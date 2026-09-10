@@ -183,9 +183,12 @@ class MainActivity : AppCompatActivity() {
         val url = "https://router.project-osrm.org/route/v1/driving/$fromLon,$fromLat;$toLon,$toLat?overview=full&geometries=geojson&steps=true"
         val req = Request.Builder().url(url).header("User-Agent", "GPS3D-AR-David/0.2").build()
         http.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) = ui.post {
-                instruction.text = "No se pudo calcular la ruta"
+            override fun onFailure(call: Call, e: IOException) {
+                ui.post {
+                    instruction.text = "No se pudo calcular la ruta"
+                }
             }
+
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     if (!it.isSuccessful) return
