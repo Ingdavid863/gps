@@ -1,0 +1,35 @@
+name: Package Source Code
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/package-source.yml'
+  workflow_dispatch:
+
+jobs:
+  package-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Prepare source folder
+        run: |
+          mkdir -p package/GPS3D-AR-David-source-v0.5.1
+          rsync -a ./ package/GPS3D-AR-David-source-v0.5.1/ \
+            --exclude '.git' \
+            --exclude 'package' \
+            --exclude '.gradle' \
+            --exclude 'app/build' \
+            --exclude 'build'
+          printf 'GPS3D-AR-David source package\nCommit: %s\nGenerated from main\n' "$GITHUB_SHA" > package/GPS3D-AR-David-source-v0.5.1/SOURCE_INFO.txt
+      - name: Create ZIP
+        run: |
+          cd package
+          zip -r GPS3D-AR-David-source-v0.5.1.zip GPS3D-AR-David-source-v0.5.1
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPS3D-AR-David-source-v0.5.1
+          path: package/GPS3D-AR-David-source-v0.5.1.zip
