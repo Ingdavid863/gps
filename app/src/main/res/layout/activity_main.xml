@@ -20,29 +20,31 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="54dp"
+            android:layout_height="56dp"
             android:background="@drawable/search_panel"
-            android:elevation="8dp"
+            android:elevation="9dp"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="6dp">
+            android:paddingStart="8dp"
+            android:paddingEnd="4dp">
 
             <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="⌕"
+                android:id="@+id/menuButton"
+                android:layout_width="42dp"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="☰"
                 android:textColor="#27313A"
-                android:textSize="28sp" />
+                android:textSize="22sp" />
 
             <EditText
                 android:id="@+id/searchInput"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="2dp"
                 android:layout_weight="1"
                 android:background="@android:color/transparent"
-                android:hint="Buscar destino"
+                android:hint="¿A dónde vas?"
                 android:imeOptions="actionSearch"
                 android:inputType="textPostalAddress"
                 android:singleLine="true"
@@ -52,12 +54,90 @@
 
             <TextView
                 android:id="@+id/searchButton"
-                android:layout_width="46dp"
-                android:layout_height="40dp"
+                android:layout_width="50dp"
+                android:layout_height="42dp"
                 android:gravity="center"
                 android:text="Ir"
                 android:textColor="#1469D8"
                 android:textSize="16sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/searchSuggestions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:background="@drawable/bottom_panel"
+            android:elevation="10dp"
+            android:orientation="vertical"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/settingsPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:background="@drawable/bottom_panel"
+            android:elevation="10dp"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ajustes de navegación"
+                android:textColor="#17212B"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/settings3d"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:gravity="center_vertical"
+                android:text="Vista 3D: activada"
+                android:textColor="#27313A"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/settingsVoice"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:gravity="center_vertical"
+                android:text="Voz: activada"
+                android:textColor="#27313A"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/settingsAutoZoom"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:gravity="center_vertical"
+                android:text="Zoom automático según velocidad: activado"
+                android:textColor="#27313A"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/settingsFollowDelay"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:gravity="center_vertical"
+                android:text="Retomar seguimiento después de zoom: 8 s"
+                android:textColor="#27313A"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/settingsClose"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:gravity="center_vertical|end"
+                android:text="Cerrar"
+                android:textColor="#1469D8"
+                android:textSize="15sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -127,6 +207,15 @@
                     android:textSize="13sp" />
             </LinearLayout>
         </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/routeChoices"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:visibility="gone" />
     </LinearLayout>
 
     <LinearLayout
