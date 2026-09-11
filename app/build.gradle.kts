@@ -59,8 +59,13 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:13.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // SceneView 4.34 is Compose-first. Expose Compose UI explicitly because
+    // SceneView's implementation dependencies are not part of this app's API surface.
+    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation-layout")
+
     // SceneView 4.x: ARCore camera/session + Google Filament PBR renderer.
-    // This replaces the obsolete 0.10.x API proposed in the first prototype.
     implementation("io.github.sceneview:arsceneview:4.34.0")
 }
 
