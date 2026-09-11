@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css" />
+    <style>
+        html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: transparent; }
+        body { font-family: system-ui, -apple-system, sans-serif; }
+        .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { bottom: 128px; }
+        .vehicle-wrap { width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+        .vehicle-arrow {
+            width: 31px; height: 34px;
+            background: #1976f3;
+            clip-path: polygon(50% 0%, 88% 100%, 50% 78%, 12% 100%);
+            box-shadow: inset 0 0 0 2px rgba(255,255,255,.9);
+        }
+        #loading {
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+            z-index: 5; padding: 8px 12px; border-radius: 16px;
+            background: rgba(255,255,255,.88); color: #243341; font-size: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,.18);
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="loading">Cargando terreno 3D…</div>
+<script src="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.js"></script>
+<script>
+(() => {
+    const EMPTY = { type: 'FeatureCollection', features: [] };
+    const TERRAIN_ID = 'gps-dem';
+    const HILLSHADE_ID = 'gps-hillshade';
+    const SATELLITE_ID = 'gps-satellite';
+    const SATELLITE_LAYER = 'gps-satellite-layer';
+    const BUILDING_SOURCE = 'gps-openfreemap';
+    const BUILDINGS_ID = 'gps-3d-buildings';
+    const HYBRID_ROADS_ID = 'gps-hybrid-roads';
+
+    let ready = false;
+    let visuals = { is3D: true, terrain: true, buildings: true, satellite: false };
+    let lastLocation = [-99.133209, 19.432608];
+    let lastBearing = 0;
+
+    const map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://tiles.openfreemap.org/styles/liberty',
+        center: lastLocation,
+        zoom: 16.8,
+        pitch: 68,
+        bearing: 0,
+        maxPitch: 85,
+        minZoom: 3,
+        maxZoom: 20,
+        attributionControl: true,
+        canvasContextAttributes: { antialias: true },
+        fadeDuration: 120
+    });
+
+    map.touchZoomRotate.enable();
+    map.dragRotate.enable();
+
+    const vehicle = document.createElement('div');
+    vehicle.className = 'vehicle-wrap';
+    const arrow = document.createElement('div');
+    arrow.className = 'vehicle-arrow';
+    vehicle.appendChild(arrow);
+    const vehicleMarker = new maplibregl.Marker({
+        element: vehicle,
+        rotationAlignment: 'map',
+        pitchAlignment: 'map'
+    }).setLngLat(lastLocation).addTo(map);
+
+    function labelLayerId() {
+        const layers = map.getStyle().layers || [];
+        const label = layers.find(l => l.type === 'symbol' && l.layout && l.layout['text-field']);
+        return label ? label.id : undefined;
+    }
+
+    function safeAddSource(id, spec) {
+        if (!map.getSource(id)) map.addSource(id, spec);
+    }
+
+    function safeAddLayer(layer, before) {
+        if (!map.getLayer(layer.id)) map.addLayer(layer, before);
+    }
+
+    function lineData(points) {
+        if (!Array.isArray(points) || points.length < 2) return EMPTY;
+        return { type: 'Feature', geometry: { type: 'LineString', coordinates: points }, properties: {} };
+    }
+
+    function pointData(points) {
+        return {
+            type: 'FeatureCollection',
+            features: (Array.isArray(points) ? points : []).map(p => ({
+                type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: p }
+            }))
+        };
+    }
+
+    function setLayerVisible(id, visible) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+    }
+
+    function applySky(enabled) {
+        try {
+            map.setSky(enabled ? {
+                'sky-color': '#dcecff',
+                'horizon-color': '#f7f3ea',
+                'fog-color': '#e9edf0',
+                'sky-horizon-blend': 0.72,
+                'horizon-fog-blend': 0.42,
+                'fog-ground-blend': 0.10
+            } : undefined);
+        } catch (_) {}
+    }
+
+    function applyVisuals() {
+        if (!ready) return;
+        const terrainActive = visuals.is3D && visuals.terrain;
+        try {
+            map.setTerrain(terrainActive ? { source: TERRAIN_ID, exaggeration: 1.12 } : null);
+        } catch (_) {}
+        setLayerVisible(HILLSHADE_ID, visuals.terrain);
+        setLayerVisible(BUILDINGS_ID, visuals.is3D && visuals.buildings);
+        setLayerVisible(SATELLITE_LAYER, visuals.satellite);
+        setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
+        applySky(visuals.is3D);
+        map.easeTo({ pitch: visuals.is3D ? 68 : 0, duration: 520, essential: true });
+    }
+
+    function setupLayers() {
+        const labels = labelLayerId();
+
+        safeAddSource(TERRAIN_ID, {
+            type: 'raster-dem',
+            tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            minzoom: 1,
+            maxzoom: 15,
+            encoding: 'terrarium',
+            attribution: 'Elevation © Mapzen/Tilezen, AWS Open Data'
+        });
+
+        safeAddSource(SATELLITE_ID, {
+            type: 'raster',
+            tiles: ['https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'],
+            tileSize: 256,
+            attribution: 'Satellite imagery © EOX Sentinel-2 cloudless'
+        });
+
+        safeAddSource(BUILDING_SOURCE, {
+            type: 'vector',
+            url: 'https://tiles.openfreemap.org/planet'
+        });
+
+        safeAddLayer({
+            id: SATELLITE_LAYER,
+            type: 'raster',
+            source: SATELLITE_ID,
+            layout: { visibility: 'none' },
+            paint: { 'raster-opacity': 0.94, 'raster-saturation': -0.08, 'raster-contrast': 0.08 }
+        }, labels);
+
+        safeAddLayer({
+            id: HILLSHADE_ID,
+            type: 'hillshade',
+            source: TERRAIN_ID,
+            paint: {
+                'hillshade-exaggeration': 0.32,
+                'hillshade-shadow-color': '#4c443b',
+                'hillshade-highlight-color': '#fbf8ef',
+                'hillshade-accent-color': '#7f776e'
+            }
+        }, labels);
+
+        safeAddLayer({
+            id: HYBRID_ROADS_ID,
+            type: 'line',
+            source: BUILDING_SOURCE,
+            'source-layer': 'transportation',
+            minzoom: 12,
+            layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+            paint: {
+                'line-color': '#ffffff',
+                'line-opacity': 0.72,
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.7, 15, 1.8, 18, 4.8]
+            }
+        }, labels);
+
+        safeAddLayer({
+            id: BUILDINGS_ID,
+            type: 'fill-extrusion',
+            source: BUILDING_SOURCE,
+            'source-layer': 'building',
+            minzoom: 14,
+            filter: ['!=', ['get', 'hide_3d'], true],
+            paint: {
+                'fill-extrusion-color': [
+                    'interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8],
+                    0, '#dcdad5', 40, '#d0d4d8', 120, '#c3cbd3', 260, '#b8c4cf'
+                ],
+                'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 8],
+                'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+                'fill-extrusion-opacity': 0.94,
+                'fill-extrusion-vertical-gradient': true
+            }
+        }, labels);
+
+        safeAddSource('gps-route-alt-1', { type: 'geojson', data: EMPTY });
+        safeAddSource('gps-route-alt-2', { type: 'geojson', data: EMPTY });
+        safeAddSource('gps-route-active', { type: 'geojson', data: EMPTY });
+        safeAddSource('gps-signals', { type: 'geojson', data: EMPTY });
+
+        safeAddLayer({
+            id: 'gps-route-alt-1-layer', type: 'line', source: 'gps-route-alt-1',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#7d8791', 'line-opacity': 0.80, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 18, 8] }
+        });
+        safeAddLayer({
+            id: 'gps-route-alt-2-layer', type: 'line', source: 'gps-route-alt-2',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#7187a0', 'line-opacity': 0.74, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 18, 8] }
+        });
+        safeAddLayer({
+            id: 'gps-route-outline', type: 'line', source: 'gps-route-active',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#ffffff', 'line-opacity': 0.96, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 7, 18, 14] }
+        });
+        safeAddLayer({
+            id: 'gps-route-active-layer', type: 'line', source: 'gps-route-active',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#1769ee', 'line-opacity': 1.0, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4.5, 18, 10.5] }
+        });
+        safeAddLayer({
+            id: 'gps-signals-layer', type: 'circle', source: 'gps-signals',
+            paint: {
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 3.5, 18, 7],
+                'circle-color': '#f5b400', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.7
+            }
+        });
+    }
+
+    map.on('load', () => {
+        setupLayers();
+        ready = true;
+        document.getElementById('loading').style.display = 'none';
+        applyVisuals();
+        try { if (window.AndroidBridge && AndroidBridge.onMapReady) AndroidBridge.onMapReady(); } catch (_) {}
+    });
+
+    map.on('contextmenu', e => {
+        try { if (window.AndroidBridge && AndroidBridge.routeTo) AndroidBridge.routeTo(e.lngLat.lat, e.lngLat.lng); } catch (_) {}
+    });
+
+    map.on('error', e => console.warn('GPS3D map:', e && e.error ? e.error.message : e));
+
+    window.GPS3D = {
+        setVisuals(is3D, terrain, buildings, satellite) {
+            visuals = { is3D: !!is3D, terrain: !!terrain, buildings: !!buildings, satellite: !!satellite };
+            applyVisuals();
+        },
+        setLocation(lon, lat, bearing) {
+            lastLocation = [Number(lon), Number(lat)];
+            lastBearing = Number(bearing) || 0;
+            vehicleMarker.setLngLat(lastLocation);
+            if (vehicleMarker.setRotation) vehicleMarker.setRotation(lastBearing);
+        },
+        setRoutes(active, alt1, alt2) {
+            if (!ready) return;
+            const a = map.getSource('gps-route-active');
+            const b = map.getSource('gps-route-alt-1');
+            const c = map.getSource('gps-route-alt-2');
+            if (a) a.setData(lineData(active));
+            if (b) b.setData(lineData(alt1));
+            if (c) c.setData(lineData(alt2));
+        },
+        setSignals(points) {
+            if (!ready) return;
+            const s = map.getSource('gps-signals');
+            if (s) s.setData(pointData(points));
+        },
+        follow(lon, lat, bearing, zoom, pitch, duration) {
+            if (!ready) return;
+            map.easeTo({
+                center: [Number(lon), Number(lat)],
+                bearing: Number(bearing) || 0,
+                zoom: Number(zoom) || 17,
+                pitch: Number(pitch) || 0,
+                duration: Number(duration) || 650,
+                essential: true
+            });
+        },
+        reload() { location.reload(); }
+    };
+})();
+</script>
+</body>
+</html>
