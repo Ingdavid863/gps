@@ -22,7 +22,7 @@ val arcoreApiKey = System.getenv("ARCORE_API_KEY")
 
 android {
     namespace = "com.david.gps3dar"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.david.gps3dar"
