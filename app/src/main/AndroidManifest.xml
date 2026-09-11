@@ -7,11 +7,18 @@
 
     <application
         android:allowBackup="true"
+        android:hardwareAccelerated="true"
         android:label="GPS3D AR David"
         android:theme="@style/Theme.GPS3DAR"
         android:usesCleartextTraffic="false">
+
         <activity
             android:name=".MainActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".RealisticMapActivity"
             android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>
