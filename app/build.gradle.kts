@@ -16,10 +16,16 @@ val localProperties = Properties().apply {
     }
 }
 
-// Never commit the ARCore Cloud credential. CI can inject ARCORE_API_KEY as an
+// Never commit the real ARCore Cloud credential. CI can inject ARCORE_API_KEY as an
 // environment variable; local builds can use ARCORE_API_KEY in local.properties.
+// The 39-character dummy below is intentionally non-secret and is used only so a
+// compiled test APK can be patched locally without ever publishing the real key.
+val dummyArcoreApiKey = "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 val arcoreApiKey = System.getenv("ARCORE_API_KEY")
-    ?: localProperties.getProperty("ARCORE_API_KEY", "")
+    ?.takeIf { it.isNotBlank() }
+    ?: localProperties.getProperty("ARCORE_API_KEY")
+        ?.takeIf { it.isNotBlank() }
+    ?: dummyArcoreApiKey
 
 android {
     namespace = "com.david.gps3dar"
@@ -29,8 +35,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.6.1"
+        versionCode = 10
+        versionName = "0.6.2"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
     }
 
@@ -59,18 +65,13 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:13.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // SceneView 4.34 is Compose-first. Expose Compose UI explicitly because
-    // SceneView's implementation dependencies are not part of this app's API surface.
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation-layout")
 
-    // SceneView 4.x: ARCore camera/session + Google Filament PBR renderer.
     implementation("io.github.sceneview:arsceneview:4.34.0")
 }
 
-// Keep the UMD build locally inside the APK. MapLibre GL JS v6 is ESM-only,
-// so v5.24.0 is intentionally pinned here for a classic <script> WebView load.
 val mapLibreVersion = "5.24.0"
 val vendorDir = layout.projectDirectory.dir("src/main/assets/vendor")
 
@@ -97,7 +98,7 @@ val prepareMapLibreAssets by tasks.registering {
                     val connection = URL(url).openConnection()
                     connection.connectTimeout = 20000
                     connection.readTimeout = 30000
-                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.6.1")
+                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.6.2")
                     connection.getInputStream().use { input ->
                         target.outputStream().use { output -> input.copyTo(output) }
                     }
