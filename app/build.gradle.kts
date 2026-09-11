@@ -1,10 +1,24 @@
 import java.io.File
 import java.net.URL
+import java.util.Properties
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val localProperties = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) {
+        localFile.inputStream().use { load(it) }
+    }
+}
+
+// Never commit the ARCore Cloud credential. CI can inject ARCORE_API_KEY as an
+// environment variable; local builds can use ARCORE_API_KEY in local.properties.
+val arcoreApiKey = System.getenv("ARCORE_API_KEY")
+    ?: localProperties.getProperty("ARCORE_API_KEY", "")
 
 android {
     namespace = "com.david.gps3dar"
@@ -14,8 +28,9 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.5.2"
+        versionCode = 8
+        versionName = "0.6.0"
+        manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
     }
 
     compileOptions {
@@ -23,6 +38,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    buildFeatures {
+        compose = true
+    }
 }
 
 dependencies {
@@ -33,6 +52,10 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.maplibre.gl:android-sdk:13.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // SceneView 4.x: ARCore camera/session + Google Filament PBR renderer.
+    // This replaces the obsolete 0.10.x API proposed in the first prototype.
+    implementation("io.github.sceneview:arsceneview:4.34.0")
 }
 
 // Keep the UMD build locally inside the APK. MapLibre GL JS v6 is ESM-only,
@@ -63,7 +86,7 @@ val prepareMapLibreAssets by tasks.registering {
                     val connection = URL(url).openConnection()
                     connection.connectTimeout = 20000
                     connection.readTimeout = 30000
-                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.5.2")
+                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.6.0")
                     connection.getInputStream().use { input ->
                         target.outputStream().use { output -> input.copyTo(output) }
                     }
