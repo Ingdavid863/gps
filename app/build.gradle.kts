@@ -35,9 +35,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 
-// MapLibre GL JS is bundled into the APK instead of being loaded from a CDN at runtime.
-// This avoids ORB/CORS/CDN failures inside Android WebView.
-val mapLibreVersion = "6.9.0"
+// Keep the UMD build locally inside the APK. MapLibre GL JS v6 is ESM-only,
+// so v5.24.0 is intentionally pinned here for a classic <script> WebView load.
+val mapLibreVersion = "5.24.0"
 val vendorDir = layout.projectDirectory.dir("src/main/assets/vendor")
 
 val prepareMapLibreAssets by tasks.registering {
@@ -48,26 +48,38 @@ val prepareMapLibreAssets by tasks.registering {
     doLast {
         vendorDir.asFile.mkdirs()
 
-        fun download(url: String, target: File) {
+        fun downloadWithFallback(fileName: String, target: File) {
             if (target.exists() && target.length() > 1024L) return
-            println("Downloading ${target.name} for bundled WebView map engine...")
-            val connection = URL(url).openConnection()
-            connection.connectTimeout = 20000
-            connection.readTimeout = 30000
-            connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.5.2")
-            connection.getInputStream().use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
+
+            val urls = listOf(
+                "https://cdn.jsdelivr.net/npm/maplibre-gl@$mapLibreVersion/dist/$fileName",
+                "https://unpkg.com/maplibre-gl@$mapLibreVersion/dist/$fileName"
+            )
+            var lastError: Exception? = null
+
+            for (url in urls) {
+                try {
+                    println("Downloading $fileName from $url")
+                    val connection = URL(url).openConnection()
+                    connection.connectTimeout = 20000
+                    connection.readTimeout = 30000
+                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.5.2")
+                    connection.getInputStream().use { input ->
+                        target.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (target.length() > 1024L) return
+                } catch (e: Exception) {
+                    lastError = e
+                    if (target.exists()) target.delete()
+                    println("Mirror failed for $fileName: ${e.message}")
+                }
             }
+
+            throw GradleException("Unable to bundle $fileName", lastError)
         }
 
-        download(
-            "https://unpkg.com/maplibre-gl@$mapLibreVersion/dist/maplibre-gl.js",
-            jsFile
-        )
-        download(
-            "https://unpkg.com/maplibre-gl@$mapLibreVersion/dist/maplibre-gl.css",
-            cssFile
-        )
+        downloadWithFallback("maplibre-gl.js", jsFile)
+        downloadWithFallback("maplibre-gl.css", cssFile)
     }
 }
 
