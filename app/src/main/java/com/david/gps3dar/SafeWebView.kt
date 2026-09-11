@@ -40,10 +40,10 @@ class SafeWebView @JvmOverloads constructor(
 
     private fun rewriteLocalAssetUrl(url: String): String {
         val prefix = "file:///android_asset/"
-        return if (url.startsWith(prefix)) {
-            "https://appassets.androidplatform.net/assets/" + url.removePrefix(prefix)
-        } else {
-            url
-        }
+        if (!url.startsWith(prefix)) return url
+
+        val localPath = url.removePrefix(prefix)
+        val separator = if (localPath.contains('?')) "&" else "?"
+        return "https://appassets.androidplatform.net/assets/$localPath${separator}gps3d_build=052"
     }
 }
