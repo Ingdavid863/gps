@@ -29,8 +29,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.6.0"
+        versionCode = 9
+        versionName = "0.6.1"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
     }
 
@@ -97,7 +97,7 @@ val prepareMapLibreAssets by tasks.registering {
                     val connection = URL(url).openConnection()
                     connection.connectTimeout = 20000
                     connection.readTimeout = 30000
-                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.6.0")
+                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.6.1")
                     connection.getInputStream().use { input ->
                         target.outputStream().use { output -> input.copyTo(output) }
                     }
