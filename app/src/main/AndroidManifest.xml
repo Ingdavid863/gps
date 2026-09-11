@@ -4,6 +4,13 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Keep AR optional so the normal MapLibre navigation screen remains usable
+         on phones that do not support Google Play Services for AR. -->
+    <uses-feature
+        android:name="android.hardware.camera.ar"
+        android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -14,6 +21,17 @@
         android:theme="@style/Theme.GPS3DAR"
         android:usesCleartextTraffic="false">
 
+        <!-- SceneView/ARCore can install/update Play Services for AR when needed. -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="optional" />
+
+        <!-- Injected from ARCORE_API_KEY in GitHub Actions or local.properties.
+             Empty keeps camera AR working, but Geospatial/Streetscape disabled. -->
+        <meta-data
+            android:name="com.google.android.ar.API_KEY"
+            android:value="${arcoreApiKey}" />
+
         <activity
             android:name=".MainActivity"
             android:exported="false"
@@ -21,6 +39,12 @@
 
         <activity
             android:name=".RealisticMapActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- Native AR/Filament view is now the main entry point. -->
+        <activity
+            android:name=".ArNavigationActivity"
             android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>
