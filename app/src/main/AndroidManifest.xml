@@ -8,6 +8,8 @@
     <application
         android:allowBackup="true"
         android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:label="GPS3D AR David"
         android:theme="@style/Theme.GPS3DAR"
         android:usesCleartextTraffic="false">
