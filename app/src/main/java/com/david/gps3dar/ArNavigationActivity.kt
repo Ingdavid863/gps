@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -16,29 +18,48 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.content.ContextCompat
 import com.google.ar.core.Config
+import com.google.ar.core.TrackingState
 import io.github.sceneview.ar.ARSceneView
+import java.util.Locale
 
 /**
  * Native AR entry point for GPS3D.
  *
- * SceneView owns the ARCore camera/session and Filament renderer. The existing
- * MapLibre navigation screen is kept as a fallback while the geospatial route
- * overlay is implemented in the next phase.
+ * SceneView owns the ARCore camera/session and Filament renderer. Geospatial
+ * pose data is read from Earth.cameraGeospatialPose and surfaced both on-screen
+ * and in Logcat under the tag GPS3D_AR.
  */
 class ArNavigationActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "GPS3D_AR"
+        private const val POSE_LOG_INTERVAL_MS = 500L
+    }
 
     private lateinit var sceneHost: ComposeView
     private lateinit var statusText: TextView
     private var sceneStarted = false
+    private var lastPoseLogAt = 0L
 
-    private val locationPermissionLauncher = registerForActivityResult(
+    private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
+        val cameraGranted = granted[Manifest.permission.CAMERA] == true ||
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+
         val fineGranted = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
+
+        if (!cameraGranted) {
+            statusText.text = "Se necesita permiso de cámara para iniciar AR"
+            return@registerForActivityResult
+        }
 
         startArScene(enableGeospatial = fineGranted && hasArCoreApiKey())
     }
@@ -65,10 +86,10 @@ class ArNavigationActivity : AppCompatActivity() {
         statusText = TextView(this).apply {
             text = "Preparando ARCore…"
             setTextColor(Color.WHITE)
-            setBackgroundColor(0x990B2235.toInt())
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setPadding(dp(12), dp(7), dp(12), dp(7))
+            setBackgroundColor(0xB30B2235.toInt())
+            textSize = 12f
+            gravity = Gravity.START
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -76,6 +97,7 @@ class ArNavigationActivity : AppCompatActivity() {
             ).apply {
                 leftMargin = dp(12)
                 topMargin = dp(16)
+                rightMargin = dp(92)
             }
         }
         root.addView(statusText)
@@ -106,28 +128,35 @@ class ArNavigationActivity : AppCompatActivity() {
     }
 
     private fun prepareArSession() {
-        if (!hasArCoreApiKey()) {
-            // Camera AR works without a cloud credential. Geospatial, Terrain /
-            // Rooftop anchors and Streetscape require the ARCore Cloud API key.
-            startArScene(enableGeospatial = false)
+        val cameraGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (cameraGranted && (fineGranted || !hasArCoreApiKey())) {
+            startArScene(enableGeospatial = fineGranted && hasArCoreApiKey())
             return
         }
 
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            startArScene(enableGeospatial = true)
-        } else {
-            statusText.text = "AR listo · solicitando ubicación precisa para Geospatial…"
-            locationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
+        val permissions = buildList {
+            if (!cameraGranted) add(Manifest.permission.CAMERA)
+            if (hasArCoreApiKey() && !fineGranted) {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
         }
+
+        statusText.text = if (hasArCoreApiKey()) {
+            "Solicitando cámara y ubicación precisa para AR Geospatial…"
+        } else {
+            "Solicitando cámara para AR…"
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     private fun startArScene(enableGeospatial: Boolean) {
@@ -155,7 +184,7 @@ class ArNavigationActivity : AppCompatActivity() {
                             config.streetscapeGeometryMode =
                                 Config.StreetscapeGeometryMode.ENABLED
                             statusText.post {
-                                statusText.text = "ARCore + Geospatial · inicializando VPS/GPS…"
+                                statusText.text = "ARCore + Geospatial · buscando VPS/GPS…\nMira edificios y la calle alrededor."
                             }
                         } else {
                             statusText.post {
@@ -167,9 +196,57 @@ class ArNavigationActivity : AppCompatActivity() {
                             statusText.text = if (hasArCoreApiKey()) {
                                 "AR activo · ubicación precisa no autorizada; Geospatial desactivado"
                             } else {
-                                "AR activo · agrega ARCORE_API_KEY para activar Geospatial"
+                                "AR activo · falta ARCORE_API_KEY en esta compilación"
                             }
                         }
+                    }
+                },
+                onSessionUpdated = { session, _ ->
+                    if (!enableGeospatial) return@ARSceneView
+
+                    val earth = session.earth
+                    if (earth == null) {
+                        statusText.post {
+                            statusText.text = "Geospatial · esperando Earth/VPS…"
+                        }
+                        return@ARSceneView
+                    }
+
+                    if (earth.trackingState != TrackingState.TRACKING) {
+                        statusText.post {
+                            statusText.text = "Geospatial · localizando…\nMueve el teléfono y apunta hacia edificios/calles."
+                        }
+                        return@ARSceneView
+                    }
+
+                    val pose = earth.cameraGeospatialPose
+                    val text = String.format(
+                        Locale.US,
+                        "GEOSPATIAL ✓  ±%.1f m\nLat %.6f\nLon %.6f\nAlt %.1f m · Heading %.1f°",
+                        pose.horizontalAccuracy,
+                        pose.latitude,
+                        pose.longitude,
+                        pose.altitude,
+                        pose.heading
+                    )
+                    statusText.post { statusText.text = text }
+
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastPoseLogAt >= POSE_LOG_INTERVAL_MS) {
+                        lastPoseLogAt = now
+                        Log.d(
+                            TAG,
+                            String.format(
+                                Locale.US,
+                                "Latitud: %.7f, Longitud: %.7f, Altitud: %.2f m, Heading: %.2f°, Precisión H: %.2f m, Precisión V: %.2f m",
+                                pose.latitude,
+                                pose.longitude,
+                                pose.altitude,
+                                pose.heading,
+                                pose.horizontalAccuracy,
+                                pose.verticalAccuracy
+                            )
+                        )
                     }
                 }
             )
