@@ -363,8 +363,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .build()
         val req = Request.Builder().url(url).header("User-Agent", "GPS3D-AR-David/0.3").build()
         http.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) = ui.post {
-                instruction.text = "No se pudo buscar el destino"
+            override fun onFailure(call: Call, e: IOException) {
+                ui.post {
+                    instruction.text = "No se pudo buscar el destino"
+                }
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -391,9 +393,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val url = "https://router.project-osrm.org/route/v1/driving/$fromLon,$fromLat;$toLon,$toLat?overview=full&geometries=geojson&steps=true&alternatives=true"
         val req = Request.Builder().url(url).header("User-Agent", "GPS3D-AR-David/0.3").build()
         http.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) = ui.post {
-                instruction.text = "No se pudo calcular la ruta"
-                turnIcon.text = "!"
+            override fun onFailure(call: Call, e: IOException) {
+                ui.post {
+                    instruction.text = "No se pudo calcular la ruta"
+                    turnIcon.text = "!"
+                }
             }
 
             override fun onResponse(call: Call, response: Response) {
