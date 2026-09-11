@@ -4,7 +4,7 @@
     android:layout_height="match_parent"
     android:fitsSystemWindows="true">
 
-    <WebView
+    <com.david.gps3dar.SafeWebView
         android:id="@+id/webMapView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
