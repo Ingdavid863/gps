@@ -1,3 +1,6 @@
+import java.io.File
+import java.net.URL
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -45,14 +48,14 @@ val prepareMapLibreAssets by tasks.registering {
     doLast {
         vendorDir.asFile.mkdirs()
 
-        fun download(url: String, target: java.io.File) {
+        fun download(url: String, target: File) {
             if (target.exists() && target.length() > 1024L) return
             println("Downloading ${target.name} for bundled WebView map engine...")
-            java.net.URL(url).openConnection().apply {
-                connectTimeout = 20000
-                readTimeout = 30000
-                setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.5.2")
-            }.getInputStream().use { input ->
+            val connection = URL(url).openConnection()
+            connection.connectTimeout = 20000
+            connection.readTimeout = 30000
+            connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.5.2")
+            connection.getInputStream().use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
         }
