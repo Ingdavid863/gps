@@ -42,7 +42,7 @@
                 android:layout_marginStart="6dp"
                 android:layout_weight="1"
                 android:background="@android:color/transparent"
-                android:hint="¿A dónde vas?"
+                android:hint="Buscar destino"
                 android:imeOptions="actionSearch"
                 android:inputType="textPostalAddress"
                 android:singleLine="true"
@@ -56,7 +56,7 @@
                 android:layout_height="40dp"
                 android:gravity="center"
                 android:text="Ir"
-                android:textColor="#066FE8"
+                android:textColor="#1469D8"
                 android:textSize="16sp"
                 android:textStyle="bold" />
         </LinearLayout>
@@ -67,7 +67,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="end"
             android:layout_marginTop="6dp"
-            android:background="@drawable/bottom_panel"
+            android:background="@drawable/nav_banner"
             android:elevation="5dp"
             android:paddingStart="10dp"
             android:paddingTop="5dp"
@@ -215,7 +215,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="0"
-                    android:textColor="#FFFFFF"
+                    android:textColor="#202124"
                     android:textSize="30sp"
                     android:textStyle="bold" />
 
@@ -223,7 +223,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="km/h"
-                    android:textColor="#BFFFFFFF"
+                    android:textColor="#6A6D70"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -232,7 +232,7 @@
                 android:layout_height="52dp"
                 android:layout_marginStart="6dp"
                 android:layout_marginEnd="12dp"
-                android:background="#35FFFFFF" />
+                android:background="#22000000" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -245,8 +245,8 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Sin ruta activa"
-                    android:textColor="#FFFFFF"
-                    android:textSize="18sp"
+                    android:textColor="#16834B"
+                    android:textSize="19sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -255,7 +255,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="Selecciona un destino para comenzar"
-                    android:textColor="#CFFFFFFF"
+                    android:textColor="#3C4043"
                     android:textSize="13sp" />
 
                 <TextView
@@ -264,7 +264,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:text=""
-                    android:textColor="#9FFFFFFF"
+                    android:textColor="#74777A"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -274,7 +274,7 @@
                 android:layout_height="44dp"
                 android:gravity="center"
                 android:text="✕"
-                android:textColor="#FF6B67"
+                android:textColor="#C8342F"
                 android:textSize="24sp"
                 android:textStyle="bold"
                 android:visibility="gone" />
@@ -285,7 +285,7 @@
             android:layout_height="1dp"
             android:layout_marginTop="9dp"
             android:layout_marginBottom="8dp"
-            android:background="#35FFFFFF" />
+            android:background="#22000000" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -299,7 +299,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="🚦 Próximo: --"
-                android:textColor="#FFFFFF"
+                android:textColor="#303134"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
@@ -309,7 +309,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:text="DEMO"
-                android:textColor="#FFC85A"
+                android:textColor="#B06B00"
                 android:textSize="12sp"
                 android:textStyle="bold" />
 
@@ -319,7 +319,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:text="-- s"
-                android:textColor="#FFFFFF"
+                android:textColor="#202124"
                 android:textSize="16sp"
                 android:textStyle="bold" />
         </LinearLayout>
