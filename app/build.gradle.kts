@@ -18,14 +18,11 @@ val localProperties = Properties().apply {
 
 // Never commit the real ARCore Cloud credential. CI can inject ARCORE_API_KEY as an
 // environment variable; local builds can use ARCORE_API_KEY in local.properties.
-// The 39-character dummy below is intentionally non-secret and is used only so a
-// compiled test APK can be patched locally without ever publishing the real key.
-val dummyArcoreApiKey = "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 val arcoreApiKey = System.getenv("ARCORE_API_KEY")
     ?.takeIf { it.isNotBlank() }
     ?: localProperties.getProperty("ARCORE_API_KEY")
         ?.takeIf { it.isNotBlank() }
-    ?: dummyArcoreApiKey
+    ?: ""
 
 android {
     namespace = "com.david.gps3dar"
