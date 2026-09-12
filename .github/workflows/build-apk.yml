@@ -19,6 +19,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Validate live service credentials
+        env:
+          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          test -n "$ARCORE_API_KEY" || { echo "ARCORE_API_KEY is missing"; exit 1; }
+          test -n "$TOMTOM_API_KEY" || { echo "TOMTOM_API_KEY is missing"; exit 1; }
+          echo "ARCore and TomTom credentials are configured."
       - name: Build debug APK
         env:
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
@@ -26,5 +34,5 @@ jobs:
         run: gradle assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.7.0-beta
+          name: GPS3D-AR-David-0.7.0-beta-live
           path: app/build/outputs/apk/debug/app-debug.apk
