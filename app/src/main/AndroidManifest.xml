@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -20,10 +21,11 @@
         android:theme="@style/Theme.GPS3DAR"
         android:usesCleartextTraffic="false">
 
-        <!-- ARCore is required for the primary GPS AR experience. -->
+        <!-- Override SceneView's optional declaration: GPS3D AR requires ARCore. -->
         <meta-data
             android:name="com.google.ar.core"
-            android:value="required" />
+            android:value="required"
+            tools:replace="android:value" />
 
         <!-- Injected from ARCORE_API_KEY in GitHub Actions or local.properties.
              The credential is never committed to source control. -->
