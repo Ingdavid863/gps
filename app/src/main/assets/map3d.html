@@ -28,6 +28,7 @@
 <body>
 <div id="map"></div>
 <div id="loading">Iniciando motor GPS3D…</div>
+<script src="traffic-config.js"></script>
 <script src="vendor/maplibre-gl.js"></script>
 <script>
 (() => {
@@ -40,9 +41,13 @@
     const BUILDING_SOURCE = 'gps-openfreemap';
     const BUILDINGS_ID = 'gps-3d-buildings';
     const HYBRID_ROADS_ID = 'gps-hybrid-roads';
+    const TRAFFIC_SOURCE_ID = 'gps-live-traffic';
+    const TRAFFIC_LAYER_ID = 'gps-live-traffic-layer';
+    const TRAFFIC_API_KEY = String((window.GPS3D_CONFIG && window.GPS3D_CONFIG.tomtomApiKey) || '').trim();
 
     let ready = false;
     let setupFinished = false;
+    let trafficEnabled = true;
     let visuals = { is3D: true, terrain: true, buildings: true, satellite: false };
     let lastLocation = [-99.133209, 19.432608];
     let lastBearing = 0;
@@ -177,8 +182,38 @@
         setLayerVisible(BUILDINGS_ID, visuals.is3D && visuals.buildings);
         setLayerVisible(SATELLITE_LAYER, visuals.satellite);
         setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
+        setLayerVisible(TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         applySky(visuals.is3D);
         map.easeTo({ pitch: visuals.is3D ? 68 : 0, duration: 420, essential: true });
+    }
+
+    function setupTrafficLayer() {
+        if (!TRAFFIC_API_KEY) {
+            console.info('GPS3D traffic: TOMTOM_API_KEY no configurada; tráfico en vivo desactivado.');
+            return;
+        }
+
+        const key = encodeURIComponent(TRAFFIC_API_KEY);
+        safeAddSource(TRAFFIC_SOURCE_ID, {
+            type: 'raster',
+            tiles: [
+                `https://api.tomtom.com/traffic/map/4/tile/flow/relative-delay/{z}/{x}/{y}.png?key=${key}&thickness=8&tileSize=256`
+            ],
+            tileSize: 256,
+            minzoom: 5,
+            maxzoom: 22,
+            attribution: 'Traffic © TomTom'
+        });
+        safeAddLayer({
+            id: TRAFFIC_LAYER_ID,
+            type: 'raster',
+            source: TRAFFIC_SOURCE_ID,
+            minzoom: 5,
+            paint: {
+                'raster-opacity': 0.94,
+                'raster-fade-duration': 120
+            }
+        });
     }
 
     function setupCoreLayers() {
@@ -280,6 +315,11 @@
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint: { 'line-color': '#087cf0', 'line-opacity': 1.0, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 18, 11] }
         });
+
+        // Relative-delay traffic is transparent when traffic flows normally. Congested
+        // segments are drawn above the blue route in traffic colors, Google-Maps style.
+        setupTrafficLayer();
+
         safeAddLayer({
             id: 'gps-signals-layer', type: 'circle', source: 'gps-signals',
             paint: {
@@ -321,6 +361,10 @@
         setVisuals(is3D, terrain, buildings, satellite) {
             visuals = { is3D: !!is3D, terrain: !!terrain, buildings: !!buildings, satellite: !!satellite };
             applyVisuals();
+        },
+        setTrafficEnabled(enabled) {
+            trafficEnabled = !!enabled;
+            setLayerVisible(TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         },
         setLocation(lon, lat, bearing) {
             lastLocation = [Number(lon), Number(lat)];
