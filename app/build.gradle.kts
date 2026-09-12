@@ -80,9 +80,14 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:13.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // Compose UI for the translucent AR HUD and thumb-friendly driving menus.
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation("androidx.activity:activity-compose:1.12.3")
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.foundation:foundation-layout")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
 
     // SceneView includes Filament + ARCore integration for native PBR/AR rendering.
     implementation("io.github.sceneview:arsceneview:4.35.0")
