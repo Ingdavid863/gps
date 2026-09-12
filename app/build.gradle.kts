@@ -34,14 +34,14 @@ val generatedTrafficAssetsDir = layout.buildDirectory.dir("generated/trafficAsse
 
 android {
     namespace = "com.david.gps3dar"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.6.2"
+        versionCode = 11
+        versionName = "0.7.0-beta"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
     }
 
@@ -71,16 +71,12 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("com.google.android.material:material:1.12.0")
 
-    // High-accuracy fused GPS/location services used by navigation + AR Geospatial.
     implementation("com.google.android.gms:play-services-location:21.3.0")
-
-    // Structured asynchronous work for route recalculation, location and AR tasks.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     implementation("org.maplibre.gl:android-sdk:13.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // Compose UI for the translucent AR HUD and thumb-friendly driving menus.
     implementation(platform("androidx.compose:compose-bom:2026.06.01"))
     implementation("androidx.activity:activity-compose:1.12.3")
     implementation("androidx.compose.ui:ui")
@@ -89,8 +85,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // SceneView includes Filament + ARCore integration for native PBR/AR rendering.
-    implementation("io.github.sceneview:arsceneview:4.35.0")
+    // 4.34.x keeps the AR/Filament feature set while compiling against stable SDK 36.
+    implementation("io.github.sceneview:arsceneview:4.34.0")
 }
 
 val mapLibreVersion = "5.24.0"
@@ -119,7 +115,7 @@ val prepareMapLibreAssets by tasks.registering {
                     val connection = URL(url).openConnection()
                     connection.connectTimeout = 20000
                     connection.readTimeout = 30000
-                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.6.2")
+                    connection.setRequestProperty("User-Agent", "GPS3D-AR-David-build/0.7")
                     connection.getInputStream().use { input ->
                         target.outputStream().use { output -> input.copyTo(output) }
                     }
