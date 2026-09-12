@@ -58,7 +58,13 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("com.google.android.material:material:1.12.0")
+
+    // High-accuracy fused GPS/location services used by navigation + AR Geospatial.
     implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // Structured asynchronous work for route recalculation, location and AR tasks.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+
     implementation("org.maplibre.gl:android-sdk:13.3.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
@@ -66,7 +72,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation-layout")
 
-    implementation("io.github.sceneview:arsceneview:4.34.0")
+    // SceneView includes Filament + ARCore integration for native PBR/AR rendering.
+    implementation("io.github.sceneview:arsceneview:4.35.0")
 }
 
 val mapLibreVersion = "5.24.0"
