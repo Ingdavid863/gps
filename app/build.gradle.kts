@@ -16,13 +16,21 @@ val localProperties = Properties().apply {
     }
 }
 
-// Never commit the real ARCore Cloud credential. CI can inject ARCORE_API_KEY as an
-// environment variable; local builds can use ARCORE_API_KEY in local.properties.
+// Never commit cloud/provider credentials. CI injects them as environment variables;
+// local builds can define the same names in local.properties.
 val arcoreApiKey = System.getenv("ARCORE_API_KEY")
     ?.takeIf { it.isNotBlank() }
     ?: localProperties.getProperty("ARCORE_API_KEY")
         ?.takeIf { it.isNotBlank() }
     ?: ""
+
+val tomTomApiKey = System.getenv("TOMTOM_API_KEY")
+    ?.takeIf { it.isNotBlank() }
+    ?: localProperties.getProperty("TOMTOM_API_KEY")
+        ?.takeIf { it.isNotBlank() }
+    ?: ""
+
+val generatedTrafficAssetsDir = layout.buildDirectory.dir("generated/trafficAssets")
 
 android {
     namespace = "com.david.gps3dar"
@@ -44,6 +52,10 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    sourceSets {
+        getByName("main").assets.srcDir(generatedTrafficAssetsDir)
     }
 }
 
@@ -122,6 +134,24 @@ val prepareMapLibreAssets by tasks.registering {
     }
 }
 
+val prepareTrafficConfig by tasks.registering {
+    val outputDir = generatedTrafficAssetsDir
+    outputs.dir(outputDir)
+
+    doLast {
+        val dir = outputDir.get().asFile
+        dir.mkdirs()
+        val escapedKey = tomTomApiKey
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\r", "")
+            .replace("\n", "")
+        File(dir, "traffic-config.js").writeText(
+            "window.GPS3D_CONFIG = Object.assign({}, window.GPS3D_CONFIG || {}, { tomtomApiKey: \"$escapedKey\" });\n"
+        )
+    }
+}
+
 tasks.named("preBuild").configure {
-    dependsOn(prepareMapLibreAssets)
+    dependsOn(prepareMapLibreAssets, prepareTrafficConfig)
 }
