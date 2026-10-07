@@ -1068,8 +1068,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun findRouteMatch(location: Location): RouteMatch? {
         if (routePoints.size < 2) return null
 
+        // Search around the current progress instead of scanning the whole route on every
+        // GNSS update. Besides saving CPU, this prevents a crossing/parallel road from
+        // matching to a distant future section of the same route.
+        val startIndex = max(0, routeProgressIndex - 28)
+        val endIndex = min(routePoints.lastIndex - 1, routeProgressIndex + 460)
+
         var best: RouteMatch? = null
-        for (i in 0 until routePoints.lastIndex) {
+        for (i in startIndex..endIndex) {
             val a = routePoints[i]
             val b = routePoints[i + 1]
             val projected = projectToSegment(
