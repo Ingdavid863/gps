@@ -752,10 +752,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             val c = coordinates.getJSONArray(i)
                             points.add(GeoPoint(c.getDouble(1), c.getDouble(0)))
                         }
+                        val indexedSteps = parseSteps(route).map { step ->
+                            step.copy(
+                                routeIndex = nearestRoutePointIndex(points, step.lat, step.lon)
+                            )
+                        }
                         parsedRoutes.add(
                             RouteOption(
                                 points = points,
-                                steps = parseSteps(route),
+                                steps = indexedSteps,
                                 durationSeconds = route.optDouble("duration", 0.0),
                                 distanceMeters = route.optDouble("distance", 0.0)
                             )
@@ -940,17 +945,27 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (!routeActive) {
                 instruction.text = "Busca un destino o mantén pulsado el mapa"
                 turnIcon.text = "↑"
-                turnDistance.text = "GPS3D · terreno DEM + edificios 3D"
+                turnDistance.text = "GPS3D · mapa de conducción"
             }
             return
         }
 
+        // A maneuver that is already behind the matched route progress must never remain
+        // on screen. This is especially important after rerouting or joining a route midway.
+        while (
+            currentStepIndex < navSteps.lastIndex &&
+            navSteps[currentStepIndex].routeIndex < routeProgressIndex
+        ) {
+            currentStepIndex++
+        }
+
         var step = navSteps[currentStepIndex.coerceIn(0, navSteps.lastIndex)]
-        var distance = distanceMeters(location.latitude, location.longitude, step.lat, step.lon)
-        if (distance < 28 && currentStepIndex < navSteps.lastIndex) {
+        var distance = distanceAlongRouteToStep(step, location)
+
+        if (distance < 24.0 && currentStepIndex < navSteps.lastIndex) {
             currentStepIndex++
             step = navSteps[currentStepIndex]
-            distance = distanceMeters(location.latitude, location.longitude, step.lat, step.lon)
+            distance = distanceAlongRouteToStep(step, location)
         }
 
         instruction.text = step.instruction
@@ -966,6 +981,43 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 "nav"
             )
         }
+    }
+
+    private fun nearestRoutePointIndex(points: List<GeoPoint>, lat: Double, lon: Double): Int {
+        if (points.isEmpty()) return 0
+        var bestIndex = 0
+        var bestDistance = Double.MAX_VALUE
+        for (i in points.indices) {
+            val p = points[i]
+            val d = distanceMeters(lat, lon, p.lat, p.lon)
+            if (d < bestDistance) {
+                bestDistance = d
+                bestIndex = i
+            }
+        }
+        return bestIndex
+    }
+
+    private fun distanceAlongRouteToStep(step: NavStep, location: Location): Double {
+        if (routePoints.size < 2 || routeRemainingFromIndex.isEmpty()) {
+            return distanceMeters(location.latitude, location.longitude, step.lat, step.lon)
+        }
+
+        val stepIndex = step.routeIndex.coerceIn(0, routePoints.lastIndex)
+        val match = lastRouteMatch
+        if (match == null || stepIndex <= routeProgressIndex) {
+            return distanceMeters(location.latitude, location.longitude, step.lat, step.lon)
+        }
+
+        val segment = max(routeProgressIndex, match.segmentIndex)
+            .coerceIn(0, routePoints.lastIndex - 1)
+        val nextIndex = segment + 1
+        val next = routePoints[nextIndex]
+        val currentRemaining =
+            distanceMeters(match.lat, match.lon, next.lat, next.lon) +
+                routeRemainingFromIndex.getOrElse(nextIndex) { 0.0 }
+        val afterStep = routeRemainingFromIndex.getOrElse(stepIndex) { 0.0 }
+        return (currentRemaining - afterStep).coerceAtLeast(0.0)
     }
 
     private fun stopNavigation() {
@@ -1295,7 +1347,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     data class GeoPoint(val lat: Double, val lon: Double)
     data class SignalPoint(val id: Long, val lat: Double, val lon: Double)
-    data class NavStep(val lat: Double, val lon: Double, val instruction: String, val icon: String)
+    data class NavStep(
+        val lat: Double,
+        val lon: Double,
+        val instruction: String,
+        val icon: String,
+        val routeIndex: Int = 0
+    )
     data class SearchResult(val label: String, val lat: Double, val lon: Double)
     data class RouteMatch(
         val segmentIndex: Int,
