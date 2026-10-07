@@ -46,6 +46,8 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -101,6 +103,16 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var routeDistanceMeters = 0.0
     private var routeAlternatives: List<RouteOption> = emptyList()
     private var activeRouteIndex = 0
+    private var routeDestination: GeoPoint? = null
+    private var routeCall: Call? = null
+    private var routeProgressIndex = 0
+    private var lastRenderedProgressIndex = -1
+    private var lastProgressRenderAtMs = 0L
+    private var routeRemainingFromIndex = DoubleArray(0)
+    private var lastRouteMatch: RouteMatch? = null
+    private var offRouteSinceMs = 0L
+    private var lastRerouteAtMs = 0L
+    private var rerouting = false
 
     private var searchResults: List<SearchResult> = emptyList()
     private var searchCall: Call? = null
@@ -111,7 +123,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastSignalQuery: Location? = null
 
     private var is3D = true
-    private var terrainEnabled = true
+    private var terrainEnabled = false
     private var buildingsEnabled = true
     private var satelliteEnabled = false
     private var voiceEnabled = true
@@ -398,10 +410,19 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     @SuppressLint("MissingPermission")
     private fun startHighAccuracyLocation() {
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 750L)
-            .setMinUpdateIntervalMillis(400L)
-            .setMaxUpdateDelayMillis(1200L)
-            .setWaitForAccurateLocation(true)
+        // Use the last fresh fix immediately so the map does not sit waiting for a new GNSS cycle.
+        fusedLocation.lastLocation.addOnSuccessListener { last ->
+            if (last != null && System.currentTimeMillis() - last.time < 20_000L) {
+                processLocation(last)
+            }
+        }
+
+        // Navigation needs low-latency fixes. Avoid batching because a delayed batch makes the
+        // vehicle appear to outrun the map even when the GNSS itself is accurate.
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500L)
+            .setMinUpdateIntervalMillis(250L)
+            .setMaxUpdateDelayMillis(600L)
+            .setWaitForAccurateLocation(false)
             .build()
         fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
     }
@@ -424,8 +445,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val smooth = smoothLocation(location)
         filteredLocation = smooth
-        val shown = if (routeActive) snapToRoute(smooth) else smooth
+
+        val match = if (routeActive) findRouteMatch(smooth) else null
+        lastRouteMatch = match
+        if (routeActive) maybeReroute(smooth, match)
+
+        val shown = if (routeActive) snapToRoute(smooth, match) else smooth
         displayLocation = shown
+
+        if (routeActive && match != null) updateRouteProgress(match)
 
         updateLocationMarker(shown)
         updateCamera(shown)
@@ -436,11 +464,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun smoothLocation(raw: Location): Location {
         val old = filteredLocation ?: return Location(raw)
+        // Keep enough filtering to suppress GNSS jitter, but give new fixes much more weight
+        // while driving so the marker does not visibly trail the real vehicle.
         val alpha = when {
-            raw.speed > 15f -> 0.72
-            raw.accuracy <= 6f -> 0.62
-            raw.accuracy <= 15f -> 0.46
-            else -> 0.28
+            raw.speed > 20f -> 0.92
+            raw.speed > 8f -> 0.88
+            raw.speed > 2f -> 0.80
+            raw.accuracy <= 6f -> 0.74
+            raw.accuracy <= 15f -> 0.64
+            else -> 0.52
         }
         return Location(raw).apply {
             latitude = old.latitude + (raw.latitude - old.latitude) * alpha
@@ -493,27 +525,27 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val target = lookAheadTarget(location, lastCameraBearing, moving)
         val zoom = desiredZoom(moving)
-        val pitch = if (is3D) 68.0 else 0.0
+        val pitch = if (is3D) 62.0 else 0.0
         jsCall(
-            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},650)"
+            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},260)"
         )
     }
 
     private fun desiredZoom(speedMps: Float): Double {
-        if (!autoZoomEnabled) return 17.0
-        if (!routeActive) return 16.9
+        if (!autoZoomEnabled) return 18.35
+        if (!routeActive) return 18.15
         return when {
-            speedMps >= 30f -> 16.20
-            speedMps >= 22f -> 16.50
-            speedMps >= 14f -> 16.85
-            speedMps >= 7f -> 17.20
-            else -> 17.55
+            speedMps >= 30f -> 17.25
+            speedMps >= 22f -> 17.55
+            speedMps >= 14f -> 17.90
+            speedMps >= 7f -> 18.25
+            else -> 18.65
         }
     }
 
     private fun lookAheadTarget(location: Location, bearing: Double, speedMps: Float): GeoPoint {
         if (!routeActive || speedMps < 1.8f) return GeoPoint(location.latitude, location.longitude)
-        val meters = (42.0 + speedMps * 2.6).coerceIn(42.0, 112.0)
+        val meters = (18.0 + speedMps * 1.25).coerceIn(18.0, 58.0)
         val r = Math.toRadians(bearing)
         val lat = location.latitude + (cos(r) * meters / 110540.0)
         val lonScale = 111320.0 * cos(Math.toRadians(location.latitude)).coerceAtLeast(0.2)
@@ -527,7 +559,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val moving = rawLocation?.speed ?: 0f
         val target = lookAheadTarget(here, lastCameraBearing, moving)
         jsCall(
-            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},${num(if (is3D) 68.0 else 0.0)},${if (animated) 800 else 1})"
+            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},${num(if (is3D) 62.0 else 0.0)},${if (animated) 420 else 1})"
         )
     }
 
@@ -661,32 +693,55 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         searchSuggestions.visibility = View.GONE
     }
 
-    private fun requestRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double) {
-        instruction.text = "Calculando rutas…"
+    private fun requestRoute(
+        fromLat: Double,
+        fromLon: Double,
+        toLat: Double,
+        toLon: Double,
+        isReroute: Boolean = false
+    ) {
+        if (!isReroute) routeDestination = GeoPoint(toLat, toLon)
+        rerouting = isReroute
+        instruction.text = if (isReroute) "Recalculando ruta…" else "Calculando rutas…"
         turnIcon.text = "…"
         hideSearchSuggestions()
 
+        routeCall?.cancel()
+        val alternatives = if (isReroute) 1 else 3
         val url = "https://router.project-osrm.org/route/v1/driving/$fromLon,$fromLat;$toLon,$toLat" +
-            "?overview=full&geometries=geojson&steps=true&alternatives=3"
+            "?overview=full&geometries=geojson&steps=true&alternatives=$alternatives"
         val request = Request.Builder()
             .url(url)
-            .header("User-Agent", "GPS3D-AR-David/0.5")
+            .header("User-Agent", "GPS3D-AR-David/0.8")
             .build()
 
-        http.newCall(request).enqueue(object : Callback {
+        routeCall = http.newCall(request)
+        routeCall?.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                if (call.isCanceled()) return
                 ui.post {
-                    instruction.text = "No se pudo calcular la ruta"
-                    turnIcon.text = "!"
+                    rerouting = false
+                    if (isReroute) {
+                        instruction.text = "Sin conexión para recalcular · continúa con precaución"
+                    } else {
+                        instruction.text = "No se pudo calcular la ruta"
+                        turnIcon.text = "!"
+                    }
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
-                    if (!it.isSuccessful) return
+                    if (!it.isSuccessful) {
+                        ui.post { rerouting = false }
+                        return
+                    }
                     val root = JSONObject(it.body?.string().orEmpty())
-                    val routes = root.optJSONArray("routes") ?: return
-                    if (routes.length() == 0) return
+                    val routes = root.optJSONArray("routes")
+                    if (routes == null || routes.length() == 0) {
+                        ui.post { rerouting = false }
+                        return
+                    }
 
                     val parsedRoutes = ArrayList<RouteOption>()
                     for (r in 0 until min(3, routes.length())) {
@@ -708,9 +763,23 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
 
                     ui.post {
+                        if (parsedRoutes.isEmpty()) {
+                            rerouting = false
+                            return@post
+                        }
                         routeAlternatives = parsedRoutes
                         activeRouteIndex = 0
-                        activateRoute(0, recenterMap = true)
+                        activateRoute(0, recenterMap = !isReroute)
+                        rerouting = false
+                        offRouteSinceMs = 0L
+                        if (isReroute && voiceEnabled) {
+                            tts.speak(
+                                "Ruta actualizada",
+                                TextToSpeech.QUEUE_FLUSH,
+                                null,
+                                "reroute"
+                            )
+                        }
                     }
                 }
             }
@@ -727,8 +796,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         routeDistanceMeters = option.distanceMeters
         routeActive = routePoints.isNotEmpty()
         lastSpokenInstruction = ""
+        routeProgressIndex = 0
+        lastRenderedProgressIndex = -1
+        lastProgressRenderAtMs = 0L
+        lastRouteMatch = null
+        offRouteSinceMs = 0L
+        rebuildRouteDistanceCache()
 
         syncRoutes()
+        syncRouteProgress(force = true)
         stopButton.visibility = if (routeActive) View.VISIBLE else View.GONE
         etaText.text = formatDuration(routeDurationSeconds)
         routeDistance.text = formatDistance(routeDistanceMeters)
@@ -743,6 +819,44 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val alt1 = others.getOrNull(0)?.let { routeAlternatives[it].points } ?: emptyList()
         val alt2 = others.getOrNull(1)?.let { routeAlternatives[it].points } ?: emptyList()
         jsCall("setRoutes(${pointsJson(routePoints)},${pointsJson(alt1)},${pointsJson(alt2)})")
+    }
+
+    private fun syncRouteProgress(force: Boolean = false) {
+        if (!routeActive || routePoints.size < 2) return
+        val match = lastRouteMatch
+        val index = routeProgressIndex.coerceIn(0, routePoints.lastIndex - 1)
+        val p = if (match != null && match.segmentIndex >= index - 1) {
+            GeoPoint(match.lat, match.lon)
+        } else {
+            routePoints[index]
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (!force &&
+            index == lastRenderedProgressIndex &&
+            now - lastProgressRenderAtMs < 700L
+        ) return
+
+        lastRenderedProgressIndex = index
+        lastProgressRenderAtMs = now
+        jsCall("setRouteProgress(${num(p.lon)},${num(p.lat)},$index)")
+    }
+
+    private fun updateRouteProgress(match: RouteMatch) {
+        if (match.distanceMeters > 65.0) return
+        if (match.segmentIndex + 1 < routeProgressIndex) return
+        routeProgressIndex = max(routeProgressIndex, match.segmentIndex)
+        syncRouteProgress()
+    }
+
+    private fun rebuildRouteDistanceCache() {
+        routeRemainingFromIndex = DoubleArray(routePoints.size)
+        if (routePoints.size < 2) return
+        for (i in routePoints.lastIndex - 1 downTo 0) {
+            val a = routePoints[i]
+            val b = routePoints[i + 1]
+            routeRemainingFromIndex[i] =
+                routeRemainingFromIndex[i + 1] + distanceMeters(a.lat, a.lon, b.lat, b.lon)
+        }
     }
 
     private fun showRouteChoices() {
@@ -856,6 +970,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun stopNavigation() {
         routeActive = false
+        routeDestination = null
+        routeCall?.cancel()
+        rerouting = false
         routePoints = emptyList()
         navSteps = emptyList()
         routeAlternatives = emptyList()
@@ -863,6 +980,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         currentStepIndex = 0
         routeDistanceMeters = 0.0
         routeDurationSeconds = 0.0
+        routeProgressIndex = 0
+        lastRenderedProgressIndex = -1
+        routeRemainingFromIndex = DoubleArray(0)
+        lastRouteMatch = null
+        offRouteSinceMs = 0L
         lastSpokenInstruction = ""
 
         syncRoutes()
@@ -875,34 +997,118 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         recenter(true)
     }
 
-    private fun snapToRoute(location: Location): Location {
-        if (routePoints.size < 2) return location
-        var bestLat = location.latitude
-        var bestLon = location.longitude
-        var bestDistance = Double.MAX_VALUE
-
-        val maxSnap = max(18.0, min(42.0, (if (location.hasAccuracy()) location.accuracy else 12f) * 1.7))
-        for (i in 0 until routePoints.lastIndex) {
-            val a = routePoints[i]
-            val b = routePoints[i + 1]
-            val projected = projectToSegment(location.latitude, location.longitude, a.lat, a.lon, b.lat, b.lon)
-            val d = distanceMeters(location.latitude, location.longitude, projected.first, projected.second)
-            if (d < bestDistance) {
-                bestDistance = d
-                bestLat = projected.first
-                bestLon = projected.second
-            }
-        }
-
-        return if (bestDistance <= maxSnap) {
+    private fun snapToRoute(location: Location, match: RouteMatch?): Location {
+        if (match == null) return location
+        val maxSnap = max(
+            16.0,
+            min(38.0, (if (location.hasAccuracy()) location.accuracy else 12f) * 1.6)
+        )
+        return if (match.distanceMeters <= maxSnap) {
             Location(location).apply {
-                latitude = bestLat
-                longitude = bestLon
+                latitude = match.lat
+                longitude = match.lon
             }
         } else {
             location
         }
     }
+
+    private fun findRouteMatch(location: Location): RouteMatch? {
+        if (routePoints.size < 2) return null
+
+        var best: RouteMatch? = null
+        for (i in 0 until routePoints.lastIndex) {
+            val a = routePoints[i]
+            val b = routePoints[i + 1]
+            val projected = projectToSegment(
+                location.latitude,
+                location.longitude,
+                a.lat,
+                a.lon,
+                b.lat,
+                b.lon
+            )
+            val d = distanceMeters(
+                location.latitude,
+                location.longitude,
+                projected.first,
+                projected.second
+            )
+            if (best == null || d < best!!.distanceMeters) {
+                best = RouteMatch(
+                    segmentIndex = i,
+                    lat = projected.first,
+                    lon = projected.second,
+                    distanceMeters = d,
+                    segmentBearing = bearingDegrees(a.lat, a.lon, b.lat, b.lon)
+                )
+            }
+        }
+        return best
+    }
+
+    private fun maybeReroute(location: Location, match: RouteMatch?) {
+        val destination = routeDestination ?: return
+        if (rerouting || !routeActive) return
+
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 18.0
+        if (accuracy > 40.0) {
+            offRouteSinceMs = 0L
+            return
+        }
+
+        val speed = rawLocation?.speed ?: 0f
+        val distanceThreshold = max(22.0, min(45.0, accuracy * 1.8))
+        val bearingMismatch = if (
+            match != null &&
+            rawLocation?.hasBearing() == true &&
+            speed > 4.5f
+        ) {
+            angularDifference(rawLocation!!.bearing.toDouble(), match.segmentBearing)
+        } else {
+            0.0
+        }
+
+        val clearlyOffRoute = match == null ||
+            match.distanceMeters > distanceThreshold ||
+            (speed > 4.5f && match.distanceMeters > 13.0 && bearingMismatch > 72.0)
+
+        val now = SystemClock.elapsedRealtime()
+        if (!clearlyOffRoute) {
+            offRouteSinceMs = 0L
+            return
+        }
+
+        if (offRouteSinceMs == 0L) {
+            offRouteSinceMs = now
+            return
+        }
+
+        val confirmationMs = if (speed > 8f) 1_600L else 2_400L
+        if (now - offRouteSinceMs < confirmationMs || now - lastRerouteAtMs < 6_500L) return
+
+        lastRerouteAtMs = now
+        offRouteSinceMs = 0L
+        requestRoute(
+            location.latitude,
+            location.longitude,
+            destination.lat,
+            destination.lon,
+            isReroute = true
+        )
+    }
+
+    private fun bearingDegrees(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val phi1 = Math.toRadians(lat1)
+        val phi2 = Math.toRadians(lat2)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val y = sin(dLon) * cos(phi2)
+        val x = cos(phi1) * sin(phi2) - sin(phi1) * cos(phi2) * cos(dLon)
+        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
+    }
+
+    private fun angularDifference(a: Double, b: Double): Double =
+        abs((a - b + 540.0) % 360.0 - 180.0)
 
     private fun projectToSegment(
         lat: Double,
@@ -926,26 +1132,23 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun estimateRemainingDistance(location: Location): Double {
         if (routePoints.size < 2) return routeDistanceMeters
-        var nearestIndex = 0
-        var nearestDistance = Double.MAX_VALUE
-        val stride = max(1, routePoints.size / 700)
 
-        for (i in routePoints.indices step stride) {
-            val p = routePoints[i]
-            val d = distanceMeters(location.latitude, location.longitude, p.lat, p.lon)
-            if (d < nearestDistance) {
-                nearestDistance = d
-                nearestIndex = i
+        val match = lastRouteMatch
+        if (match != null) {
+            val segment = max(routeProgressIndex, match.segmentIndex)
+                .coerceIn(0, routePoints.lastIndex - 1)
+            val nextIndex = segment + 1
+            val next = routePoints[nextIndex]
+            val fromCurrent = distanceMeters(match.lat, match.lon, next.lat, next.lon)
+            val tail = routeRemainingFromIndex.getOrElse(nextIndex) { 0.0 }
+            return (fromCurrent + tail).coerceAtMost(routeDistanceMeters * 1.05)
+        }
+
+        return routeRemainingFromIndex
+            .getOrElse(routeProgressIndex.coerceIn(0, routeRemainingFromIndex.lastIndex.coerceAtLeast(0))) {
+                routeDistanceMeters
             }
-        }
-
-        var remaining = 0.0
-        for (i in nearestIndex until routePoints.lastIndex) {
-            val a = routePoints[i]
-            val b = routePoints[i + 1]
-            remaining += distanceMeters(a.lat, a.lon, b.lat, b.lon)
-        }
-        return remaining.coerceAtMost(routeDistanceMeters * 1.05)
+            .coerceAtMost(routeDistanceMeters * 1.05)
     }
 
     private fun maybeQuerySignals(location: Location) {
@@ -1080,6 +1283,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ui.removeCallbacks(ticker)
         searchDebounce?.let { ui.removeCallbacks(it) }
         searchCall?.cancel()
+        routeCall?.cancel()
         fusedLocation.removeLocationUpdates(locationCallback)
         tts.stop()
         tts.shutdown()
@@ -1093,6 +1297,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     data class SignalPoint(val id: Long, val lat: Double, val lon: Double)
     data class NavStep(val lat: Double, val lon: Double, val instruction: String, val icon: String)
     data class SearchResult(val label: String, val lat: Double, val lon: Double)
+    data class RouteMatch(
+        val segmentIndex: Int,
+        val lat: Double,
+        val lon: Double,
+        val distanceMeters: Double,
+        val segmentBearing: Double
+    )
     data class RouteOption(
         val points: List<GeoPoint>,
         val steps: List<NavStep>,
