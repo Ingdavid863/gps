@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.7.1-beta-live"
+        versionCode = 13
+        versionName = "0.8.0-beta-nav"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
     }
 
