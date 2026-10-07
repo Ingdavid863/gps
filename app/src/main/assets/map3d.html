@@ -48,9 +48,10 @@
     let ready = false;
     let setupFinished = false;
     let trafficEnabled = true;
-    let visuals = { is3D: true, terrain: true, buildings: true, satellite: false };
+    let visuals = { is3D: true, terrain: false, buildings: true, satellite: false };
     let lastLocation = [-99.133209, 19.432608];
     let lastBearing = 0;
+    let activeRoutePoints = [];
 
     function fail(message) {
         loading.textContent = message;
@@ -88,7 +89,16 @@
         },
         layers: [
             { id: 'gps-background', type: 'background', paint: { 'background-color': '#d9e2e8' } },
-            { id: 'gps-osm-base-layer', type: 'raster', source: 'gps-osm-base', paint: { 'raster-opacity': 1.0 } }
+            {
+                id: 'gps-osm-base-layer',
+                type: 'raster',
+                source: 'gps-osm-base',
+                paint: {
+                    'raster-opacity': 1.0,
+                    'raster-fade-duration': 0,
+                    'raster-resampling': 'linear'
+                }
+            }
         ]
     };
 
@@ -98,15 +108,18 @@
             container: 'map',
             style: baseStyle,
             center: lastLocation,
-            zoom: 16.8,
-            pitch: 68,
+            zoom: 18.2,
+            pitch: 62,
             bearing: 0,
             maxPitch: 85,
             minZoom: 3,
             maxZoom: 20,
             attributionControl: true,
             canvasContextAttributes: { antialias: true },
-            fadeDuration: 100
+            fadeDuration: 0,
+            crossSourceCollisions: false,
+            maxTileCacheSize: 320,
+            maxTileCacheZoomLevels: 5
         });
     } catch (e) {
         fail('Error al crear el mapa 3D: ' + (e && e.message ? e.message : e));
@@ -184,7 +197,7 @@
         setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
         setLayerVisible(TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         applySky(visuals.is3D);
-        map.easeTo({ pitch: visuals.is3D ? 68 : 0, duration: 420, essential: true });
+        map.easeTo({ pitch: visuals.is3D ? 62 : 0, duration: 260, essential: true });
     }
 
     function setupTrafficLayer() {
@@ -210,8 +223,8 @@
             source: TRAFFIC_SOURCE_ID,
             minzoom: 5,
             paint: {
-                'raster-opacity': 0.94,
-                'raster-fade-duration': 120
+                'raster-opacity': 0.76,
+                'raster-fade-duration': 0
             }
         });
     }
@@ -298,27 +311,56 @@
         safeAddLayer({
             id: 'gps-route-alt-1-layer', type: 'line', source: 'gps-route-alt-1',
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#727d87', 'line-opacity': 0.72, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 18, 8] }
+            paint: {
+                'line-color': '#6f7a84',
+                'line-opacity': 0.46,
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 18, 6, 20, 7],
+                'line-dasharray': [1.2, 1.5]
+            }
         });
         safeAddLayer({
             id: 'gps-route-alt-2-layer', type: 'line', source: 'gps-route-alt-2',
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#6e839b', 'line-opacity': 0.68, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 4, 18, 8] }
+            paint: {
+                'line-color': '#7b8792',
+                'line-opacity': 0.42,
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 18, 6, 20, 7],
+                'line-dasharray': [1.2, 1.5]
+            }
+        });
+
+        // Traffic stays under the navigation path so congestion colors never hide the
+        // route the driver must follow.
+        setupTrafficLayer();
+
+        safeAddLayer({
+            id: 'gps-route-shadow', type: 'line', source: 'gps-route-active',
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: {
+                'line-color': '#0a315c',
+                'line-opacity': 0.42,
+                'line-blur': 1.4,
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 11, 18, 17, 20, 21]
+            }
         });
         safeAddLayer({
             id: 'gps-route-outline', type: 'line', source: 'gps-route-active',
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#ffffff', 'line-opacity': 0.98, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 8, 18, 15] }
+            paint: {
+                'line-color': '#ffffff',
+                'line-opacity': 0.98,
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 9, 18, 13, 20, 16]
+            }
         });
         safeAddLayer({
             id: 'gps-route-active-layer', type: 'line', source: 'gps-route-active',
             layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#087cf0', 'line-opacity': 1.0, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 18, 11] }
+            paint: {
+                'line-color': '#087cf0',
+                'line-opacity': 1.0,
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5.5, 18, 8.5, 20, 10.5]
+            }
         });
-
-        // Relative-delay traffic is transparent when traffic flows normally. Congested
-        // segments are drawn above the blue route in traffic colors, Google-Maps style.
-        setupTrafficLayer();
 
         safeAddLayer({
             id: 'gps-signals-layer', type: 'circle', source: 'gps-signals',
@@ -374,12 +416,21 @@
         },
         setRoutes(active, alt1, alt2) {
             if (!ready) return;
+            activeRoutePoints = Array.isArray(active) ? active : [];
             const a = map.getSource('gps-route-active');
             const b = map.getSource('gps-route-alt-1');
             const c = map.getSource('gps-route-alt-2');
-            if (a) a.setData(lineData(active));
+            if (a) a.setData(lineData(activeRoutePoints));
             if (b) b.setData(lineData(alt1));
             if (c) c.setData(lineData(alt2));
+        },
+        setRouteProgress(lon, lat, fromIndex) {
+            if (!ready || activeRoutePoints.length < 2) return;
+            const source = map.getSource('gps-route-active');
+            if (!source) return;
+            const index = Math.max(0, Math.min(activeRoutePoints.length - 2, Number(fromIndex) || 0));
+            const remaining = [[Number(lon), Number(lat)], ...activeRoutePoints.slice(index + 1)];
+            source.setData(lineData(remaining));
         },
         setSignals(points) {
             if (!ready) return;
