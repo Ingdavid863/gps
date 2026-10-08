@@ -109,6 +109,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val destinationSearch = DestinationSearch(http)
     private lateinit var tollRepository: TollRepository
     private var tollQuote: TollRepository.Quote? = null
+    private var tollProgressDistances = DoubleArray(0)
     private var tollLookupPending = false
     private var avoidTolls = false
     private var viewMode = 0
@@ -1582,6 +1583,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         routeGeneration++
         tollRepository.cancel()
         tollQuote = null
+        tollProgressDistances = DoubleArray(0)
         tollLookupPending = false
         pendingExternalDestination = null
         pendingExternalQuery = null
@@ -1787,6 +1789,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         syncTolls()
         updateTollPanel()
         val snapshot = routePoints
+        tollProgressDistances = DoubleArray(snapshot.size)
+        for (i in 1 until snapshot.size) {
+            val a = snapshot[i - 1]; val b = snapshot[i]
+            tollProgressDistances[i] = tollProgressDistances[i - 1] + RouteGeometry.distance(
+                RouteGeometry.Point(a.lat, a.lon), RouteGeometry.Point(b.lat, b.lon))
+        }
         val option = routeAlternatives.getOrNull(activeRouteIndex) ?: return
         tollRepository.load(snapshot.map { RouteGeometry.Point(it.lat, it.lon) }, option.hasTolls) { quote ->
             ui.post {
@@ -1800,8 +1808,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun remainingTolls(): List<TollRepository.Booth> {
-        val traveled = if (routeRemainingFromIndex.isNotEmpty())
-            routeRemainingFromIndex[0] - (displayLocation?.let { estimateRemainingDistance(it) } ?: routeRemainingFromIndex[0]) else 0.0
+        // Use the same distance model that projects each booth, so a long route does
+        // not mark a plaza as passed early because navigation uses another metric.
+        val match = lastRouteMatch
+        val segment = max(routeProgressIndex, match?.segmentIndex ?: 0)
+            .coerceIn(0, (routePoints.lastIndex - 1).coerceAtLeast(0))
+        var traveled = tollProgressDistances.getOrElse(segment) { 0.0 }
+        if (match != null && routePoints.size > segment + 1) {
+            val a = routePoints[segment]; val b = routePoints[segment + 1]
+            traveled += RouteGeometry.project(listOf(RouteGeometry.Point(a.lat, a.lon),
+                RouteGeometry.Point(b.lat, b.lon)), RouteGeometry.Point(match.lat, match.lon))?.along ?: 0.0
+        }
         return tollQuote?.booths.orEmpty().filter { it.alongMeters + 35.0 >= traveled }
     }
 
