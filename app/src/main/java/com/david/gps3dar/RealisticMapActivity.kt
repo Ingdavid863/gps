@@ -2,6 +2,7 @@ package com.david.gps3dar
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.location.Location
@@ -75,6 +76,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var signalPhase: TextView
     private lateinit var signalTime: TextView
     private lateinit var modeButton: TextView
+    private lateinit var zoomInButton: TextView
+    private lateinit var zoomOutButton: TextView
     private lateinit var voiceButton: TextView
     private lateinit var settings3d: TextView
     private lateinit var settingsTerrain: TextView
@@ -122,12 +125,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var trafficSignals: List<SignalPoint> = emptyList()
     private var lastSignalQuery: Location? = null
 
-    private var is3D = true
+    private var is3D = false
     private var terrainEnabled = false
-    private var buildingsEnabled = true
+    private var buildingsEnabled = false
     private var satelliteEnabled = false
     private var voiceEnabled = true
-    private var autoZoomEnabled = true
+    private var autoZoomEnabled = false
+    private var zoomPresetIndex = DEFAULT_ZOOM_PRESET_INDEX
     private var followResumeDelayMs = DEFAULT_FOLLOW_RESUME_MS
     private var manualCameraUntilMs = 0L
 
@@ -192,6 +196,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         signalPhase = findViewById(R.id.signalPhase)
         signalTime = findViewById(R.id.signalTime)
         modeButton = findViewById(R.id.modeButton)
+        zoomInButton = findViewById(R.id.zoomInButton)
+        zoomOutButton = findViewById(R.id.zoomOutButton)
         voiceButton = findViewById(R.id.voiceButton)
         settings3d = findViewById(R.id.settings3d)
         settingsTerrain = findViewById(R.id.settingsTerrain)
@@ -287,12 +293,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
 
-        settings3d.setOnClickListener {
-            is3D = !is3D
-            refreshSettingsLabels()
-            syncVisualSettings()
-            recenter(true)
-        }
+        settings3d.setOnClickListener { openVrMode() }
         settingsTerrain.setOnClickListener {
             terrainEnabled = !terrainEnabled
             refreshSettingsLabels()
@@ -333,12 +334,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupButtons() {
         findViewById<TextView>(R.id.recenterButton).setOnClickListener { recenter(true) }
-        modeButton.setOnClickListener {
-            is3D = !is3D
-            refreshSettingsLabels()
-            syncVisualSettings()
-            recenter(true)
-        }
+        zoomInButton.setOnClickListener { changeZoomPreset(+1) }
+        zoomOutButton.setOnClickListener { changeZoomPreset(-1) }
+        modeButton.setOnClickListener { openVrMode() }
         voiceButton.setOnClickListener {
             voiceEnabled = !voiceEnabled
             refreshSettingsLabels()
@@ -359,15 +357,39 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun refreshSettingsLabels() {
-        modeButton.text = if (is3D) "3D" else "2D"
+        modeButton.text = "VR"
         voiceButton.text = if (voiceEnabled) "🔊" else "🔇"
-        settings3d.text = "Vista 3D avanzada: ${if (is3D) "activada" else "desactivada"}"
+        settings3d.text = "VR peatonal: disponible hasta 20 km/h"
         settingsTerrain.text = "Terreno DEM real: ${if (terrainEnabled) "activado" else "desactivado"}"
         settingsBuildings.text = "Edificios 3D por tiles: ${if (buildingsEnabled) "activados" else "desactivados"}"
         settingsSatellite.text = "Satélite híbrido: ${if (satelliteEnabled) "activado" else "desactivado"}"
         settingsVoice.text = "Voz: ${if (voiceEnabled) "activada" else "desactivada"}"
-        settingsAutoZoom.text = "Zoom automático según velocidad: ${if (autoZoomEnabled) "activado" else "desactivado"}"
+        settingsAutoZoom.text = if (autoZoomEnabled) {
+            "Zoom automático: activado"
+        } else {
+            "Zoom manual: nivel ${zoomPresetIndex + 1} de ${ZOOM_PRESETS.size}"
+        }
         settingsFollowDelay.text = "Retomar seguimiento después de zoom: ${followResumeDelayMs / 1000L} s"
+    }
+
+    private fun changeZoomPreset(delta: Int) {
+        autoZoomEnabled = false
+        zoomPresetIndex = (zoomPresetIndex + delta).coerceIn(0, ZOOM_PRESETS.lastIndex)
+        refreshSettingsLabels()
+        recenter(true)
+    }
+
+    private fun openVrMode() {
+        val speedKmh = ((rawLocation?.speed ?: 0f) * 3.6f)
+        if (speedKmh > VR_MAX_SPEED_KMH) {
+            Toast.makeText(
+                this,
+                "VR es solo para caminar. A más de 20 km/h se usa el mapa 2D.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        startActivity(Intent(this, ArNavigationActivity::class.java))
     }
 
     private fun syncMapAll() {
@@ -419,9 +441,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Navigation needs low-latency fixes. Avoid batching because a delayed batch makes the
         // vehicle appear to outrun the map even when the GNSS itself is accurate.
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500L)
-            .setMinUpdateIntervalMillis(250L)
-            .setMaxUpdateDelayMillis(600L)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 300L)
+            .setMinUpdateIntervalMillis(100L)
+            .setMaxUpdateDelayMillis(350L)
             .setWaitForAccurateLocation(false)
             .build()
         fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
@@ -445,12 +467,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val smooth = smoothLocation(location)
         filteredLocation = smooth
+        val predicted = predictLocation(smooth, location)
 
-        val match = if (routeActive) findRouteMatch(smooth) else null
+        val match = if (routeActive) findRouteMatch(predicted) else null
         lastRouteMatch = match
-        if (routeActive) maybeReroute(smooth, match)
+        if (routeActive) maybeReroute(predicted, match)
 
-        val shown = if (routeActive) snapToRoute(smooth, match) else smooth
+        val shown = if (routeActive) snapToRoute(predicted, match) else predicted
         displayLocation = shown
 
         if (routeActive && match != null) updateRouteProgress(match)
@@ -467,16 +490,37 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Keep enough filtering to suppress GNSS jitter, but give new fixes much more weight
         // while driving so the marker does not visibly trail the real vehicle.
         val alpha = when {
-            raw.speed > 20f -> 0.92
-            raw.speed > 8f -> 0.88
-            raw.speed > 2f -> 0.80
-            raw.accuracy <= 6f -> 0.74
-            raw.accuracy <= 15f -> 0.64
-            else -> 0.52
+            raw.speed > 15f -> 0.99
+            raw.speed > 7f -> 0.97
+            raw.speed > 2f -> 0.92
+            raw.accuracy <= 6f -> 0.82
+            raw.accuracy <= 15f -> 0.72
+            else -> 0.60
         }
         return Location(raw).apply {
             latitude = old.latitude + (raw.latitude - old.latitude) * alpha
             longitude = old.longitude + (raw.longitude - old.longitude) * alpha
+        }
+    }
+
+    private fun predictLocation(filtered: Location, raw: Location): Location {
+        if (!raw.hasSpeed() || !raw.hasBearing() || raw.speed < 1.2f) return Location(filtered)
+
+        val predictionSeconds = when {
+            raw.speed > 22f -> 0.80
+            raw.speed > 12f -> 0.72
+            raw.speed > 5f -> 0.62
+            else -> 0.42
+        }
+        val meters = (raw.speed * predictionSeconds).coerceAtMost(18f).toDouble()
+        val bearing = Math.toRadians(raw.bearing.toDouble())
+        val lat = filtered.latitude + (cos(bearing) * meters / 110540.0)
+        val lonScale = 111320.0 * cos(Math.toRadians(filtered.latitude)).coerceAtLeast(0.2)
+        val lon = filtered.longitude + (sin(bearing) * meters / lonScale)
+
+        return Location(filtered).apply {
+            latitude = lat
+            longitude = lon
         }
     }
 
@@ -507,7 +551,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } else {
             lastCameraBearing
         }
-        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)})")
+        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())})")
     }
 
     private fun pauseCameraFollow() {
@@ -525,27 +569,25 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val target = lookAheadTarget(location, lastCameraBearing, moving)
         val zoom = desiredZoom(moving)
-        val pitch = if (is3D) 62.0 else 0.0
+        val pitch = 0.0
         jsCall(
-            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},260)"
+            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},110)"
         )
     }
 
     private fun desiredZoom(speedMps: Float): Double {
-        if (!autoZoomEnabled) return 18.35
-        if (!routeActive) return 18.15
+        if (!autoZoomEnabled) return ZOOM_PRESETS[zoomPresetIndex]
         return when {
-            speedMps >= 30f -> 17.25
-            speedMps >= 22f -> 17.55
-            speedMps >= 14f -> 17.90
-            speedMps >= 7f -> 18.25
-            else -> 18.65
+            speedMps >= 30f -> ZOOM_PRESETS[0]
+            speedMps >= 20f -> ZOOM_PRESETS[1]
+            speedMps >= 12f -> ZOOM_PRESETS[2]
+            speedMps >= 6f -> ZOOM_PRESETS[3]
+            else -> ZOOM_PRESETS[4]
         }
     }
-
     private fun lookAheadTarget(location: Location, bearing: Double, speedMps: Float): GeoPoint {
         if (!routeActive || speedMps < 1.8f) return GeoPoint(location.latitude, location.longitude)
-        val meters = (18.0 + speedMps * 1.25).coerceIn(18.0, 58.0)
+        val meters = (10.0 + speedMps * 0.85).coerceIn(10.0, 38.0)
         val r = Math.toRadians(bearing)
         val lat = location.latitude + (cos(r) * meters / 110540.0)
         val lonScale = 111320.0 * cos(Math.toRadians(location.latitude)).coerceAtLeast(0.2)
@@ -559,7 +601,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val moving = rawLocation?.speed ?: 0f
         val target = lookAheadTarget(here, lastCameraBearing, moving)
         jsCall(
-            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},${num(if (is3D) 62.0 else 0.0)},${if (animated) 420 else 1})"
+            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},0,${if (animated) 180 else 1})"
         )
     }
 
@@ -1329,7 +1371,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
+        is3D = false
         webMapView.onResume()
+        syncVisualSettings()
+        recenter(false)
     }
 
     override fun onPause() {
@@ -1378,5 +1423,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     companion object {
         const val SEARCH_DEBOUNCE_MS = 350L
         const val DEFAULT_FOLLOW_RESUME_MS = 8000L
+        const val VR_MAX_SPEED_KMH = 20f
+        const val DEFAULT_ZOOM_PRESET_INDEX = 2
+        val ZOOM_PRESETS = doubleArrayOf(16.20, 16.80, 17.40, 18.00, 18.65)
     }
 }
