@@ -470,7 +470,729 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             "Zoom automático: activado"
         } else {
             "Zoom manual: nivel ${zoomPresetIndex + 1} de ${ZOOM_PRESETS.size}"
-   …7866 tokens truncated…         instruction.text = message
+        }
+        settingsFollowDelay.text = "Retomar seguimiento después de zoom: ${followResumeDelayMs / 1000L} s"
+    }
+
+    private fun changeZoomPreset(delta: Int) {
+        autoZoomEnabled = false
+        zoomPresetIndex = (zoomPresetIndex + delta).coerceIn(0, ZOOM_PRESETS.lastIndex)
+        refreshSettingsLabels()
+        recenter(true)
+    }
+
+    private fun openVrMode() {
+        val speedKmh = ((rawLocation?.speed ?: 0f) * 3.6f)
+        if (speedKmh > VR_MAX_SPEED_KMH) {
+            Toast.makeText(
+                this,
+                "VR es solo para caminar. A más de 20 km/h se usa el mapa 2D.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        startActivity(Intent(this, ArNavigationActivity::class.java))
+    }
+
+    private fun syncMapAll() {
+        syncVisualSettings()
+        syncRoutes()
+        syncTolls()
+        displayLocation?.let { updateLocationMarker(it) }
+        syncViewport()
+        selectedMapPoint?.let { jsCall("setSelectionPin(${num(it.lon)},${num(it.lat)})") }
+        if (viewMode == 2) jsCall("showOverview()") else recenter(false)
+        maybeStartPendingExternalNavigation()
+    }
+
+    private fun syncVisualSettings() {
+        jsCall("setVisuals($is3D,$terrainEnabled,$buildingsEnabled,$satelliteEnabled)")
+        jsCall("setViewMode($viewMode)")
+    }
+
+    private fun jsCall(call: String) {
+        if (!mapReady) return
+        webMapView.evaluateJavascript("window.GPS3D && window.GPS3D.$call;", null)
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts.language = Locale("es", "MX")
+        }
+    }
+
+    private fun requestLocationPermission() {
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED) {
+            startHighAccuracyLocation()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startHighAccuracyLocation() {
+        // Use the last fresh fix immediately so the map does not sit waiting for a new GNSS cycle.
+        fusedLocation.lastLocation.addOnSuccessListener { last ->
+            if (last != null && System.currentTimeMillis() - last.time < 20_000L) {
+                processLocation(last)
+            }
+        }
+
+        // Navigation needs low-latency fixes. Avoid batching because a delayed batch makes the
+        // vehicle appear to outrun the map even when the GNSS itself is accurate.
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 300L)
+            .setMinUpdateIntervalMillis(100L)
+            .setMaxUpdateDelayMillis(0L)
+            .setWaitForAccurateLocation(false)
+            .build()
+        fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+    }
+
+    private fun processLocation(location: Location) {
+        val accepted = lastAcceptedLocation
+        if (accepted != null && location.elapsedRealtimeNanos <= accepted.elapsedRealtimeNanos) return
+        if (accepted != null && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 3_000_000_000L) return
+        rawLocation = location
+
+        if (location.hasAccuracy() && location.accuracy > 65f) {
+            gpsStatus.text = "GPS débil · ±${location.accuracy.toInt()} m"
+            return
+        }
+
+        val previous = lastAcceptedLocation
+        if (previous != null) {
+            val dt = max(0.25, (location.time - previous.time) / 1000.0)
+            val jumpSpeed = previous.distanceTo(location) / dt
+            if (jumpSpeed > 85.0 && location.accuracy > 12f) return
+        }
+        lastAcceptedLocation = Location(location)
+
+        val smooth = smoothLocation(location)
+        filteredLocation = smooth
+        val predicted = predictLocation(smooth, location)
+
+        val match = if (routeActive) findRouteMatch(predicted) else null
+        lastRouteMatch = match
+        if (routeActive) maybeReroute(predicted, match)
+
+        val shown = if (routeActive) snapToRoute(predicted, match) else predicted
+        displayLocation = shown
+
+        if (routeActive && match != null) updateRouteProgress(match)
+
+        updateLocationMarker(shown)
+        updateCamera(shown)
+        updateDrivingUi(location, shown)
+        updateNavigationStep(shown)
+        updateTollPanel()
+        maybeStartPendingExternalNavigation()
+    }
+
+    private fun smoothLocation(raw: Location): Location {
+        val old = filteredLocation ?: return Location(raw)
+        // Keep enough filtering to suppress GNSS jitter, but give new fixes much more weight
+        // while driving so the marker does not visibly trail the real vehicle.
+        val alpha = when {
+            raw.speed > 15f -> 0.99
+            raw.speed > 7f -> 0.97
+            raw.speed > 2f -> 0.92
+            raw.accuracy <= 6f -> 0.82
+            raw.accuracy <= 15f -> 0.72
+            else -> 0.60
+        }
+        return Location(raw).apply {
+            latitude = old.latitude + (raw.latitude - old.latitude) * alpha
+            longitude = old.longitude + (raw.longitude - old.longitude) * alpha
+        }
+    }
+
+    private fun predictLocation(filtered: Location, raw: Location): Location {
+        if (!raw.hasSpeed() || !raw.hasBearing() || raw.speed < 1.2f) return Location(filtered)
+
+        // Compensate actual fix age only; continuous rendering handles time between fixes.
+        val ageSeconds = ((SystemClock.elapsedRealtimeNanos() - raw.elapsedRealtimeNanos) /
+            1_000_000_000.0).coerceIn(0.0, 0.6)
+        val meters = (raw.speed.toDouble() * ageSeconds).coerceAtMost(18.0)
+        val bearing = Math.toRadians(raw.bearing.toDouble())
+        val lat = filtered.latitude + (cos(bearing) * meters / 110540.0)
+        val lonScale = 111320.0 * cos(Math.toRadians(filtered.latitude)).coerceAtLeast(0.2)
+        val lon = filtered.longitude + (sin(bearing) * meters / lonScale)
+
+        return Location(filtered).apply {
+            latitude = lat
+            longitude = lon
+        }
+    }
+
+    private fun updateDrivingUi(raw: Location, shown: Location) {
+        val accuracy = if (raw.hasAccuracy()) raw.accuracy.toInt() else 0
+        gpsStatus.text = when {
+            accuracy in 1..7 -> "GPS excelente · ±$accuracy m"
+            accuracy in 8..15 -> "GPS preciso · ±$accuracy m"
+            accuracy in 16..30 -> "GPS medio · ±$accuracy m"
+            else -> "GPS débil · ±$accuracy m"
+        }
+        speedText.text = (raw.speed * 3.6f).toInt().coerceAtLeast(0).toString()
+
+        if (routeActive && routeDistanceMeters > 0) {
+            val remaining = estimateRemainingDistance(shown)
+            val ratio = (remaining / routeDistanceMeters).coerceIn(0.0, 1.0)
+            val seconds = routeDurationSeconds * ratio
+            etaText.text = formatDuration(seconds)
+            routeDistance.text = formatDistance(remaining)
+            arrivalText.text = "Llegada aprox. ${formatArrival(seconds)}"
+        }
+    }
+
+    private fun updateLocationMarker(location: Location) {
+        val raw = rawLocation
+        val bearing = if (raw?.hasBearing() == true && raw.speed > 0.8f) {
+            raw.bearing.toDouble()
+        } else {
+            lastCameraBearing
+        }
+        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())})")
+    }
+
+    private fun pauseCameraFollow() {
+        manualCameraUntilMs = SystemClock.elapsedRealtime() + followResumeDelayMs
+    }
+
+    private fun updateCamera(location: Location) {
+        val moving = rawLocation?.speed ?: 0f
+        val raw = rawLocation
+        if (raw?.hasBearing() == true && moving > 1.0f) {
+            lastCameraBearing = smoothBearing(lastCameraBearing, raw.bearing.toDouble(), if (moving > 8f) 0.38 else 0.24)
+        }
+
+        if (viewMode == 2 || SystemClock.elapsedRealtime() < manualCameraUntilMs) return
+
+        val target = GeoPoint(location.latitude, location.longitude)
+        val zoom = desiredZoom(moving)
+        val pitch = if (viewMode == 1) 55.0 else 0.0
+        jsCall(
+            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},110)"
+        )
+    }
+
+    private fun desiredZoom(speedMps: Float): Double {
+        if (!autoZoomEnabled) return ZOOM_PRESETS[zoomPresetIndex]
+        return when {
+            speedMps >= 30f -> ZOOM_PRESETS[0]
+            speedMps >= 20f -> ZOOM_PRESETS[1]
+            speedMps >= 12f -> ZOOM_PRESETS[2]
+            speedMps >= 6f -> ZOOM_PRESETS[3]
+            else -> ZOOM_PRESETS[4]
+        }
+    }
+    private fun lookAheadTarget(location: Location, bearing: Double, speedMps: Float): GeoPoint {
+        if (!routeActive || speedMps < 1.8f) return GeoPoint(location.latitude, location.longitude)
+        val meters = (10.0 + speedMps * 0.85).coerceIn(10.0, 38.0)
+        val r = Math.toRadians(bearing)
+        val lat = location.latitude + (cos(r) * meters / 110540.0)
+        val lonScale = 111320.0 * cos(Math.toRadians(location.latitude)).coerceAtLeast(0.2)
+        val lon = location.longitude + (sin(r) * meters / lonScale)
+        return GeoPoint(lat, lon)
+    }
+
+    private fun recenter(animated: Boolean) {
+        val here = displayLocation ?: rawLocation ?: return
+        manualCameraUntilMs = 0L
+        val moving = rawLocation?.speed ?: 0f
+        if (viewMode == 2) { jsCall("showOverview()"); return }
+        val target = GeoPoint(here.latitude, here.longitude)
+        val pitch = if (viewMode == 1) 55 else 0
+        jsCall(
+            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},$pitch,${if (animated) 180 else 1})"
+        )
+    }
+
+    private fun handleNavigationIntent(sourceIntent: Intent?) {
+        val text = runCatching {
+            sourceIntent?.data?.toString() ?: sourceIntent?.getStringExtra(Intent.EXTRA_TEXT)
+        }.getOrNull() ?: return
+        receiveDestinationText(text)
+    }
+
+    private fun receiveDestinationText(text: String) {
+        val received = SharedDestination.parse(text) ?: run {
+            Toast.makeText(this, "Esta ubicación no incluye un destino válido", Toast.LENGTH_LONG).show()
+            return
+        }
+        externalLinkCall?.cancel()
+        destinationSearch.cancel()
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        if (received.shortUrl != null) {
+            expandMapLink(received.shortUrl)
+            return
+        }
+        pendingExternalDestination = received.point?.let { GeoPoint(it.lat, it.lon) }
+        pendingExternalQuery = received.query
+        suppressSearchWatcher = true
+        searchInput.setText(received.query ?: "Destino recibido")
+        suppressSearchWatcher = false
+        hideKeyboard()
+        hideSearchSuggestions()
+        settingsPanel.visibility = View.GONE
+        instruction.text = "Destino recibido · preparando mapa y GPS…"
+        received.point?.let {
+            selectedMapPoint = SearchResult("Destino recibido", it.lat, it.lon)
+            jsCall("setSelectionPin(${num(it.lon)},${num(it.lat)})")
+        }
+        maybeStartPendingExternalNavigation()
+    }
+
+    private fun expandMapLink(url: String, redirects: Int = 0) {
+        if (redirects > 5) {
+            Toast.makeText(this, "No se pudo resolver el enlace de ubicación", Toast.LENGTH_LONG).show()
+            return
+        }
+        instruction.text = "Abriendo ubicación compartida…"
+        val request = Request.Builder().url(url).header("User-Agent", "GPS3D-AR-David/0.13").build()
+        val client = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        val linkCall = client.newCall(request)
+        externalLinkCall = linkCall
+        linkCall.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                ui.post { if (externalLinkCall === call && !isDestroyed) instruction.text = "No se pudo abrir la ubicación compartida" }
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val next = response.use { it.header("Location")?.let { path -> it.request.url.resolve(path) } }
+                ui.post {
+                    if (externalLinkCall !== call || isDestroyed) return@post
+                    val parsed = next?.let { SharedDestination.parse(it.toString()) }
+                    when {
+                        next == null || !next.isHttps || !SharedDestination.isMapHost(next.host) ->
+                            instruction.text = "El enlace no contiene una ubicación legible"
+                        parsed?.point != null || parsed?.query != null -> receiveDestinationText(next.toString())
+                        else -> expandMapLink(next.toString(), redirects + 1)
+                    }
+                }
+            }
+        })
+    }
+
+    private fun maybeStartPendingExternalNavigation() {
+        if (!mapReady) return
+        val current = displayLocation ?: return
+        pendingExternalDestination?.let { destination ->
+            pendingExternalDestination = null
+            requestRoute(current.latitude, current.longitude, destination.lat, destination.lon)
+            return
+        }
+        pendingExternalQuery?.let { query ->
+            pendingExternalQuery = null
+            fetchSearchSuggestions(query, navigateFirst = true)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNavigationIntent(intent)
+    }
+
+    private fun searchDestination() {
+        val query = searchInput.text.toString().trim()
+        if (query.isBlank()) return
+        fetchSearchSuggestions(query, navigateFirst = true)
+    }
+
+    private fun tomTomApiKey(): String = runCatching {
+        val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+        info.metaData?.getString("com.david.gps3dar.TOMTOM_API_KEY")?.trim().orEmpty()
+    }.getOrDefault("")
+
+    private fun fetchSearchSuggestions(query: String, navigateFirst: Boolean) {
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        SharedDestination.coordinates(query)?.let { point ->
+            showPlacePreview(SearchResult(query, point.lat, point.lon), movePin = true)
+            return
+        }
+        if (navigateFirst && (query.startsWith("http") || query.startsWith("geo:") || query.startsWith("google.navigation:"))) {
+            receiveDestinationText(query)
+            return
+        }
+        if (navigateFirst) instruction.text = "Buscando $query…"
+        val here = rawLocation?.let { SharedDestination.Point(it.latitude, it.longitude) }
+        destinationSearch.search(query, tomTomApiKey(), here, navigateFirst) { found, error ->
+            ui.post {
+                if (isDestroyed || searchInput.text.toString().trim() != query) return@post
+                if (found.isEmpty()) {
+                    hideSearchSuggestions()
+                    if (navigateFirst) instruction.text = error ?: "No encontré esa dirección. Incluye municipio o código postal."
+                } else {
+                    deliverSearchResults(query, navigateFirst, found.map { SearchResult(it.label, it.lat, it.lon, it.title, it.address) })
+                }
+            }
+        }
+    }
+
+    private fun deliverSearchResults(
+        query: String,
+        navigateFirst: Boolean,
+        results: List<SearchResult>
+    ) {
+        ui.post {
+            if (isDestroyed || searchInput.text.toString().trim() != query) return@post
+            searchResults = results
+            if (navigateFirst && results.size == 1) {
+                hideSearchSuggestions()
+                showPlacePreview(results.first(), movePin = true)
+            } else {
+                if (navigateFirst) instruction.text = "Selecciona la dirección correcta"
+                showSearchSuggestions(results)
+            }
+        }
+    }
+
+    private fun showSearchSuggestions(results: List<SearchResult>) {
+        searchSuggestions.removeAllViews()
+        if (results.isEmpty()) {
+            hideSearchSuggestions()
+            return
+        }
+
+        settingsPanel.visibility = View.GONE
+        results.forEachIndexed { index, result ->
+            val label = result.label.split(",").take(3).joinToString(",")
+            val row = TextView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50))
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(14), 0, dp(12), 0)
+                text = "${index + 1}. $label"
+                textSize = 14f
+                setTextColor(Color.rgb(39, 49, 58))
+                maxLines = 2
+                setOnClickListener {
+                    suppressSearchWatcher = true
+                    searchInput.setText(label)
+                    searchInput.setSelection(searchInput.text.length)
+                    suppressSearchWatcher = false
+                    hideSearchSuggestions()
+                    showPlacePreview(result, movePin = true)
+                }
+            }
+            searchSuggestions.addView(row)
+            if (index < results.lastIndex) {
+                searchSuggestions.addView(View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
+                    setBackgroundColor(Color.argb(25, 0, 0, 0))
+                })
+            }
+        }
+        searchSuggestions.visibility = View.VISIBLE
+        findViewById<View>(R.id.searchSuggestionsContainer).apply {
+            layoutParams.height = dp(min(240, results.size * 51 + 8))
+            visibility = View.VISIBLE
+        }
+    }
+
+    private fun hideSearchSuggestions() {
+        searchSuggestions.visibility = View.GONE
+        findViewById<View>(R.id.searchSuggestionsContainer).visibility = View.GONE
+    }
+
+    private fun previewMapPoint(lat: Double, lon: Double) {
+        hideKeyboard()
+        hideSearchSuggestions()
+        settingsPanel.visibility = View.GONE
+        val result = SearchResult(
+            label = "Punto seleccionado",
+            lat = lat,
+            lon = lon,
+            title = "Punto seleccionado",
+            address = String.format(Locale("es", "MX"), "%.6f, %.6f", lat, lon)
+        )
+        showPlacePreview(result, movePin = true)
+        resolveMapPoint(lat, lon)
+    }
+
+    private fun showPlacePreview(result: SearchResult, movePin: Boolean) {
+        hideKeyboard()
+        selectedMapPoint = result
+        placePreviewTitle.text = result.title.ifBlank { result.label.substringBefore(",") }
+        placePreviewAddress.text = result.address.ifBlank { result.label }
+        placePreviewImage.setImageDrawable(null)
+        placePreviewImage.visibility = View.GONE
+        placePreview.visibility = View.VISIBLE
+        if (movePin) {
+            jsCall(
+                "setSelectionPin(" + num(result.lon) + "," + num(result.lat) + ")"
+            )
+        }
+        if (movePin) {
+            manualCameraUntilMs = SystemClock.elapsedRealtime() + followResumeDelayMs
+            jsCall("previewPoint(${num(result.lon)},${num(result.lat)})")
+        }
+        loadPlaceImage(result)
+    }
+
+    private fun hidePlacePreview() {
+        selectedMapPoint = null
+        placePreviewCall?.cancel()
+        placeImageCall?.cancel()
+        placePreview.visibility = View.GONE
+        jsCall("clearSelectionPin()")
+    }
+
+    private fun resolveMapPoint(lat: Double, lon: Double) {
+        val key = tomTomApiKey()
+        if (key.isBlank()) {
+            reverseGeocodePoint(lat, lon)
+            return
+        }
+
+        placePreviewCall?.cancel()
+        val url = HttpUrl.Builder()
+            .scheme("https")
+            .host("api.tomtom.com")
+            .addPathSegment("search")
+            .addPathSegment("2")
+            .addPathSegment("nearbySearch")
+            .addPathSegment(".json")
+            .addQueryParameter("key", key)
+            .addQueryParameter("lat", lat.toString())
+            .addQueryParameter("lon", lon.toString())
+            .addQueryParameter("radius", "120")
+            .addQueryParameter("limit", "1")
+            .addQueryParameter("countrySet", "MX")
+            .addQueryParameter("language", "es-ES")
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "GPS3D-AR-David/0.10")
+            .build()
+
+        placePreviewCall = http.newCall(request)
+        placePreviewCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (!call.isCanceled()) reverseGeocodePoint(lat, lon)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) {
+                        reverseGeocodePoint(lat, lon)
+                        return
+                    }
+
+                    val root = JSONObject(it.body?.string().orEmpty())
+                    val results = root.optJSONArray("results")
+                    val item = results?.optJSONObject(0)
+                    val position = item?.optJSONObject("position")
+
+                    if (item == null || position == null) {
+                        reverseGeocodePoint(lat, lon)
+                        return
+                    }
+
+                    val poiName = item.optJSONObject("poi")
+                        ?.optString("name")
+                        ?.trim()
+                        .orEmpty()
+                    val addressObject = item.optJSONObject("address")
+                    val freeform = addressObject
+                        ?.optString("freeformAddress")
+                        ?.trim()
+                        .orEmpty()
+                    val municipality = addressObject
+                        ?.optString("municipality")
+                        ?.trim()
+                        .orEmpty()
+                    val pLat = position.optDouble("lat", lat)
+                    val pLon = position.optDouble("lon", lon)
+
+                    val distance = distanceMeters(lat, lon, pLat, pLon)
+                    if (poiName.isBlank() || distance > 120.0) {
+                        reverseGeocodePoint(lat, lon)
+                        return
+                    }
+
+                    val result = SearchResult(
+                        label = listOf(poiName, freeform)
+                            .filter { value -> value.isNotBlank() }
+                            .joinToString(", "),
+                        lat = lat,
+                        lon = lon,
+                        title = poiName,
+                        address = listOf(freeform, municipality)
+                            .filter { value -> value.isNotBlank() }
+                            .distinct()
+                            .joinToString(", ")
+                    )
+                    ui.post {
+                        val selected = selectedMapPoint ?: return@post
+                        if (distanceMeters(selected.lat, selected.lon, lat, lon) > 2.0) return@post
+                        showPlacePreview(result, movePin = false)
+                    }
+                }
+            }
+        })
+    }
+
+    private fun reverseGeocodePoint(lat: Double, lon: Double) {
+        val key = tomTomApiKey()
+        if (key.isBlank()) return
+
+        placePreviewCall?.cancel()
+        val url = HttpUrl.Builder()
+            .scheme("https")
+            .host("api.tomtom.com")
+            .addPathSegment("search")
+            .addPathSegment("2")
+            .addPathSegment("reverseGeocode")
+            .addPathSegment(lat.toString() + "," + lon + ".json")
+            .addQueryParameter("key", key)
+            .addQueryParameter("radius", "100")
+            .addQueryParameter("language", "es-ES")
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "GPS3D-AR-David/0.10")
+            .build()
+
+        placePreviewCall = http.newCall(request)
+        placePreviewCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = Unit
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val root = JSONObject(it.body?.string().orEmpty())
+                    val addresses = root.optJSONArray("addresses") ?: return
+                    val first = addresses.optJSONObject(0) ?: return
+                    val addressObject = first.optJSONObject("address") ?: return
+                    val freeform = addressObject.optString("freeformAddress").trim()
+                    val street = addressObject.optString("streetName").trim()
+                    val municipality = addressObject.optString("municipality").trim()
+                    val title = street.ifBlank {
+                        freeform.substringBefore(",").ifBlank { "Punto seleccionado" }
+                    }
+                    val result = SearchResult(
+                        label = freeform.ifBlank { lat.toString() + "," + lon },
+                        lat = lat,
+                        lon = lon,
+                        title = title,
+                        address = listOf(freeform, municipality)
+                            .filter { value -> value.isNotBlank() }
+                            .distinct()
+                            .joinToString(", ")
+                    )
+                    ui.post {
+                        val selected = selectedMapPoint ?: return@post
+                        if (distanceMeters(selected.lat, selected.lon, lat, lon) > 2.0) return@post
+                        showPlacePreview(result, movePin = false)
+                    }
+                }
+            }
+        })
+    }
+
+    private fun loadPlaceImage(result: SearchResult) {
+        placeImageCall?.cancel()
+        val title = result.title.trim()
+        if (title.length < 4 || title.equals("Punto seleccionado", true)) return
+
+        val query = if (result.address.isBlank()) title
+            else title + " " + result.address.substringAfterLast(",").trim()
+
+        val url = HttpUrl.Builder()
+            .scheme("https")
+            .host("es.wikipedia.org")
+            .addPathSegment("w")
+            .addPathSegment("api.php")
+            .addQueryParameter("action", "query")
+            .addQueryParameter("generator", "search")
+            .addQueryParameter("gsrsearch", query)
+            .addQueryParameter("gsrlimit", "1")
+            .addQueryParameter("prop", "pageimages")
+            .addQueryParameter("piprop", "thumbnail")
+            .addQueryParameter("pithumbsize", "700")
+            .addQueryParameter("format", "json")
+            .addQueryParameter("origin", "*")
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "GPS3D-AR-David/0.10")
+            .build()
+
+        placeImageCall = http.newCall(request)
+        placeImageCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = Unit
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val root = JSONObject(it.body?.string().orEmpty())
+                    val pages = root.optJSONObject("query")?.optJSONObject("pages") ?: return
+                    val keys = pages.keys()
+                    if (!keys.hasNext()) return
+                    val page = pages.optJSONObject(keys.next()) ?: return
+                    val imageUrl = page.optJSONObject("thumbnail")
+                        ?.optString("source")
+                        ?.trim()
+                        .orEmpty()
+                    if (imageUrl.isBlank()) return
+                    loadPreviewBitmap(imageUrl, result.lat, result.lon)
+                }
+            }
+        })
+    }
+
+    private fun loadPreviewBitmap(url: String, lat: Double, lon: Double) {
+        val request = Request.Builder().url(url).build()
+        placeImageCall = http.newCall(request)
+        placeImageCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = Unit
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val bytes = it.body?.bytes() ?: return
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
+                    ui.post {
+                        val selected = selectedMapPoint ?: return@post
+                        if (distanceMeters(selected.lat, selected.lon, lat, lon) > 2.0) return@post
+                        placePreviewImage.setImageBitmap(bitmap)
+                        placePreviewImage.visibility = View.VISIBLE
+                    }
+                }
+            }
+        })
+    }
+
+    private fun requestRoute(
+        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, isReroute: Boolean = false
+    ) {
+        val generation = ++routeGeneration
+        val requestedAvoid = avoidTolls
+        rerouting = true
+        instruction.text = if (requestedAvoid) "Calculando ruta sin casetas…" else if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
+        turnIcon.text = "…"
+        hideSearchSuggestions(); hidePlacePreview(); hideKeyboard()
+        routeCall?.cancel()
+
+        fun fail(message: String) {
+            ui.post {
+                if (isDestroyed || generation != routeGeneration) return@post
+                rerouting = false
+                if (routeActive) {
+                    avoidTolls = routeAlternatives.getOrNull(activeRouteIndex)?.avoidsTolls ?: false
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
+                }
+                updateTollPanel()
+                instruction.text = message
                 turnIcon.text = "!"
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             }
