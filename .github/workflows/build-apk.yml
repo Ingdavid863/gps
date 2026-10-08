@@ -45,6 +45,11 @@ jobs:
         run: |
           node --test tests/*.test.cjs
           gradle testDebugUnitTest assembleDebug --stacktrace
+      - name: Verify map rendering and camera modes
+        run: |
+          npm install --prefix "$RUNNER_TEMP/gps3d-qa" playwright@1.51.1
+          "$RUNNER_TEMP/gps3d-qa/node_modules/.bin/playwright" install --with-deps chromium
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: GPS3D-AR-David-0.13.0-beta-destinations

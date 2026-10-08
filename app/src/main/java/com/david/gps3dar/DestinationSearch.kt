@@ -42,7 +42,7 @@ class DestinationSearch(private val client: OkHttpClient) {
                 .addPathSegment("search").addPathSegment("2").addPathSegment(endpoint)
                 .addPathSegment(query + ".json").addQueryParameter("key", key)
                 .addQueryParameter("limit", "8").addQueryParameter("countrySet", "MX")
-                .addQueryParameter("language", "es-MX")
+                .addQueryParameter("language", "es-ES")
             if (endpoint == "search") {
                 url.addQueryParameter("typeahead", (!explicit).toString()).addQueryParameter("maxFuzzyLevel", "4")
                 here?.let { url.addQueryParameter("lat", it.lat.toString()).addQueryParameter("lon", it.lon.toString()) }
