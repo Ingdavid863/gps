@@ -45,6 +45,7 @@ class ArNavigationActivity : AppCompatActivity() {
         private const val PREFS = "gps3d_navigation"
         private const val PREF_VOICE = "voice_enabled"
         private const val PREF_TRAFFIC = "traffic_enabled"
+        private const val VR_MAX_SPEED_KMH = 20
     }
 
     private lateinit var sceneHost: ComposeView
@@ -53,6 +54,7 @@ class ArNavigationActivity : AppCompatActivity() {
     private var sceneStarted = false
     private var lastPoseLogAt = 0L
     private var locationUpdatesStarted = false
+    private var leavingVrForSpeed = false
 
     private var speedKmh by mutableIntStateOf(0)
     private var arStatus by mutableStateOf("Preparando ARCore…")
@@ -69,6 +71,16 @@ class ArNavigationActivity : AppCompatActivity() {
                 (location.speed * 3.6f).toInt().coerceIn(0, 260)
             } else {
                 0
+            }
+
+            if (speedKmh > VR_MAX_SPEED_KMH && !leavingVrForSpeed) {
+                leavingVrForSpeed = true
+                Toast.makeText(
+                    this@ArNavigationActivity,
+                    "VR desactivado: a más de 20 km/h se usa navegación 2D.",
+                    Toast.LENGTH_LONG
+                ).show()
+                finish()
             }
         }
     }
@@ -254,9 +266,9 @@ class ArNavigationActivity : AppCompatActivity() {
         if (locationUpdatesStarted || !hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return
         locationUpdatesStarted = true
 
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
-            .setMinUpdateIntervalMillis(500L)
-            .setMaxUpdateDelayMillis(1500L)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 400L)
+            .setMinUpdateIntervalMillis(150L)
+            .setMaxUpdateDelayMillis(500L)
             .setWaitForAccurateLocation(false)
             .build()
 
@@ -270,11 +282,7 @@ class ArNavigationActivity : AppCompatActivity() {
     }
 
     private fun openMap() {
-        startActivity(
-            Intent(this, RealisticMapActivity::class.java)
-                .putExtra("voice_enabled", voiceEnabled)
-                .putExtra("traffic_enabled", trafficEnabled)
-        )
+        finish()
     }
 
     private fun toggleVoice() {
@@ -338,6 +346,7 @@ class ArNavigationActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        leavingVrForSpeed = false
         if (hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) startLocationUpdates()
     }
 
