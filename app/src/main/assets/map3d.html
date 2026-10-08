@@ -12,7 +12,7 @@
         .vehicle-wrap { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,.48)); }
         .vehicle-arrow {
             width: 31px; height: 35px;
-            background: #1677ff;
+            background: #19b45b;
             clip-path: polygon(50% 0%, 89% 100%, 50% 78%, 11% 100%);
             border-radius: 3px;
         }
@@ -59,6 +59,7 @@
 <script src="traffic-config.js"></script>
 <script src="vendor/maplibre-gl.js"></script>
 <script src="navigation-motion.js"></script>
+<script src="navigation-view.js"></script>
 <script>
 (() => {
     const loading = document.getElementById('loading');
@@ -84,6 +85,28 @@
     let routeProgressStartIndex = 0;
     let routeTrafficIntervals = [];
     let routeTrafficGeneration = 0;
+    let viewMode = 0;
+    let viewportTop = 0.25, viewportBottom = 0.16;
+    let remainingRoutePoints = [];
+    let selectedPoint = null;
+
+    function currentPadding(overview = false) {
+        return NavigationView.padding(map.getContainer().clientWidth, map.getContainer().clientHeight,
+            viewportTop, viewportBottom, overview);
+    }
+    function showOverview() {
+        if (!ready) return;
+        cameraMotion = null;
+        const points = NavigationView.overviewPoints(activeRoutePoints, lastLocation, selectedPoint);
+        const options = { padding: currentPadding(true), pitch: 0, bearing: 0, duration: 350, essential: true };
+        if (points.length < 2) {
+            map.easeTo({ ...options, center: lastLocation, zoom: 14 });
+        } else {
+            const bounds = new maplibregl.LngLatBounds(points[0], points[0]);
+            points.forEach(p => bounds.extend(p));
+            map.fitBounds(bounds, { ...options, maxZoom: 17 });
+        }
+    }
 
     function fail(message) {
         loading.textContent = message;
@@ -202,13 +225,13 @@
             vehicleMarker.setLngLat(displayedVehicle);
             if (vehicleMarker.setRotation) vehicleMarker.setRotation(displayedBearing);
         }
-        if (ready && cameraMotion) {
+        if (ready && cameraMotion && viewMode !== 2) {
             const t = Math.min(1, (now - cameraMotion.at) / cameraMotion.duration);
             displayedCamera = NavigationMotion.mix(cameraMotion.from, cameraMotion.to, t);
             const delta = motionStarted === null ? [0, 0] : displayedVehicle.map((v, i) => v - targetVehicle[i]);
             map.jumpTo({center: displayedCamera.slice(0, 2).map((v, i) => v + delta[i]),
                 bearing: NavigationMotion.bearingMix(cameraMotion.from[2], cameraMotion.to[2], t),
-                zoom: displayedCamera[3], pitch: displayedCamera[4]});
+                zoom: displayedCamera[3], pitch: displayedCamera[4], padding: currentPadding()});
         }
         requestAnimationFrame(animateVehicleMarker);
     }
@@ -304,7 +327,7 @@
         setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
         setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         applySky(visuals.is3D);
-        map.easeTo({ pitch: visuals.is3D ? 62 : 0, duration: 180, essential: true });
+        if (viewMode !== 2) map.easeTo({ pitch: visuals.is3D ? 55 : 0, duration: 180, essential: true });
     }
 
     function distanceMeters(a, b) {
@@ -497,7 +520,7 @@
         safeAddSource('gps-route-alt-2', { type: 'geojson', data: EMPTY });
         safeAddSource('gps-route-active', { type: 'geojson', data: EMPTY });
         safeAddSource(ROUTE_TRAFFIC_SOURCE_ID, { type: 'geojson', data: EMPTY });
-        safeAddSource('gps-signals', { type: 'geojson', data: EMPTY });
+        safeAddSource('gps-tolls', { type: 'geojson', data: EMPTY });
 
         safeAddLayer({
             id: 'gps-route-alt-1-layer', type: 'line', source: 'gps-route-alt-1',
@@ -565,7 +588,7 @@
         });
 
         safeAddLayer({
-            id: 'gps-signals-layer', type: 'circle', source: 'gps-signals',
+            id: 'gps-tolls-layer', type: 'circle', source: 'gps-tolls',
             paint: {
                 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 3.5, 18, 7],
                 'circle-color': '#f5b400', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.7
@@ -639,6 +662,7 @@
         setRoutes(active, alt1, alt2) {
             if (!ready) return;
             activeRoutePoints = Array.isArray(active) ? active : [];
+            remainingRoutePoints = activeRoutePoints;
             routeProgressStartIndex = 0;
             const a = map.getSource('gps-route-active');
             const b = map.getSource('gps-route-alt-1');
@@ -648,6 +672,7 @@
             if (c) c.setData(lineData(alt2));
             setDestinationMarker(activeRoutePoints.length ? activeRoutePoints[activeRoutePoints.length - 1] : null);
             refreshRouteTraffic();
+            if (viewMode === 2) showOverview();
         },
         setRouteProgress(lon, lat, fromIndex) {
             if (!ready || activeRoutePoints.length < 2) return;
@@ -656,23 +681,48 @@
             const index = Math.max(0, Math.min(activeRoutePoints.length - 2, Number(fromIndex) || 0));
             routeProgressStartIndex = index;
             const remaining = [[Number(lon), Number(lat)], ...activeRoutePoints.slice(index + 1)];
-            source.setData(lineData(remaining));
+            remainingRoutePoints = remaining;
+            source.setData(lineData(viewMode === 2 ? activeRoutePoints : remaining));
             renderRouteTraffic();
         },
-        setSignals(points) {
+        setTolls(points) {
             if (!ready) return;
-            const s = map.getSource('gps-signals');
+            const s = map.getSource('gps-tolls');
             if (s) s.setData(pointData(points));
         },
         setSelectionPin(lon, lat) {
             if (!ready) return;
+            selectedPoint = [Number(lon), Number(lat)];
             setSelectionMarker([Number(lon), Number(lat)]);
         },
         clearSelectionPin() {
+            selectedPoint = null;
             setSelectionMarker(null);
         },
+        setViewport(top, bottom) {
+            viewportTop = Math.max(0, Number(top) || 0);
+            viewportBottom = Math.max(0, Number(bottom) || 0);
+            const attribution = document.querySelectorAll('.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right');
+            attribution.forEach(el => { el.style.bottom = (viewportBottom * map.getContainer().clientHeight + 6) + 'px'; });
+            if (viewMode === 2) showOverview();
+        },
+        setViewMode(mode) {
+            const next = Math.max(0, Math.min(2, Number(mode) || 0));
+            if (viewMode === next) return;
+            viewMode = next;
+            cameraMotion = null;
+            const source = map.getSource('gps-route-active');
+            if (source) source.setData(lineData(viewMode === 2 ? activeRoutePoints : remainingRoutePoints));
+            if (viewMode === 2) showOverview();
+        },
+        showOverview,
+        previewPoint(lon, lat) {
+            cameraMotion = null;
+            map.easeTo({center: [Number(lon), Number(lat)], zoom: 16.5, pitch: 0, bearing: 0,
+                padding: currentPadding(true), duration: 300, essential: true});
+        },
         follow(lon, lat, bearing, zoom, pitch, duration) {
-            if (!ready) return;
+            if (!ready || viewMode === 2) return;
             const center = map.getCenter();
             const from = [center.lng, center.lat, map.getBearing(), map.getZoom(), map.getPitch()];
             cameraMotion = {from, to: [Number(lon), Number(lat), Number(bearing) || 0,

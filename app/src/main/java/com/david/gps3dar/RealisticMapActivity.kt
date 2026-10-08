@@ -29,6 +29,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.ImageView
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -81,9 +82,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var routeDistance: TextView
     private lateinit var arrivalText: TextView
     private lateinit var stopButton: TextView
-    private lateinit var signalDistance: TextView
-    private lateinit var signalPhase: TextView
-    private lateinit var signalTime: TextView
+    private lateinit var tollCount: TextView
+    private lateinit var tollTotal: TextView
+    private lateinit var avoidTollsButton: TextView
+    private lateinit var viewModeButton: ImageButton
     private lateinit var modeButton: TextView
     private lateinit var zoomInButton: TextView
     private lateinit var zoomOutButton: TextView
@@ -104,6 +106,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val http = OkHttpClient()
     private val ui = Handler(Looper.getMainLooper())
+    private val destinationSearch = DestinationSearch(http)
+    private lateinit var tollRepository: TollRepository
+    private var tollQuote: TollRepository.Quote? = null
+    private var tollLookupPending = false
+    private var avoidTolls = false
+    private var viewMode = 0
+    private var externalLinkCall: Call? = null
+    private var routeGeneration = 0
 
     private var mapReady = false
     private var rawLocation: Location? = null
@@ -142,8 +152,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var placeImageCall: Call? = null
     private var selectedMapPoint: SearchResult? = null
 
-    private var trafficSignals: List<SignalPoint> = emptyList()
-    private var lastSignalQuery: Location? = null
 
     private var is3D = false
     private var terrainEnabled = false
@@ -160,7 +168,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val ticker = object : Runnable {
         override fun run() {
-            updateSignalPanel()
+            updateTollPanel()
             ui.postDelayed(this, 1000L)
         }
     }
@@ -189,12 +197,19 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
 
         bindViews()
+        tollRepository = TollRepository(http, assets.open("capufe-tarifas-2026.json").bufferedReader().use { it.readText() })
+        avoidTolls = getPreferences(MODE_PRIVATE).getBoolean("avoidTolls", false)
         setupWebMap()
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
         setupBackNavigation()
         refreshSettingsLabels()
+        updateTollPanel()
+        val viewportChanged = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncViewport() }
+        findViewById<View>(R.id.bottomPanel).addOnLayoutChangeListener(viewportChanged)
+        findViewById<View>(R.id.turnBanner).addOnLayoutChangeListener(viewportChanged)
+        webMapView.addOnLayoutChangeListener(viewportChanged)
         handleNavigationIntent(intent)
         requestLocationPermission()
         ui.post(ticker)
@@ -215,9 +230,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         routeDistance = findViewById(R.id.routeDistance)
         arrivalText = findViewById(R.id.arrivalText)
         stopButton = findViewById(R.id.stopButton)
-        signalDistance = findViewById(R.id.signalDistance)
-        signalPhase = findViewById(R.id.signalPhase)
-        signalTime = findViewById(R.id.signalTime)
+        tollCount = findViewById(R.id.tollCount)
+        tollTotal = findViewById(R.id.tollTotal)
+        avoidTollsButton = findViewById(R.id.avoidTollsButton)
+        viewModeButton = findViewById(R.id.viewModeButton)
         modeButton = findViewById(R.id.modeButton)
         zoomInButton = findViewById(R.id.zoomInButton)
         zoomOutButton = findViewById(R.id.zoomOutButton)
@@ -300,6 +316,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val query = s?.toString()?.trim().orEmpty()
                 searchDebounce?.let { ui.removeCallbacks(it) }
                 searchCall?.cancel()
+                destinationSearch.cancel()
 
                 if (query.length < 3) {
                     searchResults = emptyList()
@@ -359,7 +376,20 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupButtons() {
-        findViewById<TextView>(R.id.recenterButton).setOnClickListener { recenter(true) }
+        findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(0); recenter(true) }
+        viewModeButton.setOnClickListener { setViewMode((viewMode + 1) % 3) }
+        avoidTollsButton.setOnClickListener {
+            avoidTolls = !avoidTolls
+            getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
+            updateTollPanel()
+            val current = displayLocation ?: rawLocation
+            val destination = routeDestination
+            if (current != null && destination != null) {
+                requestRoute(current.latitude, current.longitude, destination.lat, destination.lon)
+            }
+        }
+        tollCount.setOnClickListener { showTollDetails() }
+        tollTotal.setOnClickListener { showTollDetails() }
         zoomInButton.setOnClickListener { changeZoomPreset(+1) }
         zoomOutButton.setOnClickListener { changeZoomPreset(-1) }
         modeButton.setOnClickListener { openVrMode() }
@@ -467,13 +497,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun syncMapAll() {
         syncVisualSettings()
         syncRoutes()
-        syncSignals()
+        syncTolls()
         displayLocation?.let { updateLocationMarker(it) }
-        recenter(false)
+        syncViewport()
+        selectedMapPoint?.let { jsCall("setSelectionPin(${num(it.lon)},${num(it.lat)})") }
+        if (viewMode == 2) jsCall("showOverview()") else recenter(false)
+        maybeStartPendingExternalNavigation()
     }
 
     private fun syncVisualSettings() {
         jsCall("setVisuals($is3D,$terrainEnabled,$buildingsEnabled,$satelliteEnabled)")
+        jsCall("setViewMode($viewMode)")
     }
 
     private fun jsCall(call: String) {
@@ -557,7 +591,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         updateCamera(shown)
         updateDrivingUi(location, shown)
         updateNavigationStep(shown)
-        maybeQuerySignals(location)
+        updateTollPanel()
         maybeStartPendingExternalNavigation()
     }
 
@@ -638,11 +672,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastCameraBearing = smoothBearing(lastCameraBearing, raw.bearing.toDouble(), if (moving > 8f) 0.38 else 0.24)
         }
 
-        if (SystemClock.elapsedRealtime() < manualCameraUntilMs) return
+        if (viewMode == 2 || SystemClock.elapsedRealtime() < manualCameraUntilMs) return
 
-        val target = lookAheadTarget(location, lastCameraBearing, moving)
+        val target = GeoPoint(location.latitude, location.longitude)
         val zoom = desiredZoom(moving)
-        val pitch = 0.0
+        val pitch = if (viewMode == 1) 55.0 else 0.0
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},110)"
         )
@@ -672,58 +706,89 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val here = displayLocation ?: rawLocation ?: return
         manualCameraUntilMs = 0L
         val moving = rawLocation?.speed ?: 0f
-        val target = lookAheadTarget(here, lastCameraBearing, moving)
+        if (viewMode == 2) { jsCall("showOverview()"); return }
+        val target = GeoPoint(here.latitude, here.longitude)
+        val pitch = if (viewMode == 1) 55 else 0
         jsCall(
-            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},0,${if (animated) 180 else 1})"
+            "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},$pitch,${if (animated) 180 else 1})"
         )
     }
 
     private fun handleNavigationIntent(sourceIntent: Intent?) {
-        val data = sourceIntent?.data ?: return
-        val scheme = data.scheme?.lowercase(Locale.US) ?: return
-        if (scheme != "geo" && scheme != "google.navigation") return
+        val text = runCatching {
+            sourceIntent?.data?.toString() ?: sourceIntent?.getStringExtra(Intent.EXTRA_TEXT)
+        }.getOrNull() ?: return
+        receiveDestinationText(text)
+    }
 
-        val query = data.getQueryParameter("q")?.trim().orEmpty()
-        val parsed = parseExternalCoordinate(query)
-            ?: if (scheme == "geo") parseExternalCoordinate(data.schemeSpecificPart.substringBefore('?')) else null
-
-        if (parsed != null) {
-            pendingExternalDestination = parsed
-            pendingExternalQuery = null
-            searchInput.setText("Destino recibido")
-            instruction.text = "Destino recibido · esperando GPS…"
-        } else if (query.isNotBlank()) {
-            pendingExternalQuery = Uri.decode(query).substringBefore('(').trim()
-            pendingExternalDestination = null
-            searchInput.setText(pendingExternalQuery)
-            instruction.text = "Destino recibido · preparando ruta…"
+    private fun receiveDestinationText(text: String) {
+        val received = SharedDestination.parse(text) ?: run {
+            Toast.makeText(this, "Esta ubicación no incluye un destino válido", Toast.LENGTH_LONG).show()
+            return
         }
-
+        externalLinkCall?.cancel()
+        destinationSearch.cancel()
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        if (received.shortUrl != null) {
+            expandMapLink(received.shortUrl)
+            return
+        }
+        pendingExternalDestination = received.point?.let { GeoPoint(it.lat, it.lon) }
+        pendingExternalQuery = received.query
+        suppressSearchWatcher = true
+        searchInput.setText(received.query ?: "Destino recibido")
+        suppressSearchWatcher = false
+        hideKeyboard()
+        hideSearchSuggestions()
+        settingsPanel.visibility = View.GONE
+        instruction.text = "Destino recibido · preparando mapa y GPS…"
+        received.point?.let {
+            selectedMapPoint = SearchResult("Destino recibido", it.lat, it.lon)
+            jsCall("setSelectionPin(${num(it.lon)},${num(it.lat)})")
+        }
         maybeStartPendingExternalNavigation()
     }
 
-    private fun parseExternalCoordinate(value: String?): GeoPoint? {
-        if (value.isNullOrBlank()) return null
-        val clean = value.substringBefore('(').trim()
-        val parts = clean.split(',')
-        if (parts.size < 2) return null
-        val lat = parts[0].trim().toDoubleOrNull() ?: return null
-        val lon = parts[1].trim().toDoubleOrNull() ?: return null
-        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
-        return GeoPoint(lat, lon)
+    private fun expandMapLink(url: String, redirects: Int = 0) {
+        if (redirects > 5) {
+            Toast.makeText(this, "No se pudo resolver el enlace de ubicación", Toast.LENGTH_LONG).show()
+            return
+        }
+        instruction.text = "Abriendo ubicación compartida…"
+        val request = Request.Builder().url(url).header("User-Agent", "GPS3D-AR-David/0.13").build()
+        val client = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        val linkCall = client.newCall(request)
+        externalLinkCall = linkCall
+        linkCall.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                ui.post { if (externalLinkCall === call && !isDestroyed) instruction.text = "No se pudo abrir la ubicación compartida" }
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val next = response.use { it.header("Location")?.let { path -> it.request.url.resolve(path) } }
+                ui.post {
+                    if (externalLinkCall !== call || isDestroyed) return@post
+                    val parsed = next?.let { SharedDestination.parse(it.toString()) }
+                    when {
+                        next == null || !next.isHttps || !SharedDestination.isMapHost(next.host) ->
+                            instruction.text = "El enlace no contiene una ubicación legible"
+                        parsed?.point != null || parsed?.query != null -> receiveDestinationText(next.toString())
+                        else -> expandMapLink(next.toString(), redirects + 1)
+                    }
+                }
+            }
+        })
     }
 
     private fun maybeStartPendingExternalNavigation() {
-        val current = displayLocation ?: rawLocation ?: return
+        if (!mapReady) return
+        val current = displayLocation ?: return
         pendingExternalDestination?.let { destination ->
             pendingExternalDestination = null
             requestRoute(current.latitude, current.longitude, destination.lat, destination.lon)
             return
         }
-
         pendingExternalQuery?.let { query ->
             pendingExternalQuery = null
-            searchInput.setText(query)
             fetchSearchSuggestions(query, navigateFirst = true)
         }
     }
@@ -746,199 +811,28 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }.getOrDefault("")
 
     private fun fetchSearchSuggestions(query: String, navigateFirst: Boolean) {
-        if (navigateFirst) instruction.text = "Buscando $query…"
-        searchCall?.cancel()
-
-        val key = tomTomApiKey()
-        if (key.isBlank()) {
-            fetchNominatimSearch(query, navigateFirst, emptyList())
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        SharedDestination.coordinates(query)?.let { point ->
+            showPlacePreview(SearchResult(query, point.lat, point.lon), movePin = true)
             return
         }
-
-        val builder = HttpUrl.Builder()
-            .scheme("https")
-            .host("api.tomtom.com")
-            .addPathSegment("search")
-            .addPathSegment("2")
-            .addPathSegment("search")
-            .addPathSegment(query + ".json")
-            .addQueryParameter("key", key)
-            .addQueryParameter("limit", "10")
-            .addQueryParameter("countrySet", "MX")
-            .addQueryParameter("language", "es-MX")
-            .addQueryParameter("maxFuzzyLevel", "4")
-            .addQueryParameter("typeahead", (!navigateFirst).toString())
-
-        rawLocation?.let { here ->
-            builder.addQueryParameter(
-                "geobias",
-                "point:" + here.latitude + "," + here.longitude
-            )
+        if (navigateFirst && (query.startsWith("http") || query.startsWith("geo:") || query.startsWith("google.navigation:"))) {
+            receiveDestinationText(query)
+            return
         }
-
-        val request = Request.Builder()
-            .url(builder.build())
-            .header("User-Agent", "GPS3D-AR-David/0.10")
-            .build()
-
-        searchCall = http.newCall(request)
-        searchCall?.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (call.isCanceled()) return
-                fetchNominatimSearch(query, navigateFirst, emptyList())
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!it.isSuccessful) {
-                        fetchNominatimSearch(query, navigateFirst, emptyList())
-                        return
-                    }
-
-                    val root = JSONObject(it.body?.string().orEmpty())
-                    val array = root.optJSONArray("results") ?: JSONArray()
-                    val parsed = ArrayList<SearchResult>()
-
-                    for (i in 0 until min(10, array.length())) {
-                        val item = array.optJSONObject(i) ?: continue
-                        val position = item.optJSONObject("position") ?: continue
-                        val lat = position.optDouble("lat", Double.NaN)
-                        val lon = position.optDouble("lon", Double.NaN)
-                        if (!lat.isFinite() || !lon.isFinite()) continue
-
-                        val poiName = item.optJSONObject("poi")
-                            ?.optString("name")
-                            ?.trim()
-                            .orEmpty()
-                        val addressObject = item.optJSONObject("address")
-                        val address = addressObject
-                            ?.optString("freeformAddress")
-                            ?.trim()
-                            .orEmpty()
-                        val municipality = addressObject
-                            ?.optString("municipality")
-                            ?.trim()
-                            .orEmpty()
-
-                        val title = when {
-                            poiName.isNotBlank() -> poiName
-                            address.isNotBlank() -> address.substringBefore(",")
-                            else -> "Destino"
-                        }
-                        val detail = listOf(address, municipality)
-                            .filter { value -> value.isNotBlank() }
-                            .distinct()
-                            .joinToString(", ")
-                        val label = listOf(title, detail)
-                            .filter { value -> value.isNotBlank() }
-                            .distinct()
-                            .joinToString(", ")
-
-                        parsed.add(
-                            SearchResult(
-                                label = label,
-                                lat = lat,
-                                lon = lon,
-                                title = title,
-                                address = detail
-                            )
-                        )
-                    }
-
-                    if (parsed.size >= 6) {
-                        deliverSearchResults(query, navigateFirst, parsed)
-                    } else {
-                        fetchNominatimSearch(query, navigateFirst, parsed)
-                    }
+        if (navigateFirst) instruction.text = "Buscando $query…"
+        val here = rawLocation?.let { SharedDestination.Point(it.latitude, it.longitude) }
+        destinationSearch.search(query, tomTomApiKey(), here, navigateFirst) { found, error ->
+            ui.post {
+                if (isDestroyed || searchInput.text.toString().trim() != query) return@post
+                if (found.isEmpty()) {
+                    hideSearchSuggestions()
+                    if (navigateFirst) instruction.text = error ?: "No encontré esa dirección. Incluye municipio o código postal."
+                } else {
+                    deliverSearchResults(query, navigateFirst, found.map { SearchResult(it.label, it.lat, it.lon, it.title, it.address) })
                 }
             }
-        })
-    }
-
-    private fun fetchNominatimSearch(
-        query: String,
-        navigateFirst: Boolean,
-        seed: List<SearchResult>
-    ) {
-        val builder = HttpUrl.Builder()
-            .scheme("https")
-            .host("nominatim.openstreetmap.org")
-            .addPathSegment("search")
-            .addQueryParameter("format", "jsonv2")
-            .addQueryParameter("limit", "10")
-            .addQueryParameter("countrycodes", "mx")
-            .addQueryParameter("addressdetails", "1")
-            .addQueryParameter("namedetails", "1")
-            .addQueryParameter("dedupe", "1")
-            .addQueryParameter("accept-language", "es")
-            .addQueryParameter("q", query)
-
-        rawLocation?.let { here ->
-            val left = here.longitude - 2.5
-            val right = here.longitude + 2.5
-            val top = here.latitude + 2.0
-            val bottom = here.latitude - 2.0
-            builder.addQueryParameter(
-                "viewbox",
-                left.toString() + "," + top + "," + right + "," + bottom
-            )
         }
-
-        val request = Request.Builder()
-            .url(builder.build())
-            .header("User-Agent", "GPS3D-AR-David/0.10")
-            .build()
-
-        searchCall = http.newCall(request)
-        searchCall?.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (call.isCanceled()) return
-                deliverSearchResults(query, navigateFirst, seed)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!it.isSuccessful) {
-                        deliverSearchResults(query, navigateFirst, seed)
-                        return
-                    }
-
-                    val array = JSONArray(it.body?.string().orEmpty())
-                    val combined = ArrayList<SearchResult>()
-                    combined.addAll(seed)
-
-                    for (i in 0 until min(10, array.length())) {
-                        val item = array.optJSONObject(i) ?: continue
-                        val lat = item.optString("lat").toDoubleOrNull() ?: continue
-                        val lon = item.optString("lon").toDoubleOrNull() ?: continue
-                        val display = item.optString("display_name", "Destino").trim()
-                        val namedetails = item.optJSONObject("namedetails")
-                        val title = namedetails?.optString("name")?.takeIf { it.isNotBlank() }
-                            ?: display.substringBefore(",")
-                        val address = display.substringAfter(",", "").trim()
-
-                        val duplicate = combined.any { existing ->
-                            distanceMeters(existing.lat, existing.lon, lat, lon) < 35.0 ||
-                                existing.label.equals(display, ignoreCase = true)
-                        }
-                        if (!duplicate) {
-                            combined.add(
-                                SearchResult(
-                                    label = display,
-                                    lat = lat,
-                                    lon = lon,
-                                    title = title,
-                                    address = address
-                                )
-                            )
-                        }
-                        if (combined.size >= 12) break
-                    }
-
-                    deliverSearchResults(query, navigateFirst, combined)
-                }
-            }
-        })
     }
 
     private fun deliverSearchResults(
@@ -947,17 +841,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         results: List<SearchResult>
     ) {
         ui.post {
-            if (!navigateFirst && searchInput.text.toString().trim() != query) return@post
+            if (isDestroyed || searchInput.text.toString().trim() != query) return@post
             searchResults = results
-            if (navigateFirst) {
-                val first = results.firstOrNull()
-                if (first == null) {
-                    instruction.text = "Destino no encontrado"
-                } else {
-                    hideSearchSuggestions()
-                    showPlacePreview(first, movePin = true)
-                }
+            if (navigateFirst && results.size == 1) {
+                hideSearchSuggestions()
+                showPlacePreview(results.first(), movePin = true)
             } else {
+                if (navigateFirst) instruction.text = "Selecciona la dirección correcta"
                 showSearchSuggestions(results)
             }
         }
@@ -999,10 +889,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
         searchSuggestions.visibility = View.VISIBLE
+        findViewById<View>(R.id.searchSuggestionsContainer).apply {
+            layoutParams.height = dp(min(240, results.size * 51 + 8))
+            visibility = View.VISIBLE
+        }
     }
 
     private fun hideSearchSuggestions() {
         searchSuggestions.visibility = View.GONE
+        findViewById<View>(R.id.searchSuggestionsContainer).visibility = View.GONE
     }
 
     private fun previewMapPoint(lat: Double, lon: Double) {
@@ -1032,6 +927,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             jsCall(
                 "setSelectionPin(" + num(result.lon) + "," + num(result.lat) + ")"
             )
+        }
+        if (movePin) {
+            manualCameraUntilMs = SystemClock.elapsedRealtime() + followResumeDelayMs
+            jsCall("previewPoint(${num(result.lon)},${num(result.lat)})")
         }
         loadPlaceImage(result)
     }
@@ -1274,143 +1173,90 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun requestRoute(
-        fromLat: Double,
-        fromLon: Double,
-        toLat: Double,
-        toLon: Double,
-        isReroute: Boolean = false
+        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, isReroute: Boolean = false
     ) {
-        if (!isReroute) routeDestination = GeoPoint(toLat, toLon)
-        rerouting = isReroute
-        instruction.text = if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
+        val generation = ++routeGeneration
+        val requestedAvoid = avoidTolls
+        rerouting = true
+        instruction.text = if (requestedAvoid) "Calculando ruta sin casetas…" else if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
         turnIcon.text = "…"
-        hideSearchSuggestions()
-        hidePlacePreview()
-        hideKeyboard()
+        hideSearchSuggestions(); hidePlacePreview(); hideKeyboard()
+        routeCall?.cancel()
+
+        fun fail(message: String) {
+            ui.post {
+                if (isDestroyed || generation != routeGeneration) return@post
+                rerouting = false
+                if (routeActive) {
+                    avoidTolls = routeAlternatives.getOrNull(activeRouteIndex)?.avoidsTolls ?: false
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
+                }
+                updateTollPanel()
+                instruction.text = message
+                turnIcon.text = "!"
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
+        }
 
         val key = tomTomApiKey()
-        if (key.isBlank()) {
-            rerouting = false
-            instruction.text = "Falta TOMTOM_API_KEY para calcular tráfico"
-            turnIcon.text = "!"
-            return
-        }
-
-        routeCall?.cancel()
-        val locations = fromLat.toString() + "," + fromLon + ":" + toLat + "," + toLon
-        val builder = HttpUrl.Builder()
-            .scheme("https")
-            .host("api.tomtom.com")
-            .addPathSegment("routing")
-            .addPathSegment("1")
-            .addPathSegment("calculateRoute")
-            .addPathSegment(locations)
-            .addPathSegment("json")
-            .addQueryParameter("key", key)
-            .addQueryParameter("traffic", "true")
-            .addQueryParameter("routeType", "fastest")
-            .addQueryParameter("travelMode", "car")
-            .addQueryParameter("routeRepresentation", "polyline")
-            .addQueryParameter("instructionsType", "text")
-            .addQueryParameter("language", "es-MX")
-            .addQueryParameter("computeTravelTimeFor", "all")
-            .addQueryParameter("sectionType", "traffic")
+        if (key.isBlank()) { fail("El servicio de rutas no está configurado"); return }
+        val builder = HttpUrl.Builder().scheme("https").host("api.tomtom.com")
+            .addPathSegment("routing").addPathSegment("1").addPathSegment("calculateRoute")
+            .addPathSegment("$fromLat,$fromLon:$toLat,$toLon").addPathSegment("json")
+            .addQueryParameter("key", key).addQueryParameter("traffic", "true")
+            .addQueryParameter("routeType", "fastest").addQueryParameter("travelMode", "car")
+            .addQueryParameter("routeRepresentation", "polyline").addQueryParameter("instructionsType", "text")
+            .addQueryParameter("language", "es-MX").addQueryParameter("computeTravelTimeFor", "all")
+            .addQueryParameter("sectionType", "traffic").addQueryParameter("sectionType", "toll")
+            .addQueryParameter("sectionType", "tollVignette")
             .addQueryParameter("maxAlternatives", if (isReroute) "0" else "2")
-
-        rawLocation?.takeIf { loc -> loc.hasBearing() }?.let { loc ->
-            builder.addQueryParameter(
-                "vehicleHeading",
-                (((loc.bearing % 360f) + 360f) % 360f).toInt().toString()
-            )
+        if (requestedAvoid) builder.addQueryParameter("avoid", "tollRoad")
+        rawLocation?.takeIf { it.hasBearing() && it.speed > 1.0f }?.let {
+            builder.addQueryParameter("vehicleHeading", (((it.bearing % 360f) + 360f) % 360f).toInt().toString())
         }
-
-        val request = Request.Builder()
-            .url(builder.build())
-            .header("User-Agent", "GPS3D-AR-David/0.11")
-            .build()
-
+        val request = Request.Builder().url(builder.build()).header("User-Agent", "GPS3D-AR-David/0.13").build()
         routeCall = http.newCall(request)
         routeCall?.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (call.isCanceled()) return
-                ui.post {
-                    rerouting = false
-                    instruction.text = if (isReroute) {
-                        "No se pudo recalcular la ruta"
-                    } else {
-                        "No se pudo calcular la ruta con tráfico"
-                    }
-                    turnIcon.text = "!"
-                }
+                if (!call.isCanceled()) fail("No se pudo consultar la ruta. Revisa la conexión.")
             }
-
             override fun onResponse(call: Call, response: Response) {
-                response.use { httpResponse ->
-                    if (!httpResponse.isSuccessful) {
-                        ui.post {
-                            rerouting = false
-                            instruction.text = "Error de ruta TomTom: " + httpResponse.code
-                            turnIcon.text = "!"
+                val parsed = response.use { r ->
+                    if (!r.isSuccessful) null else runCatching {
+                        val routes = JSONObject(r.body?.string().orEmpty()).getJSONArray("routes")
+                        (0 until min(3, routes.length())).mapNotNull { index ->
+                            val route = routes.optJSONObject(index) ?: return@mapNotNull null
+                            val points = parseTomTomRoutePoints(route)
+                            if (points.size < 2) return@mapNotNull null
+                            val summary = route.optJSONObject("summary") ?: return@mapNotNull null
+                            val duration = summary.optDouble("travelTimeInSeconds", 0.0)
+                            val live = summary.optDouble("liveTrafficIncidentsTravelTimeInSeconds", duration)
+                            val sections = route.optJSONArray("sections") ?: JSONArray()
+                            val hasTolls = (0 until sections.length()).any {
+                                sections.optJSONObject(it)?.optString("sectionType") in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")
+                            }
+                            RouteOption(points, parseTomTomSteps(route, points),
+                                if (live > 0.0) live else duration, summary.optDouble("lengthInMeters", 0.0),
+                                summary.optDouble("trafficDelayInSeconds", 0.0),
+                                summary.optDouble("noTrafficTravelTimeInSeconds", duration), hasTolls, requestedAvoid)
                         }
-                        return
-                    }
-
-                    val root = JSONObject(httpResponse.body?.string().orEmpty())
-                    val routes = root.optJSONArray("routes")
-                    if (routes == null || routes.length() == 0) {
-                        ui.post {
-                            rerouting = false
-                            instruction.text = "No se encontró una ruta disponible"
-                            turnIcon.text = "!"
-                        }
-                        return
-                    }
-
-                    val parsedRoutes = ArrayList<RouteOption>()
-                    for (r in 0 until min(3, routes.length())) {
-                        val route = routes.optJSONObject(r) ?: continue
-                        val points = parseTomTomRoutePoints(route)
-                        if (points.size < 2) continue
-
-                        val summary = route.optJSONObject("summary")
-                        val duration = summary?.optDouble("travelTimeInSeconds", 0.0) ?: 0.0
-                        val distance = summary?.optDouble("lengthInMeters", 0.0) ?: 0.0
-                        val trafficDelay = summary?.optDouble("trafficDelayInSeconds", 0.0) ?: 0.0
-                        val noTraffic = summary?.optDouble("noTrafficTravelTimeInSeconds", duration) ?: duration
-                        val liveTraffic = summary?.optDouble(
-                            "liveTrafficIncidentsTravelTimeInSeconds",
-                            duration
-                        ) ?: duration
-
-                        parsedRoutes.add(
-                            RouteOption(
-                                points = points,
-                                steps = parseTomTomSteps(route, points),
-                                durationSeconds = if (liveTraffic > 0.0) liveTraffic else duration,
-                                distanceMeters = distance,
-                                trafficDelaySeconds = trafficDelay,
-                                noTrafficDurationSeconds = noTraffic
-                            )
-                        )
-                    }
-
-                    ui.post {
-                        if (parsedRoutes.isEmpty()) {
-                            rerouting = false
-                            instruction.text = "TomTom no devolvió geometría de ruta"
-                            turnIcon.text = "!"
-                            return@post
-                        }
-
-                        routeAlternatives = parsedRoutes
-                        activeRouteIndex = 0
-                        activateRoute(0, recenterMap = !isReroute)
-                        rerouting = false
-                        offRouteSinceMs = 0L
-                        if (isReroute) {
-                            rerouteTone.startTone(ToneGenerator.TONE_PROP_BEEP, 180)
-                        }
-                    }
+                    }.getOrNull()
+                }
+                if (call.isCanceled() || generation != routeGeneration) return
+                val acceptable = parsed.orEmpty().filter { !requestedAvoid || !it.hasTolls }
+                if (acceptable.isEmpty()) {
+                    fail(if (requestedAvoid) "No se encontró una ruta disponible sin casetas" else "No se encontró una ruta disponible")
+                    return
+                }
+                ui.post {
+                    if (isDestroyed || generation != routeGeneration) return@post
+                    routeDestination = GeoPoint(toLat, toLon)
+                    routeAlternatives = acceptable
+                    activeRouteIndex = 0
+                    avoidTolls = requestedAvoid
+                    activateRoute(0, recenterMap = !isReroute)
+                    rerouting = false; offRouteSinceMs = 0L
+                    if (isReroute) runCatching { rerouteTone.startTone(ToneGenerator.TONE_PROP_BEEP, 180) }
                 }
             }
         })
@@ -1521,7 +1367,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         arrivalText.text = "Llegada aprox. ${formatArrival(routeDurationSeconds)}"
         updateNavigationStep(displayLocation)
         showRouteChoices()
-        if (recenterMap) recenter(true)
+        refreshTolls()
+        if (viewMode == 2) jsCall("showOverview()") else if (recenterMap) recenter(true)
     }
 
     private fun syncRoutes() {
@@ -1556,6 +1403,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (match.segmentIndex + 1 < routeProgressIndex) return
         routeProgressIndex = max(routeProgressIndex, match.segmentIndex)
         syncRouteProgress()
+        syncTolls()
     }
 
     private fun rebuildRouteDistanceCache() {
@@ -1731,6 +1579,16 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun stopNavigation() {
         routeActive = false
+        routeGeneration++
+        tollRepository.cancel()
+        tollQuote = null
+        tollLookupPending = false
+        pendingExternalDestination = null
+        pendingExternalQuery = null
+        externalLinkCall?.cancel()
+        destinationSearch.cancel()
+        viewMode = 0
+        is3D = false
         routeDestination = null
         routeCall?.cancel()
         rerouting = false
@@ -1751,6 +1609,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         syncRoutes()
         routeChoices.visibility = View.GONE
         stopButton.visibility = View.GONE
+        syncTolls()
+        updateTollPanel()
+        syncVisualSettings()
         etaText.text = "Sin ruta activa"
         routeDistance.text = "Selecciona un destino para comenzar"
         arrivalText.text = ""
@@ -1920,86 +1781,92 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .coerceAtMost(routeDistanceMeters * 1.05)
     }
 
-    private fun maybeQuerySignals(location: Location) {
-        if (!routeActive || routePoints.size < 2) return
-        val previous = lastSignalQuery
-        if (previous != null && location.distanceTo(previous) < 450f) return
-        lastSignalQuery = Location(location)
+    private fun refreshTolls() {
+        tollQuote = null
+        tollLookupPending = true
+        syncTolls()
+        updateTollPanel()
+        val snapshot = routePoints
+        val option = routeAlternatives.getOrNull(activeRouteIndex) ?: return
+        tollRepository.load(snapshot.map { RouteGeometry.Point(it.lat, it.lon) }, option.hasTolls) { quote ->
+            ui.post {
+                if (isDestroyed || !routeActive || routePoints !== snapshot) return@post
+                tollLookupPending = false
+                tollQuote = quote
+                syncTolls()
+                updateTollPanel()
+            }
+        }
+    }
 
-        val query = "[out:json][timeout:12];node[\"highway\"=\"traffic_signals\"]" +
-            "(around:1800,${location.latitude},${location.longitude});out;"
-        val body = FormBody.Builder().add("data", query).build()
-        val request = Request.Builder()
-            .url("https://overpass-api.de/api/interpreter")
-            .post(body)
-            .header("User-Agent", "GPS3D-AR-David/0.5")
-            .build()
+    private fun remainingTolls(): List<TollRepository.Booth> {
+        val traveled = if (routeRemainingFromIndex.isNotEmpty())
+            routeRemainingFromIndex[0] - (displayLocation?.let { estimateRemainingDistance(it) } ?: routeRemainingFromIndex[0]) else 0.0
+        return tollQuote?.booths.orEmpty().filter { it.alongMeters + 35.0 >= traveled }
+    }
 
-        http.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) = Unit
+    private fun syncTolls() {
+        val json = remainingTolls().joinToString(prefix = "[", postfix = "]") { "[${num(it.lon)},${num(it.lat)}]" }
+        jsCall("setTolls($json)")
+    }
 
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!it.isSuccessful) return
-                    val root = JSONObject(it.body?.string().orEmpty())
-                    val array = root.optJSONArray("elements") ?: return
-                    val found = ArrayList<SignalPoint>()
-                    for (i in 0 until array.length()) {
-                        val o = array.getJSONObject(i)
-                        found.add(
-                            SignalPoint(
-                                id = o.optLong("id"),
-                                lat = o.optDouble("lat"),
-                                lon = o.optDouble("lon")
-                            )
-                        )
-                    }
-                    ui.post {
-                        trafficSignals = found.mapNotNull { signal ->
-                            val routeIndex = nearestRoutePointIndex(routePoints, signal.lat, signal.lon)
-                            val routePoint = routePoints.getOrNull(routeIndex) ?: return@mapNotNull null
-                            val corridorDistance = distanceMeters(signal.lat, signal.lon, routePoint.lat, routePoint.lon)
-                            if (corridorDistance > 45.0 || routeIndex < routeProgressIndex - 3) null
-                            else signal.copy(routeIndex = routeIndex)
-                        }
-                        syncSignals()
-                        updateSignalPanel()
-                    }
+    private fun updateTollPanel() {
+        avoidTollsButton.text = if (avoidTolls) "Evitar caseta ✓" else "Evitar caseta"
+        avoidTollsButton.isSelected = avoidTolls
+        avoidTollsButton.contentDescription = if (avoidTolls) "Evitar casetas activado. Tocar para permitir casetas" else "Evitar casetas y recalcular ruta"
+        val quote = tollQuote
+        val booths = remainingTolls()
+        when {
+            !routeActive -> { tollCount.text = "Casetas: --"; tollTotal.text = "-- MXN" }
+            tollLookupPending -> { tollCount.text = "Casetas: …"; tollTotal.text = "Consultando…" }
+            quote == null || !quote.coverageKnown -> { tollCount.text = "Casetas: ?"; tollTotal.text = "Tarifa\npendiente" }
+            booths.isEmpty() -> { tollCount.text = "Casetas: 0"; tollTotal.text = "$0 MXN" }
+            else -> {
+                tollCount.text = "Casetas: ${booths.size}\ndetectadas"
+                val known = booths.filter { it.carMxn != null }.sumOf { it.carMxn!! }
+                tollTotal.text = when {
+                    booths.all { it.carMxn != null } -> String.format(Locale("es", "MX"), "$%.0f MXN\nestimado", known)
+                    known > 0 -> String.format(Locale("es", "MX"), "≥ $%.0f MXN\nfaltan tarifas", known)
+                    else -> "Tarifa\npendiente"
                 }
             }
-        })
+        }
     }
 
-    private fun syncSignals() {
-        val json = trafficSignals.take(300).joinToString(prefix = "[", postfix = "]") {
-            "[${num(it.lon)},${num(it.lat)}]"
-        }
-        jsCall("setSignals($json)")
+    private fun showTollDetails() {
+        val booths = remainingTolls()
+        val message = if (booths.isEmpty()) {
+            if (tollQuote?.coverageKnown == true) "No hay casetas pendientes en esta ruta." else "Aún no hay datos suficientes para contar o cotizar las casetas."
+        } else booths.mapIndexed { index, b ->
+            "${index + 1}. ${b.name}: " + (b.carMxn?.let { "$${it.toInt()} MXN (${b.effective})" } ?: "tarifa pendiente")
+        }.joinToString("\n")
+        AlertDialog.Builder(this).setTitle("Casetas hasta tu destino")
+            .setMessage(message + "\n\nEstimación para auto de 2 ejes, sin remolque. Plazas detectadas en OpenStreetMap y tarifas CAPUFE 2026. Puede faltar información de concesiones o cobros por entrada/salida.")
+            .setPositiveButton("Cerrar", null).show()
     }
 
-    private fun updateSignalPanel() {
-        if (!routeActive || routePoints.isEmpty()) {
-            signalDistance.text = "🚦 Próximo: --"
-            signalPhase.text = ""
-            signalTime.text = "--"
-            return
+    private fun setViewMode(mode: Int) {
+        viewMode = mode.coerceIn(0, 2)
+        is3D = viewMode == 1
+        manualCameraUntilMs = 0L
+        viewModeButton.contentDescription = when (viewMode) {
+            0 -> "Cambiar a vista isométrica"
+            1 -> "Mostrar inicio y final de la ruta"
+            else -> "Volver a vista de navegación"
         }
+        syncVisualSettings()
+        syncViewport()
+        if (viewMode == 2) jsCall("showOverview()") else recenter(true)
+    }
 
-        val next = trafficSignals
-            .filter { it.routeIndex >= routeProgressIndex }
-            .minByOrNull { it.routeIndex }
-
-        if (next == null) {
-            signalDistance.text = "🚦 Próximo: --"
-            signalPhase.text = "Sin semáforo en ruta"
-            signalTime.text = "--"
-            return
-        }
-
-        val meters = distanceAlongRouteToIndex(next.routeIndex)
-        signalDistance.text = "🚦 Próximo: ${formatDistance(meters)}"
-        signalPhase.text = "SEÑAL REAL"
-        signalTime.text = "sin SPaT"
+    private fun syncViewport() {
+        if (!mapReady || webMapView.height <= 0) return
+        val mapPosition = IntArray(2); webMapView.getLocationInWindow(mapPosition)
+        val topPosition = IntArray(2); val top = findViewById<View>(R.id.turnBanner); top.getLocationInWindow(topPosition)
+        val bottomPosition = IntArray(2); val bottom = findViewById<View>(R.id.bottomPanel); bottom.getLocationInWindow(bottomPosition)
+        val topFraction = ((topPosition[1] + top.height - mapPosition[1]).toDouble() / webMapView.height).coerceIn(0.0, 0.45)
+        val bottomFraction = ((mapPosition[1] + webMapView.height - bottomPosition[1]).toDouble() / webMapView.height).coerceIn(0.0, 0.45)
+        jsCall("setViewport(${num(topFraction)},${num(bottomFraction)})")
     }
 
     private fun distanceAlongRouteToIndex(targetIndex: Int): Double {
@@ -2057,7 +1924,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
-        is3D = false
+        is3D = viewMode == 1
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
         syncVisualSettings()
@@ -2074,6 +1941,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ui.removeCallbacks(ticker)
         searchDebounce?.let { ui.removeCallbacks(it) }
         searchCall?.cancel()
+        destinationSearch.cancel()
+        externalLinkCall?.cancel()
+        tollRepository.cancel()
         placePreviewCall?.cancel()
         placeImageCall?.cancel()
         routeCall?.cancel()
@@ -2088,12 +1958,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     data class GeoPoint(val lat: Double, val lon: Double)
-    data class SignalPoint(
-        val id: Long,
-        val lat: Double,
-        val lon: Double,
-        val routeIndex: Int = -1
-    )
     data class NavStep(
         val lat: Double,
         val lon: Double,
@@ -2121,11 +1985,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val durationSeconds: Double,
         val distanceMeters: Double,
         val trafficDelaySeconds: Double = 0.0,
-        val noTrafficDurationSeconds: Double = durationSeconds
+        val noTrafficDurationSeconds: Double = durationSeconds,
+        val hasTolls: Boolean = false,
+        val avoidsTolls: Boolean = false
     )
 
     companion object {
-        const val SEARCH_DEBOUNCE_MS = 350L
+        const val SEARCH_DEBOUNCE_MS = 500L
         const val DEFAULT_FOLLOW_RESUME_MS = 8000L
         const val VR_MAX_SPEED_KMH = 20f
         const val DEFAULT_ZOOM_PRESET_INDEX = 2

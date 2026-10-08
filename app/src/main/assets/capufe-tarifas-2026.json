@@ -1,0 +1,1403 @@
+{
+  "source": "CAPUFE/FONADIN y Fideicomiso 358 - tarifas oficiales para autos con IVA",
+  "url": "https://iave.capufe.gob.mx/assets/Doc/Tarifas-vigentes-2026.pdf",
+  "retrieved": "2026-10-08",
+  "sha256": "89166b501dd5b9f75bc9572e3da841b854e6942c35d89dae1d06747ac399cbf1",
+  "vehicle": "Auto de 2 ejes, sin remolque",
+  "coverage": "Se usa solo una coincidencia de nombre con tarifa inequívoca; tarifas por recorrido o plazas no incluidas quedan pendientes.",
+  "fares": [
+    {
+      "name": "CENTRAL DE ABASTOS",
+      "segment": "CUERNAVACA-CENTRAL DE ABASTOS",
+      "carMxn": 10,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "AEROPUERTO",
+      "segment": "CUERNAVACA-AEROPUERTO",
+      "carMxn": 16,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "XOCHITEPEC",
+      "segment": "CUERNAVACA-XOCHITEPEC",
+      "carMxn": 33,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "XOCHITEPEC",
+      "segment": "XOCHITEPEC-ALPUYECA",
+      "carMxn": 9,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "ING. FRANCISCO VELASCO DURAN (D)",
+      "segment": "CUERNAVACA-PUENTE DE IXTLA",
+      "carMxn": 100,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "ALPUYECA (I1)",
+      "segment": "CUERNAVACA-ALPUYECA",
+      "carMxn": 68,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "ALPUYECA (I2)",
+      "segment": "ALPUYECA-PUENTE DE IXTLA",
+      "carMxn": 32,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "PASO MORELOS (D)",
+      "segment": "PUENTE DE IXTLA-CHILPANCINGO",
+      "carMxn": 209,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "PASO MORELOS (I1)",
+      "segment": "PUENTE DE IXTLA-PASO MORELOS",
+      "carMxn": 80,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "PASO MORELOS (I2)",
+      "segment": "PASO MORELOS-CHILPANCINGO",
+      "carMxn": 126,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "PALO BLANCO",
+      "segment": "CHILPANCINGO-TIERRA COLORADA",
+      "carMxn": 190,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "LA VENTA",
+      "segment": "TIERRA COLORADA-ACAPULCO",
+      "carMxn": 171,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "CUITLAHUAC (D)",
+      "segment": "CORDOBA-LA TINAJA",
+      "carMxn": 146,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "CUITLAHUAC (I1)",
+      "segment": "CORDOBA-CUITLAHUAC",
+      "carMxn": 51,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "CUITLAHUAC (I2)",
+      "segment": "CUITLAHUAC-LA TINAJA",
+      "carMxn": 100,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "PASO DEL TORO (D)",
+      "segment": "LA TINAJA-VERACRUZ",
+      "carMxn": 136,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "PASO DEL TORO (I1)",
+      "segment": "LA TINAJA-PASO DEL TORO",
+      "carMxn": 111,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "PASO DEL TORO (I2)",
+      "segment": "PASO DEL TORO-VERACRUZ",
+      "carMxn": 21,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "COSAMALOAPAN (D)",
+      "segment": "LA TINAJA-ISLA",
+      "carMxn": 290,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "COSAMALOAPAN (I1)",
+      "segment": "LA TINAJA-COSAMALOAPAN",
+      "carMxn": 240,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "COSAMALOAPAN (I2)",
+      "segment": "COSAMALOAPAN-ISLA",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "ACAYUCAN (SAYULA) (D)",
+      "segment": "ISLA-COSOLEACAQUE",
+      "carMxn": 270,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "ACAYUCAN (SAYULA) (I1)",
+      "segment": "ISLA-ACAYUCAN",
+      "carMxn": 175,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "ACAYUCAN (SAYULA) (I2)",
+      "segment": "ACAYUCAN-COSOLEACAQUE",
+      "carMxn": 100,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "CHICHIMEQUILLAS",
+      "segment": "ENT. AUT. MEX. QRO.-ENT.QRO. SLP.",
+      "carMxn": 65,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "OJO CALIENTE",
+      "segment": "LIBRAMIENTO ORIENTE DE SALTILLO",
+      "carMxn": 53,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "LOS CHORROS (D)",
+      "segment": "LA CARBONERA-PUERTO MEXICO",
+      "carMxn": 82,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "HUACHICHIL (I1)",
+      "segment": "ENT.HUACHICHIL-ENT. TRAMO LOS CHORROS",
+      "carMxn": 62,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "TAMPICO (D)",
+      "segment": "ENT. CIUDAD VALLES-ENT. ALTAMIRA",
+      "carMxn": 39,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "TAMPICO (I1)",
+      "segment": "ENT. CIUDAD VALLES-BLVD. LOMA REAL",
+      "carMxn": 18,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "TAMPICO (I2)",
+      "segment": "BLVD. LOMA REAL-ENT. ALTAMIRA",
+      "carMxn": 19,
+      "effective": "Abr 13/2026",
+      "page": 1
+    },
+    {
+      "name": "SEYBAPLAYA (D)",
+      "segment": "CHAMPOTON-CAMPECHE",
+      "carMxn": 99,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "SEYBAPLAYA (I1)",
+      "segment": "VILLA MADERO-SEYBAPLAYA",
+      "carMxn": 42,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "SEYBAPLAYA (I2)",
+      "segment": "SEYBAPLAYA-CAMPECHE",
+      "carMxn": 61,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CHAMAPA",
+      "segment": "CHAMAPA-LECHERIA",
+      "carMxn": 69,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CHAMAPA",
+      "segment": "CHAMAPA-ENT.SAN MIGUEL",
+      "carMxn": 63,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CHAMAPA",
+      "segment": "CHAMAPA-LAGO DE GUADALUPE",
+      "carMxn": 61,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CHAMAPA",
+      "segment": "CHAMAPA-ATIZAPAN",
+      "carMxn": 48,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CHAMAPA",
+      "segment": "CHAMAPA-MADIN",
+      "carMxn": 36,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CHAMAPA",
+      "segment": "CHAMAPA-SAN MATEO NOPALA",
+      "carMxn": 13,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CHAMAPA",
+      "segment": "CHAMAPA-CIPRESES",
+      "carMxn": 6,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CIPRESES",
+      "segment": "CIPRESES-LECHERIA",
+      "carMxn": 62,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CIPRESES",
+      "segment": "CIPRESES-ENT.SAN MIGUEL",
+      "carMxn": 52,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CIPRESES",
+      "segment": "CIPRESES-LAGO DE GUADALUPE",
+      "carMxn": 51,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CIPRESES",
+      "segment": "CIPRESES-ATIZAPAN",
+      "carMxn": 42,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CIPRESES",
+      "segment": "CIPRESES-MADIN",
+      "carMxn": 26,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "CIPRESES",
+      "segment": "CIPRESES-SAN MATEO NOPALA",
+      "carMxn": 5,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "SAN MATEO NOPALA",
+      "segment": "SAN MATEO NOPALA-LECHERIA",
+      "carMxn": 60,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "SAN MATEO NOPALA",
+      "segment": "SAN MATEO NOPALA-ENT.SAN MIGUEL",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "SAN MATEO NOPALA",
+      "segment": "SAN MATEO NOPALA-LAGO DE GUADALUPE",
+      "carMxn": 46,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "SAN MATEO NOPALA",
+      "segment": "SAN MATEO NOPALA-ATIZAPAN",
+      "carMxn": 36,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "SAN MATEO NOPALA",
+      "segment": "SAN MATEO NOPALA-MADIN",
+      "carMxn": 21,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "MADIN",
+      "segment": "MADIN-LECHERIA",
+      "carMxn": 36,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "MADIN",
+      "segment": "MADIN-ENT.SAN MIGUEL",
+      "carMxn": 25,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "MADIN",
+      "segment": "MADIN-LAGO DE GUADALUPE",
+      "carMxn": 22,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "MADIN",
+      "segment": "MADIN-ATIZAPAN",
+      "carMxn": 8,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "ATIZAPAN",
+      "segment": "ATIZAPAN-LECHERIA",
+      "carMxn": 21,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "ATIZAPAN",
+      "segment": "ATIZAPAN-ENT.SAN MIGUEL",
+      "carMxn": 13,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "ATIZAPAN",
+      "segment": "ATIZAPAN-LAGO DE GUADALUPE",
+      "carMxn": 9,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LAGO DE GUADALUPE",
+      "segment": "LAGO DE GUADALUPE-ENT.SAN MIGUEL",
+      "carMxn": 3,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LAGO DE GUADALUPE",
+      "segment": "LAGO DE GUADALUPE-LECHERIA",
+      "carMxn": 8,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LECHERIA",
+      "segment": "ENT.SAN MIGUEL-LECHERIA",
+      "carMxn": 6,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LOMAS VERDES",
+      "segment": "LOMAS VERDES-LECHERIA",
+      "carMxn": 61,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LOMAS VERDES",
+      "segment": "LOMAS VERDES-ENT.SAN MIGUEL",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LOMAS VERDES",
+      "segment": "LOMAS VERDES-LAGO DE GUADALUPE",
+      "carMxn": 44,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LOMAS VERDES",
+      "segment": "LOMAS VERDES-ATIZAPAN",
+      "carMxn": 36,
+      "effective": "Abr 13/2026",
+      "page": 2
+    },
+    {
+      "name": "LOMAS VERDES",
+      "segment": "LOMAS VERDES-SAN MATEO NOPALA",
+      "carMxn": 21,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "LOMAS VERDES",
+      "segment": "LOMAS VERDES-CIPRESES",
+      "carMxn": 36,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "LOMAS VERDES",
+      "segment": "LOMAS VERDES-CHAMAPA",
+      "carMxn": 42,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "RETORNO",
+      "segment": "LECHERIA RETORNO",
+      "carMxn": 69,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "ESTACION DON",
+      "segment": "ESTACION DON - NAVOJOA",
+      "carMxn": 114,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "FUNDICION",
+      "segment": "NAVOJOA-CIUDAD OBREGON",
+      "carMxn": 114,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "ESPERANZA",
+      "segment": "CIUDAD OBREGON-GUAYMAS",
+      "carMxn": 114,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "GUAYMAS",
+      "segment": "LIBRAMIENTO GUAYMAS",
+      "carMxn": 48,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "HERMOSILLO",
+      "segment": "HERMOSILLO-MAGDALENA DE KINO",
+      "carMxn": 114,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "MAGDALENA",
+      "segment": "LIBRAMIENTO MAGDALENA DE KINO",
+      "carMxn": 38,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "LIB. CD. OBREGON (LICO)",
+      "segment": "CIUDAD OBREGON-GUAYMAS",
+      "carMxn": 105,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "BERMEJILLO",
+      "segment": "GOMEZ PALACIO-EST. BANDERAS",
+      "carMxn": 161,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "CEBALLOS",
+      "segment": "EST. BANDERAS-CORRALITOS",
+      "carMxn": 183,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "LA CUCHILLA",
+      "segment": "MATAMOROS-LA CUCHILLA",
+      "carMxn": 100,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "PLAN DE AYALA",
+      "segment": "PLAN DE AYALA-EL PORVENIR",
+      "carMxn": 176,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "LA VENTA (AGUADULCE) (D)",
+      "segment": "AGUADULCE-CARDENAS",
+      "carMxn": 106,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "LA VENTA (AGUADULCE) (I1)",
+      "segment": "AGUADULCE-ENTR.MAGALLANES",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "LA VENTA (AGUADULCE) (I2)",
+      "segment": "ENT. MAGALLANES-CARDENAS",
+      "carMxn": 51,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "TLALPAN",
+      "segment": "MEXICO-CUERNAVACA",
+      "carMxn": 156,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "TRES MARIAS \"A\" Y \"B\"",
+      "segment": "TRES MARIAS-CUERNAVACA",
+      "carMxn": 56,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "VIADUCTO ELEVADO TLALPAN (D)",
+      "segment": "CIUDAD DE MÉXICO-CUERNAVACA",
+      "carMxn": 186,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "IGUALA",
+      "segment": "PUENTE DE IXTLA-IGUALA",
+      "carMxn": 112,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Tepoztlán",
+      "segment": "Tepoztlán A - Oacalco A",
+      "carMxn": 33,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Tepoztlán",
+      "segment": "Oacalco B - Tepoztlán B",
+      "carMxn": 33,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Tepoztlán",
+      "segment": "Tepoztlán A - Cuautla A",
+      "carMxn": 64,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Tepoztlán",
+      "segment": "Cuautla B - Tepoztlán B",
+      "carMxn": 64,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Tepoztlán",
+      "segment": "Tepoztlán A - Oaxtepec A",
+      "carMxn": 46,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Oaxtepec",
+      "segment": "Oaxtepec B - Tepoztlán B",
+      "carMxn": 46,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Oacalco",
+      "segment": "Oacalco A - Cuautla A",
+      "carMxn": 33,
+      "effective": "Abr 13/2026",
+      "page": 3
+    },
+    {
+      "name": "Oacalco",
+      "segment": "Oacalco A - Oaxtepec A",
+      "carMxn": 12,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "Oaxtepec",
+      "segment": "Oaxtepec B - Oacalco B",
+      "carMxn": 12,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "Oacalco",
+      "segment": "La Pera A - Oacalco A",
+      "carMxn": 53,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "Oacalco",
+      "segment": "Oacalco B - La Pera B",
+      "carMxn": 53,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "Oaxtepec",
+      "segment": "La Pera A - Oaxtepec A",
+      "carMxn": 66,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "Oaxtepec",
+      "segment": "Oaxtepec B - La Pera B",
+      "carMxn": 66,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "Tepoztlán",
+      "segment": "Tepoztlán B - La Pera B",
+      "carMxn": 20,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "Tepoztlán",
+      "segment": "La Pera A - Tepoztlán A",
+      "carMxn": 20,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "ZACAPALCO",
+      "segment": "ZACAPALCO-RANCHO VIEJO",
+      "carMxn": 46,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "TOTOMOXTLE (D)",
+      "segment": "TOTOMOXTLE-ENT. EL PITAL",
+      "carMxn": 60,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "TOTOMOXTLE",
+      "segment": "ENTR. TIHUATLAN-PUENTE CAZONES",
+      "carMxn": 15,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "TOTOMOXTLE",
+      "segment": "PUENTE CAZONES-ENTR. TOTOMOXTLE",
+      "carMxn": 45,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "LAS CHOAPAS (D)",
+      "segment": "ENT. LAS CHOAPAS - ENT. NUEVO SACRIFICIO",
+      "carMxn": 105,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "LAS CHOAPAS (I1)",
+      "segment": "ENT. LAS CHOAPAS - ENT. LAS CHOAPAS II",
+      "carMxn": 35,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "LAS CHOAPAS (I2)",
+      "segment": "ENT.LAS CHOAPAS II - ENT.NUEVO SACRIFICIO",
+      "carMxn": 74,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "MALPASITO (D)",
+      "segment": "ENT. NUEVO SACRIFICIO - ENT. RAUDALES",
+      "carMxn": 106,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "MALPASITO (I1)",
+      "segment": "ENT. NUEVO SACRIFICIO - ENT. MALPASITO",
+      "carMxn": 58,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "MALPASITO (I2)",
+      "segment": "ENT. MALPASITO - ENT. RAUDALES",
+      "carMxn": 48,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "OCOZOCOAUTLA (OCUILAPA) (D)",
+      "segment": "ENT. RAUDALES - ENT. OCOZOCOAUTLA",
+      "carMxn": 106,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "TEPOTZOTLAN",
+      "segment": "MEXICO TEPEJI",
+      "carMxn": 113,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "JOROBAS",
+      "segment": "JOROBAS-TEPEJI",
+      "carMxn": 74,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "JOROBAS (CEM)",
+      "segment": "JOROBAS-TEPEJI",
+      "carMxn": 74,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "PALMILLAS",
+      "segment": "TEPEJI-PALMILLAS",
+      "carMxn": 113,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "PALMILLAS BIS",
+      "segment": "TEPEJI-PALMILLAS",
+      "carMxn": 113,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "POLOTITLAN",
+      "segment": "TEPEJI-POLOTITLAN",
+      "carMxn": 103,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "QUERETARO",
+      "segment": "QUERETARO-CELAYA",
+      "carMxn": 107,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "APASEO",
+      "segment": "QUERETARO-APASEO",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "APASEO",
+      "segment": "APASEO-CELAYA",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "SALAMANCA",
+      "segment": "CELAYA-SALAMANCA",
+      "carMxn": 73,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "SALAMANCA",
+      "segment": "SALAMANCA-IRAPUATO",
+      "carMxn": 38,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "SALAMANCA",
+      "segment": "CELAYA-IRAPUATO",
+      "carMxn": 106,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "VILLAGRAN",
+      "segment": "VILLAGRAN-SALAMANCA",
+      "carMxn": 42,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "QUERETARO BIS",
+      "segment": "QUERETARO-ENT.LIB. SUROESTE DE QRO.",
+      "carMxn": 15,
+      "effective": "Abr 13/2026",
+      "page": 4
+    },
+    {
+      "name": "QUERETARO BIS",
+      "segment": "ENT.LIB. SUROESTE DE QRO.-CELAYA",
+      "carMxn": 100,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "CERRO GORDO",
+      "segment": "CELAYA-ENT. CERRO GORDO",
+      "carMxn": 61,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "CERRO GORDO",
+      "segment": "ENT. CERRO GORDO-IRAPUATO",
+      "carMxn": 53,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "CERRO GORDO",
+      "segment": "ENT. CERRO GORDO-SALAMANCA",
+      "carMxn": 15,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "CHALCO",
+      "segment": "MEXICO-CHALCO",
+      "carMxn": 26,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "IXTAPALUCA",
+      "segment": "CHALCO-MEXICO",
+      "carMxn": 26,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "SAN MARCOS",
+      "segment": "MEXICO-SAN MARTIN TEXMELUCAN",
+      "carMxn": 173,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "SAN MARCOS BIS",
+      "segment": "MEXICO-CIRCUITO EXTERIOR MEXIQUENSE",
+      "carMxn": 30,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "SAN MARTIN",
+      "segment": "SAN MARTIN TEXMELUCAN-PUEBLA",
+      "carMxn": 53,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "AMOZOC (D)",
+      "segment": "PUEBLA-ACATZINGO",
+      "carMxn": 94,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "AMOZOC ( I )",
+      "segment": "PUEBLA-AMOZOC",
+      "carMxn": 48,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "ENT. AMOZOC III",
+      "segment": "PUEBLA-ENT. (AMOZOC-PEROTE)",
+      "carMxn": 16,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "ESPERANZA (D)",
+      "segment": "ACATZINGO-CD. MENDOZA",
+      "carMxn": 178,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "ESPERANZA (I1)",
+      "segment": "ACATZINGO-ESPERANZA",
+      "carMxn": 94,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "ESPERANZA (I2)",
+      "segment": "ESPERANZA-CD. MENDOZA",
+      "carMxn": 94,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "TEHUACAN",
+      "segment": "CUACNOPALAN-TEHUACAN",
+      "carMxn": 58,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "MIAHUATLAN",
+      "segment": "TEHUACAN-MIAHUATLAN",
+      "carMxn": 42,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "SUCHIXTLAHUACA (D)",
+      "segment": "MIAHUATLAN-NOCHIXTLAN",
+      "carMxn": 99,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "SUCHIXTLAHUACA ( I )",
+      "segment": "MIAHUATLAN-COIXTLAHUACA",
+      "carMxn": 48,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "HUITZO DIRECTA (D)",
+      "segment": "NOCHIXTLAN-OAXACA",
+      "carMxn": 114,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "HUITZO INTERMEDIA (I1)",
+      "segment": "NOCHIXTLAN-HUITZO",
+      "carMxn": 98,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "HUITZO BIS (I2)",
+      "segment": "HUITZO-OAXACA",
+      "carMxn": 38,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "HUITZO ( I3)",
+      "segment": "HUITZO-NOCHIXTLAN",
+      "carMxn": 98,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "PLAYAS",
+      "segment": "TIJUANA-ROSARITO",
+      "carMxn": 50,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "ROSARITO",
+      "segment": "ROSARITO-LA MISION",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "NODO POPOTLA (I)",
+      "segment": "LA MISIÓN-CORREDOR 2000",
+      "carMxn": 45,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "ENSENADA",
+      "segment": "LA MISION-ENSENADA",
+      "carMxn": 53,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "TAXCO",
+      "segment": "RANCHO VIEJO-TAXCO",
+      "carMxn": 19,
+      "effective": "Abr 13/2026",
+      "page": 5
+    },
+    {
+      "name": "EL HONGO (D)",
+      "segment": "LA RUMOROSA-TECATE",
+      "carMxn": 108,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "EL HONGO ( I )",
+      "segment": "EL HONGO TECATE",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "EL HONGO ( I 2)LA",
+      "segment": "RUMOROSA-EL HONGO",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "SAN JOSE DEL CABO",
+      "segment": "AEROPUERTO LOS CABOS-SN. JOSE DEL CABO",
+      "carMxn": 51,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "SAN JOSE DEL CABO",
+      "segment": "SAN JOSE DEL CABO-CABO SAN LUCAS",
+      "carMxn": 93,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "SAN JOSE DEL CABO",
+      "segment": "SAN JOSE DEL CABO-EL MANGLE",
+      "carMxn": 99,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "SAN JOSE DEL CABO",
+      "segment": "SAN JOSÉ DEL CABO-CABO REAL",
+      "carMxn": 60,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "SAN JOSE DEL CABO",
+      "segment": "SAN JOSE DEL CABO RETORNO",
+      "carMxn": 99,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "EL MANGLE",
+      "segment": "EL MANGLE-CABO REAL",
+      "carMxn": 76,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "EL MANGLE",
+      "segment": "EL MANGLE RETORNO",
+      "carMxn": 126,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "CABO SAN LUCAS",
+      "segment": "CABO SAN LUCAS-EL MANGLE",
+      "carMxn": 53,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "CABO SAN LUCAS",
+      "segment": "CABO SAN LUCAS RETORNO",
+      "carMxn": 118,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "CABO REAL",
+      "segment": "CABO REAL-CABO SAN LUCAS",
+      "carMxn": 69,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "AEROPUERTO LOS CABOS",
+      "segment": "AEROPUERTO LOS CABOS-CABO SAN LUCAS",
+      "carMxn": 118,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "AEROPUERTO LOS CABOS",
+      "segment": "AEROPUERTO LOS CABOS-CABO REAL",
+      "carMxn": 86,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "AEROPUERTO LOS CABOS",
+      "segment": "AEROPUERTO LOS CABOS-EL MANGLE",
+      "carMxn": 126,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "AEROPUERTO LOS CABOS",
+      "segment": "AEROP. LOS CABOS RETORNO",
+      "carMxn": 126,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "TEHUANTEPEC (D)",
+      "segment": "SALINA CRUZ-TEHUANTEPEC",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "IXTEPEC (D)",
+      "segment": "TEHUANTEPEC-LA VENTOSA",
+      "carMxn": 100,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "IXTEPEC (I1)",
+      "segment": "TEHUANTEPEC-IXTEPEC",
+      "carMxn": 50,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "IXTEPEC (I2)",
+      "segment": "IXTEPEC-LA VENTOSA",
+      "carMxn": 49,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "DURANGO",
+      "segment": "LIB. DURANGO-ENT. OTINAPA",
+      "carMxn": 84,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "LLANO GRANDE",
+      "segment": "OTINAPA-ENT. PILONCILLO",
+      "carMxn": 126,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "COSCOMATE",
+      "segment": "ENT PILONCILLO-SANTA LUCIA",
+      "carMxn": 399,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "MESILLAS (D)",
+      "segment": "SANTA LUCÍA-VILLA UNIÓN",
+      "carMxn": 211,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "MESILLAS (I1) MESILLAS (I2)",
+      "segment": "SANTA LUCÍA-LA CONCORDIA LA CONCORDIA-VILLA UNIÓN",
+      "carMxn": 158,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "LAGOS DE MORENO",
+      "segment": "LAGOS DE MORENO-SAN LUIS POTOSÍ",
+      "carMxn": 146,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "OZUMBA",
+      "segment": "AMECAMECA-NEPANTLA",
+      "carMxn": 66,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "LIBRAMIENTO PONIENTE DE ACAP(U IL1C O)ENTRONQUE",
+      "segment": "LA VENTA- BAJOS DEL EJIDO",
+      "carMxn": 58,
+      "effective": "Abr 13/2026",
+      "page": 6
+    },
+    {
+      "name": "LOMA DE CABALLO-ENTRONQUE FRONTERA",
+      "segment": "",
+      "carMxn": 77,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "LOMA DE CABALLO- ENT. NACAJUCA",
+      "segment": "",
+      "carMxn": 42,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "NACAJUCA- ENT. FRONTERA",
+      "segment": "",
+      "carMxn": 37,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "ENT. SACRAMENTO- ENT. ALDAMA",
+      "segment": "",
+      "carMxn": 46,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "ENT. ALDAMA- ENT. JIMENEZ",
+      "segment": "",
+      "carMxn": 45,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "BARRANCA LARGA (D)",
+      "segment": "OAXACA - VENTANILLA",
+      "carMxn": 245,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "VENTANILLA (D)",
+      "segment": "VENTANILLA - PUERTO ESCONDIDO",
+      "carMxn": 245,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "LA CALERA (D)",
+      "segment": "ENT. SAN JUAN - ENT. LA PITAHAYA",
+      "carMxn": 128,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "LA CALERA (I1)",
+      "segment": "ENT. LA PITAHAYA - ENT. LA CALERA",
+      "carMxn": 52,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "LA CALERA (I2)",
+      "segment": "ENT. SAN JUAN - ENT. LA CALERA",
+      "carMxn": 74,
+      "effective": "Abr 13/2026",
+      "page": 7
+    },
+    {
+      "name": "ACATLÁN",
+      "segment": "ACATLÁN - ATOYAC",
+      "carMxn": 122,
+      "effective": "Abr 13/2026",
+      "page": 8
+    },
+    {
+      "name": "SAYULA TRONCAL",
+      "segment": "ATOYAC - CD. GUZMÁN",
+      "carMxn": 92,
+      "effective": "Abr 13/2026",
+      "page": 8
+    },
+    {
+      "name": "SAYULA REMOTA",
+      "segment": "SAYULA - CD. GUZMÁN",
+      "carMxn": 44,
+      "effective": "Abr 13/2026",
+      "page": 8
+    },
+    {
+      "name": "SAN MARCOS",
+      "segment": "CD. GUZMÁN - EL TRAPICHE",
+      "carMxn": 213,
+      "effective": "Abr 13/2026",
+      "page": 8
+    }
+  ]
+}

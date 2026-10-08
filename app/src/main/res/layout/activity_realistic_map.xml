@@ -64,17 +64,25 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
+        <ScrollView
+            android:id="@+id/searchSuggestionsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="240dp"
+            android:layout_marginTop="5dp"
+            android:background="@drawable/bottom_panel"
+            android:elevation="10dp"
+            android:fillViewport="false"
+            android:visibility="gone">
+
         <LinearLayout
             android:id="@+id/searchSuggestions"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="5dp"
-            android:background="@drawable/bottom_panel"
-            android:elevation="10dp"
             android:orientation="vertical"
             android:paddingTop="4dp"
             android:paddingBottom="4dp"
             android:visibility="gone" />
+        </ScrollView>
 
         <LinearLayout
             android:id="@+id/settingsPanel"
@@ -253,6 +261,17 @@
         android:layout_marginEnd="12dp"
         android:orientation="vertical">
 
+        <androidx.appcompat.widget.AppCompatImageButton
+            android:id="@+id/viewModeButton"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/floating_button"
+            android:contentDescription="Cambiar a vista isométrica"
+            android:elevation="8dp"
+            android:padding="14dp"
+            android:src="@drawable/ic_eye" />
+
         <TextView
             android:id="@+id/zoomInButton"
             android:layout_width="52dp"
@@ -412,6 +431,7 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/bottomPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
@@ -519,33 +539,37 @@
             android:orientation="horizontal">
 
             <TextView
-                android:id="@+id/signalDistance"
+                android:id="@+id/tollCount"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🚦 Próximo: --"
+                android:text="Casetas: --"
                 android:textColor="#303134"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/signalPhase"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text=""
-                android:textColor="#B06B00"
                 android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
-                android:id="@+id/signalTime"
-                android:layout_width="wrap_content"
+                android:id="@+id/avoidTollsButton"
+                android:layout_width="106dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/toll_button"
+                android:gravity="center"
+                android:text="Evitar caseta"
+                android:textColor="#16834B"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tollTotal"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="-- s"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:gravity="end"
+                android:text="-- MXN"
                 android:textColor="#202124"
-                android:textSize="16sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
