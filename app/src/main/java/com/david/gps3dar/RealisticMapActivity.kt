@@ -19,6 +19,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -514,13 +515,16 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // vehicle appear to outrun the map even when the GNSS itself is accurate.
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 300L)
             .setMinUpdateIntervalMillis(100L)
-            .setMaxUpdateDelayMillis(350L)
+            .setMaxUpdateDelayMillis(0L)
             .setWaitForAccurateLocation(false)
             .build()
         fusedLocation.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
     }
 
     private fun processLocation(location: Location) {
+        val accepted = lastAcceptedLocation
+        if (accepted != null && location.elapsedRealtimeNanos <= accepted.elapsedRealtimeNanos) return
+        if (accepted != null && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 3_000_000_000L) return
         rawLocation = location
 
         if (location.hasAccuracy() && location.accuracy > 65f) {
@@ -578,13 +582,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun predictLocation(filtered: Location, raw: Location): Location {
         if (!raw.hasSpeed() || !raw.hasBearing() || raw.speed < 1.2f) return Location(filtered)
 
-        val predictionSeconds = when {
-            raw.speed > 22f -> 0.80
-            raw.speed > 12f -> 0.72
-            raw.speed > 5f -> 0.62
-            else -> 0.42
-        }
-        val meters = (raw.speed.toDouble() * predictionSeconds).coerceAtMost(18.0)
+        // Compensate actual fix age only; continuous rendering handles time between fixes.
+        val ageSeconds = ((SystemClock.elapsedRealtimeNanos() - raw.elapsedRealtimeNanos) /
+            1_000_000_000.0).coerceIn(0.0, 0.6)
+        val meters = (raw.speed.toDouble() * ageSeconds).coerceAtMost(18.0)
         val bearing = Math.toRadians(raw.bearing.toDouble())
         val lat = filtered.latitude + (cos(bearing) * meters / 110540.0)
         val lonScale = 111320.0 * cos(Math.toRadians(filtered.latitude)).coerceAtLeast(0.2)
@@ -1488,11 +1489,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun iconForTomTomManeuver(maneuver: String): String = when {
+        maneuver.startsWith("ARRIVE") -> "🏁"
         maneuver.contains("LEFT") -> "↰"
         maneuver.contains("RIGHT") -> "↱"
         maneuver.contains("UTURN") -> "↶"
         maneuver.startsWith("ROUNDABOUT") -> "↻"
-        maneuver.startsWith("ARRIVE") -> "🏁"
         else -> "↑"
     }
     private fun activateRoute(index: Int, recenterMap: Boolean) {
@@ -1672,14 +1673,18 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             distance = distanceAlongRouteToStep(step, location)
         }
 
-        instruction.text = step.instruction
+        val arriving = step.icon == "🏁" || step.icon == "●"
+        val message = if (arriving && distance > 25.0) {
+            "Continúa hasta tu destino"
+        } else step.instruction
+        instruction.text = message
         turnIcon.text = step.icon
         turnDistance.text = "En ${formatDistance(distance)}"
 
-        if (voiceEnabled && distance < 180 && step.instruction != lastSpokenInstruction) {
-            lastSpokenInstruction = step.instruction
+        if (voiceEnabled && distance < 180 && message != lastSpokenInstruction) {
+            lastSpokenInstruction = message
             tts.speak(
-                "En ${formatDistance(distance)}, ${step.instruction}",
+                "En ${formatDistance(distance)}, ${message}",
                 TextToSpeech.QUEUE_FLUSH,
                 null,
                 "nav"
@@ -2053,12 +2058,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         is3D = false
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
         syncVisualSettings()
         recenter(false)
     }
 
     override fun onPause() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onPause()
         super.onPause()
     }

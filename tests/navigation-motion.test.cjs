@@ -1,0 +1,25 @@
+const assert = require('node:assert/strict');
+const {mix, bearingMix, distance, advance, installLongPress} = require('../app/src/main/assets/navigation-motion.js');
+assert.deepEqual(mix([0, 0], [10, 20], .5), [5, 10]);
+assert.equal(bearingMix(359, 1, .5), 360);
+const route = [[0, 0], [0, .001], [.001, .001]];
+const turn = advance([0, .00095], 15, 0, route, 0);
+assert.equal(turn[1], .001); // Follow the bend, never extrapolate through the corner.
+assert.ok(turn[0] > 0);
+assert.deepEqual(advance([.0009, .001], 100, 90, route, 1), route[2]);
+assert.ok(distance([0, 0], advance([0, 0], 18, 90, [], 0)) < 18.01);
+const handlers = {};
+const element = {addEventListener: (name, cb) => handlers[name] = cb, getBoundingClientRect: () => ({left: 5, top: 10})};
+let timer, canceled, selections = 0;
+const originalSet = global.setTimeout, originalClear = global.clearTimeout;
+global.setTimeout = (cb, ms) => { assert.equal(ms, 1000); timer = cb; canceled = false; return 1; };
+global.clearTimeout = () => { canceled = true; };
+installLongPress(element, p => { assert.deepEqual(p, [15, 20]); selections++; }, () => {});
+const down = {isPrimary: true, pointerType: 'touch', pointerId: 1, clientX: 20, clientY: 30};
+handlers.pointerdown(down); handlers.pointerup(down); timer(); assert.equal(selections, 0);
+handlers.pointerdown(down); timer(); assert.equal(selections, 1);
+handlers.pointerdown(down); handlers.pointermove({...down, clientX: 40}); assert.ok(canceled); timer(); assert.equal(selections, 1);
+handlers.pointerdown(down); handlers.pointerdown({...down, isPrimary: false, pointerId: 2}); timer(); assert.equal(selections, 1);
+handlers.pointerdown(down); handlers.pointercancel(down); timer(); assert.equal(selections, 1);
+global.setTimeout = originalSet; global.clearTimeout = originalClear;
+console.log('Motion, corner traversal, endpoint clamping and hold/cancel gestures passed.');

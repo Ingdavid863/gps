@@ -58,6 +58,7 @@
 <div id="loading">Iniciando motor GPS3D…</div>
 <script src="traffic-config.js"></script>
 <script src="vendor/maplibre-gl.js"></script>
+<script src="navigation-motion.js"></script>
 <script>
 (() => {
     const loading = document.getElementById('loading');
@@ -133,6 +134,17 @@
         ]
     };
 
+    // Use the same provider as routing. Keep OSM underneath if optional map tiles fail.
+    if (TRAFFIC_API_KEY) {
+        baseStyle.sources['gps-tomtom-base'] = {
+            type: 'raster', tileSize: 256, maxzoom: 22,
+            tiles: ['https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=' + encodeURIComponent(TRAFFIC_API_KEY)],
+            attribution: '© TomTom'
+        };
+        baseStyle.layers.push({id: 'gps-tomtom-base-layer', type: 'raster', source: 'gps-tomtom-base',
+            paint: {'raster-fade-duration': 0, 'raster-opacity': 1}});
+    }
+
     let map;
     try {
         map = new maplibregl.Map({
@@ -173,12 +185,31 @@
 
     let displayedVehicle = lastLocation.slice();
     let targetVehicle = lastLocation.slice();
-    function animateVehicleMarker() {
-        displayedVehicle[0] += (targetVehicle[0] - displayedVehicle[0]) * 0.58;
-        displayedVehicle[1] += (targetVehicle[1] - displayedVehicle[1]) * 0.58;
-        if (Math.abs(targetVehicle[0] - displayedVehicle[0]) < 1e-8) displayedVehicle[0] = targetVehicle[0];
-        if (Math.abs(targetVehicle[1] - displayedVehicle[1]) < 1e-8) displayedVehicle[1] = targetVehicle[1];
-        vehicleMarker.setLngLat(displayedVehicle);
+    let vehicleFrom = lastLocation.slice();
+    let motionStarted = null, motionDuration = 250, vehicleSpeed = 0;
+    let displayedBearing = 0, bearingFrom = 0;
+    let cameraMotion = null, displayedCamera = null;
+    let lastFixAt = null;
+    function animateVehicleMarker(now) {
+        if (motionStarted !== null) {
+            const elapsed = now - motionStarted;
+            const t = Math.min(1, elapsed / motionDuration);
+            const predicted = NavigationMotion.advance(targetVehicle,
+                Math.min(18, vehicleSpeed * Math.min(600, Math.max(0, elapsed)) / 1000),
+                lastBearing, activeRoutePoints, routeProgressStartIndex);
+            displayedVehicle = NavigationMotion.mix(vehicleFrom, predicted, t);
+            displayedBearing = NavigationMotion.bearingMix(bearingFrom, lastBearing, t);
+            vehicleMarker.setLngLat(displayedVehicle);
+            if (vehicleMarker.setRotation) vehicleMarker.setRotation(displayedBearing);
+        }
+        if (ready && cameraMotion) {
+            const t = Math.min(1, (now - cameraMotion.at) / cameraMotion.duration);
+            displayedCamera = NavigationMotion.mix(cameraMotion.from, cameraMotion.to, t);
+            const delta = motionStarted === null ? [0, 0] : displayedVehicle.map((v, i) => v - targetVehicle[i]);
+            map.jumpTo({center: displayedCamera.slice(0, 2).map((v, i) => v + delta[i]),
+                bearing: NavigationMotion.bearingMix(cameraMotion.from[2], cameraMotion.to[2], t),
+                zoom: displayedCamera[3], pitch: displayedCamera[4]});
+        }
         requestAnimationFrame(animateVehicleMarker);
     }
     requestAnimationFrame(animateVehicleMarker);
@@ -554,21 +585,14 @@
         try { if (window.AndroidBridge && AndroidBridge.onMapReady) AndroidBridge.onMapReady(); } catch (_) {}
     });
 
-    map.on('click', e => {
+    NavigationMotion.installLongPress(map.getCanvas(), point => {
+        const lngLat = map.unproject(point);
         try {
             if (window.AndroidBridge && AndroidBridge.previewDestination) {
-                AndroidBridge.previewDestination(e.lngLat.lat, e.lngLat.lng);
+                AndroidBridge.previewDestination(lngLat.lat, lngLat.lng);
             }
         } catch (_) {}
-    });
-
-    map.on('contextmenu', e => {
-        try {
-            if (window.AndroidBridge && AndroidBridge.previewDestination) {
-                AndroidBridge.previewDestination(e.lngLat.lat, e.lngLat.lng);
-            }
-        } catch (_) {}
-    });
+    }, () => { cameraMotion = null; });
 
     map.on('error', e => {
         const msg = e && e.error && e.error.message ? e.error.message : String(e && e.error ? e.error : e);
@@ -597,10 +621,20 @@
             if (trafficEnabled) refreshRouteTraffic(); else renderRouteTraffic();
         },
         setLocation(lon, lat, bearing, speedMps) {
+            const now = performance.now();
             lastLocation = [Number(lon), Number(lat)];
+            vehicleFrom = displayedVehicle.slice();
+            bearingFrom = displayedBearing;
+            motionDuration = lastFixAt === null ? 250 : Math.max(100, Math.min(400, now - lastFixAt));
+            if (lastFixAt === null || NavigationMotion.distance(vehicleFrom, lastLocation) > 150) {
+                vehicleFrom = lastLocation.slice();
+                displayedVehicle = lastLocation.slice();
+            }
             targetVehicle = lastLocation.slice();
+            vehicleSpeed = Math.max(0, Number(speedMps) || 0);
             lastBearing = Number(bearing) || 0;
-            if (vehicleMarker.setRotation) vehicleMarker.setRotation(lastBearing);
+            motionStarted = now;
+            lastFixAt = now;
         },
         setRoutes(active, alt1, alt2) {
             if (!ready) return;
@@ -639,18 +673,11 @@
         },
         follow(lon, lat, bearing, zoom, pitch, duration) {
             if (!ready) return;
-            const d = Number(duration) || 0;
-            const opts = {
-                center: [Number(lon), Number(lat)],
-                bearing: Number(bearing) || 0,
-                zoom: Number(zoom) || 17,
-                pitch: Number(pitch) || 0
-            };
-            if (d <= 120) {
-                map.jumpTo(opts);
-            } else {
-                map.easeTo({ ...opts, duration: d, essential: true });
-            }
+            const center = map.getCenter();
+            const from = [center.lng, center.lat, map.getBearing(), map.getZoom(), map.getPitch()];
+            cameraMotion = {from, to: [Number(lon), Number(lat), Number(bearing) || 0,
+                Number(zoom) || 17, Number(pitch) || 0], at: performance.now(),
+                duration: Math.max(100, Math.min(400, motionDuration))};
         },
         reload() { location.reload(); }
     };
