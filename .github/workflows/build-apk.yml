@@ -40,5 +40,5 @@ jobs:
         run: gradle assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.10.0-beta-search
+          name: GPS3D-AR-David-0.11.0-beta-traffic
           path: app/build/outputs/apk/debug/app-debug.apk
