@@ -30,7 +30,9 @@ object SharedDestination {
             .find(input)?.value ?: input
         val uri = URI(link.replace(" ", "%20"))
         val scheme = uri.scheme?.lowercase(Locale.US) ?: return null
-        val rawQuery = if (uri.isOpaque) uri.rawSchemeSpecificPart.substringAfter('?', "") else uri.rawQuery.orEmpty()
+        val rawQuery = if (uri.isOpaque) {
+            uri.rawSchemeSpecificPart.substringAfter('?', if (scheme == "google.navigation") uri.rawSchemeSpecificPart else "")
+        } else uri.rawQuery.orEmpty()
         val params = rawQuery.split('&').mapNotNull { part ->
             if (part.isBlank()) null else decode(part.substringBefore('=')) to decode(part.substringAfter('=', ""))
         }.toMap()
