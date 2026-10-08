@@ -512,7 +512,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             raw.speed > 5f -> 0.62
             else -> 0.42
         }
-        val meters = (raw.speed * predictionSeconds).coerceAtMost(18f).toDouble()
+        val meters = (raw.speed.toDouble() * predictionSeconds).coerceAtMost(18.0)
         val bearing = Math.toRadians(raw.bearing.toDouble())
         val lat = filtered.latitude + (cos(bearing) * meters / 110540.0)
         val lonScale = 111320.0 * cos(Math.toRadians(filtered.latitude)).coerceAtLeast(0.2)
