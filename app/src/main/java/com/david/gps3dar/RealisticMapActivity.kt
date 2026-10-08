@@ -4,6 +4,8 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.location.Location
@@ -19,6 +21,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -28,7 +31,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -150,6 +155,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var manualCameraUntilMs = 0L
 
     private lateinit var tts: TextToSpeech
+    private val rerouteTone = ToneGenerator(AudioManager.STREAM_MUSIC, 68)
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -186,6 +192,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
+        setupBackNavigation()
         refreshSettingsLabels()
         handleNavigationIntent(intent)
         requestLocationPermission()
@@ -385,6 +392,41 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun hideKeyboard() {
+        searchInput.clearFocus()
+        val input = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        input?.hideSoftInputFromWindow(searchInput.windowToken, 0)
+    }
+
+    private fun setupBackNavigation() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    placePreview.visibility == View.VISIBLE -> hidePlacePreview()
+                    searchSuggestions.visibility == View.VISIBLE -> {
+                        hideSearchSuggestions()
+                        hideKeyboard()
+                    }
+                    settingsPanel.visibility == View.VISIBLE -> settingsPanel.visibility = View.GONE
+                    routeActive -> {
+                        AlertDialog.Builder(this@RealisticMapActivity)
+                            .setTitle("Salir de la ruta")
+                            .setMessage("¿Deseas salir de la ubicación y cancelar la ruta actual?")
+                            .setNegativeButton("No", null)
+                            .setPositiveButton("Sí") { _, _ ->
+                                stopNavigation()
+                                hideKeyboard()
+                            }
+                            .show()
+                    }
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        })
+    }
     private fun refreshSettingsLabels() {
         modeButton.text = "VR"
         voiceButton.text = if (voiceEnabled) "🔊" else "🔇"
@@ -963,6 +1005,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun previewMapPoint(lat: Double, lon: Double) {
+        hideKeyboard()
         hideSearchSuggestions()
         settingsPanel.visibility = View.GONE
         val result = SearchResult(
@@ -977,6 +1020,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showPlacePreview(result: SearchResult, movePin: Boolean) {
+        hideKeyboard()
         selectedMapPoint = result
         placePreviewTitle.text = result.title.ifBlank { result.label.substringBefore(",") }
         placePreviewAddress.text = result.address.ifBlank { result.label }
@@ -1237,17 +1281,51 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     ) {
         if (!isReroute) routeDestination = GeoPoint(toLat, toLon)
         rerouting = isReroute
-        instruction.text = if (isReroute) "Recalculando ruta…" else "Calculando rutas…"
+        instruction.text = if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
         turnIcon.text = "…"
         hideSearchSuggestions()
+        hidePlacePreview()
+        hideKeyboard()
+
+        val key = tomTomApiKey()
+        if (key.isBlank()) {
+            rerouting = false
+            instruction.text = "Falta TOMTOM_API_KEY para calcular tráfico"
+            turnIcon.text = "!"
+            return
+        }
 
         routeCall?.cancel()
-        val alternatives = if (isReroute) 1 else 3
-        val url = "https://router.project-osrm.org/route/v1/driving/$fromLon,$fromLat;$toLon,$toLat" +
-            "?overview=full&geometries=geojson&steps=true&alternatives=$alternatives"
+        val locations = fromLat.toString() + "," + fromLon + ":" + toLat + "," + toLon
+        val builder = HttpUrl.Builder()
+            .scheme("https")
+            .host("api.tomtom.com")
+            .addPathSegment("routing")
+            .addPathSegment("1")
+            .addPathSegment("calculateRoute")
+            .addPathSegment(locations)
+            .addPathSegment("json")
+            .addQueryParameter("key", key)
+            .addQueryParameter("traffic", "true")
+            .addQueryParameter("routeType", "fastest")
+            .addQueryParameter("travelMode", "car")
+            .addQueryParameter("routeRepresentation", "polyline")
+            .addQueryParameter("instructionsType", "text")
+            .addQueryParameter("language", "es-MX")
+            .addQueryParameter("computeTravelTimeFor", "all")
+            .addQueryParameter("sectionType", "traffic")
+            .addQueryParameter("maxAlternatives", if (isReroute) "0" else "2")
+
+        rawLocation?.takeIf { loc -> loc.hasBearing() }?.let { loc ->
+            builder.addQueryParameter(
+                "vehicleHeading",
+                (((loc.bearing % 360f) + 360f) % 360f).toInt().toString()
+            )
+        }
+
         val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "GPS3D-AR-David/0.8")
+            .url(builder.build())
+            .header("User-Agent", "GPS3D-AR-David/0.11")
             .build()
 
         routeCall = http.newCall(request)
@@ -1256,48 +1334,61 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (call.isCanceled()) return
                 ui.post {
                     rerouting = false
-                    if (isReroute) {
-                        instruction.text = "Sin conexión para recalcular · continúa con precaución"
+                    instruction.text = if (isReroute) {
+                        "No se pudo recalcular la ruta"
                     } else {
-                        instruction.text = "No se pudo calcular la ruta"
-                        turnIcon.text = "!"
+                        "No se pudo calcular la ruta con tráfico"
                     }
+                    turnIcon.text = "!"
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!it.isSuccessful) {
-                        ui.post { rerouting = false }
+                response.use { httpResponse ->
+                    if (!httpResponse.isSuccessful) {
+                        ui.post {
+                            rerouting = false
+                            instruction.text = "Error de ruta TomTom: " + httpResponse.code
+                            turnIcon.text = "!"
+                        }
                         return
                     }
-                    val root = JSONObject(it.body?.string().orEmpty())
+
+                    val root = JSONObject(httpResponse.body?.string().orEmpty())
                     val routes = root.optJSONArray("routes")
                     if (routes == null || routes.length() == 0) {
-                        ui.post { rerouting = false }
+                        ui.post {
+                            rerouting = false
+                            instruction.text = "No se encontró una ruta disponible"
+                            turnIcon.text = "!"
+                        }
                         return
                     }
 
                     val parsedRoutes = ArrayList<RouteOption>()
                     for (r in 0 until min(3, routes.length())) {
-                        val route = routes.getJSONObject(r)
-                        val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
-                        val points = ArrayList<GeoPoint>(coordinates.length())
-                        for (i in 0 until coordinates.length()) {
-                            val c = coordinates.getJSONArray(i)
-                            points.add(GeoPoint(c.getDouble(1), c.getDouble(0)))
-                        }
-                        val indexedSteps = parseSteps(route).map { step ->
-                            step.copy(
-                                routeIndex = nearestRoutePointIndex(points, step.lat, step.lon)
-                            )
-                        }
+                        val route = routes.optJSONObject(r) ?: continue
+                        val points = parseTomTomRoutePoints(route)
+                        if (points.size < 2) continue
+
+                        val summary = route.optJSONObject("summary")
+                        val duration = summary?.optDouble("travelTimeInSeconds", 0.0) ?: 0.0
+                        val distance = summary?.optDouble("lengthInMeters", 0.0) ?: 0.0
+                        val trafficDelay = summary?.optDouble("trafficDelayInSeconds", 0.0) ?: 0.0
+                        val noTraffic = summary?.optDouble("noTrafficTravelTimeInSeconds", duration) ?: duration
+                        val liveTraffic = summary?.optDouble(
+                            "liveTrafficIncidentsTravelTimeInSeconds",
+                            duration
+                        ) ?: duration
+
                         parsedRoutes.add(
                             RouteOption(
                                 points = points,
-                                steps = indexedSteps,
-                                durationSeconds = route.optDouble("duration", 0.0),
-                                distanceMeters = route.optDouble("distance", 0.0)
+                                steps = parseTomTomSteps(route, points),
+                                durationSeconds = if (liveTraffic > 0.0) liveTraffic else duration,
+                                distanceMeters = distance,
+                                trafficDelaySeconds = trafficDelay,
+                                noTrafficDurationSeconds = noTraffic
                             )
                         )
                     }
@@ -1305,20 +1396,18 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     ui.post {
                         if (parsedRoutes.isEmpty()) {
                             rerouting = false
+                            instruction.text = "TomTom no devolvió geometría de ruta"
+                            turnIcon.text = "!"
                             return@post
                         }
+
                         routeAlternatives = parsedRoutes
                         activeRouteIndex = 0
                         activateRoute(0, recenterMap = !isReroute)
                         rerouting = false
                         offRouteSinceMs = 0L
-                        if (isReroute && voiceEnabled) {
-                            tts.speak(
-                                "Ruta actualizada",
-                                TextToSpeech.QUEUE_FLUSH,
-                                null,
-                                "reroute"
-                            )
+                        if (isReroute) {
+                            rerouteTone.startTone(ToneGenerator.TONE_PROP_BEEP, 180)
                         }
                     }
                 }
@@ -1326,6 +1415,86 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         })
     }
 
+    private fun parseTomTomRoutePoints(route: JSONObject): List<GeoPoint> {
+        val out = ArrayList<GeoPoint>()
+        val legs = route.optJSONArray("legs") ?: return out
+        for (l in 0 until legs.length()) {
+            val leg = legs.optJSONObject(l) ?: continue
+            val points = leg.optJSONArray("points") ?: continue
+            for (i in 0 until points.length()) {
+                val p = points.optJSONObject(i) ?: continue
+                val lat = p.optDouble("latitude", Double.NaN)
+                val lon = p.optDouble("longitude", Double.NaN)
+                if (!lat.isFinite() || !lon.isFinite()) continue
+                val last = out.lastOrNull()
+                if (last == null || distanceMeters(last.lat, last.lon, lat, lon) > 0.25) {
+                    out.add(GeoPoint(lat, lon))
+                }
+            }
+        }
+        return out
+    }
+
+    private fun parseTomTomSteps(route: JSONObject, points: List<GeoPoint>): List<NavStep> {
+        val out = ArrayList<NavStep>()
+        val instructions = route.optJSONObject("guidance")
+            ?.optJSONArray("instructions")
+            ?: return out
+
+        for (i in 0 until instructions.length()) {
+            val item = instructions.optJSONObject(i) ?: continue
+            val point = item.optJSONObject("point") ?: continue
+            val lat = point.optDouble("latitude", Double.NaN)
+            val lon = point.optDouble("longitude", Double.NaN)
+            if (!lat.isFinite() || !lon.isFinite()) continue
+
+            val maneuver = item.optString("maneuver", "STRAIGHT")
+            val message = item.optString("message")
+                .ifBlank { instructionForTomTomManeuver(maneuver, item.optString("street")) }
+            val reportedIndex = item.optInt("pointIndex", -1)
+            val routeIndex = if (reportedIndex in points.indices) {
+                reportedIndex
+            } else {
+                nearestRoutePointIndex(points, lat, lon)
+            }
+
+            out.add(
+                NavStep(
+                    lat = lat,
+                    lon = lon,
+                    instruction = message,
+                    icon = iconForTomTomManeuver(maneuver),
+                    routeIndex = routeIndex
+                )
+            )
+        }
+        return out
+    }
+
+    private fun instructionForTomTomManeuver(maneuver: String, street: String): String {
+        val road = street.ifBlank { "la vía" }
+        return when (maneuver) {
+            "TURN_LEFT", "BEAR_LEFT", "SHARP_LEFT" -> "Gira a la izquierda en " + road
+            "TURN_RIGHT", "BEAR_RIGHT", "SHARP_RIGHT" -> "Gira a la derecha en " + road
+            "KEEP_LEFT", "MOTORWAY_EXIT_LEFT" -> "Mantente a la izquierda hacia " + road
+            "KEEP_RIGHT", "MOTORWAY_EXIT_RIGHT" -> "Mantente a la derecha hacia " + road
+            "MAKE_UTURN", "TRY_MAKE_UTURN" -> "Da vuelta en U"
+            "ROUNDABOUT_LEFT", "ROUNDABOUT_RIGHT", "ROUNDABOUT_CROSS", "ROUNDABOUT_BACK" ->
+                "En la glorieta continúa hacia " + road
+            "TAKE_EXIT", "ENTRANCE_RAMP" -> "Toma la salida hacia " + road
+            "ARRIVE", "ARRIVE_LEFT", "ARRIVE_RIGHT" -> "Llegaste a tu destino"
+            else -> "Continúa por " + road
+        }
+    }
+
+    private fun iconForTomTomManeuver(maneuver: String): String = when {
+        maneuver.contains("LEFT") -> "↰"
+        maneuver.contains("RIGHT") -> "↱"
+        maneuver.contains("UTURN") -> "↶"
+        maneuver.startsWith("ROUNDABOUT") -> "↻"
+        maneuver.startsWith("ARRIVE") -> "🏁"
+        else -> "↑"
+    }
     private fun activateRoute(index: Int, recenterMap: Boolean) {
         val option = routeAlternatives.getOrNull(index) ?: return
         activeRouteIndex = index
@@ -1581,6 +1750,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         routeDistance.text = "Selecciona un destino para comenzar"
         arrivalText.text = ""
         updateNavigationStep(displayLocation)
+        hidePlacePreview()
+        hideKeyboard()
         recenter(true)
     }
 
@@ -1902,6 +2073,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         fusedLocation.removeLocationUpdates(locationCallback)
         tts.stop()
         tts.shutdown()
+        rerouteTone.release()
         webMapView.removeJavascriptInterface("AndroidBridge")
         webMapView.loadUrl("about:blank")
         webMapView.destroy()
@@ -1940,7 +2112,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val points: List<GeoPoint>,
         val steps: List<NavStep>,
         val durationSeconds: Double,
-        val distanceMeters: Double
+        val distanceMeters: Double,
+        val trafficDelaySeconds: Double = 0.0,
+        val noTrafficDurationSeconds: Double = durationSeconds
     )
 
     companion object {
