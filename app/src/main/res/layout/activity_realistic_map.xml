@@ -330,6 +330,88 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/placePreview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="150dp"
+        android:background="@drawable/bottom_panel"
+        android:elevation="13dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="10dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/placePreviewImage"
+            android:layout_width="88dp"
+            android:layout_height="88dp"
+            android:background="#EEF1F4"
+            android:contentDescription="Imagen del lugar"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/placePreviewTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="2"
+                android:text="Lugar seleccionado"
+                android:textColor="#202124"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/placePreviewAddress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:maxLines="3"
+                android:text="Dirección"
+                android:textColor="#5F6368"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="end"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/placePreviewClose"
+                    android:layout_width="52dp"
+                    android:layout_height="38dp"
+                    android:gravity="center"
+                    android:text="Cerrar"
+                    android:textColor="#5F6368"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/placePreviewGo"
+                    android:layout_width="72dp"
+                    android:layout_height="38dp"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/nav_banner"
+                    android:gravity="center"
+                    android:text="Ir"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
@@ -451,7 +533,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
-                android:text="DEMO"
+                android:text=""
                 android:textColor="#B06B00"
                 android:textSize="12sp"
                 android:textStyle="bold" />
