@@ -697,81 +697,227 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         fetchSearchSuggestions(query, navigateFirst = true)
     }
 
+    private fun tomTomApiKey(): String = runCatching {
+        val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+        info.metaData?.getString("com.david.gps3dar.TOMTOM_API_KEY")?.trim().orEmpty()
+    }.getOrDefault("")
+
     private fun fetchSearchSuggestions(query: String, navigateFirst: Boolean) {
         if (navigateFirst) instruction.text = "Buscando $query…"
         searchCall?.cancel()
 
+        val key = tomTomApiKey()
+        if (key.isBlank()) {
+            fetchNominatimSearch(query, navigateFirst, emptyList())
+            return
+        }
+
         val builder = HttpUrl.Builder()
             .scheme("https")
-            .host("nominatim.openstreetmap.org")
+            .host("api.tomtom.com")
             .addPathSegment("search")
-            .addQueryParameter("format", "jsonv2")
-            .addQueryParameter("limit", "5")
-            .addQueryParameter("countrycodes", "mx")
-            .addQueryParameter("addressdetails", "1")
-            .addQueryParameter("dedupe", "1")
-            .addQueryParameter("accept-language", "es")
-            .addQueryParameter("q", query)
+            .addPathSegment("2")
+            .addPathSegment("search")
+            .addPathSegment(query + ".json")
+            .addQueryParameter("key", key)
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("countrySet", "MX")
+            .addQueryParameter("language", "es-MX")
+            .addQueryParameter("maxFuzzyLevel", "4")
+            .addQueryParameter("typeahead", (!navigateFirst).toString())
 
         rawLocation?.let { here ->
-            val left = here.longitude - 0.75
-            val right = here.longitude + 0.75
-            val top = here.latitude + 0.65
-            val bottom = here.latitude - 0.65
-            builder.addQueryParameter("viewbox", "$left,$top,$right,$bottom")
+            builder.addQueryParameter(
+                "geobias",
+                "point:" + here.latitude + "," + here.longitude
+            )
         }
 
         val request = Request.Builder()
             .url(builder.build())
-            .header("User-Agent", "GPS3D-AR-David/0.5")
+            .header("User-Agent", "GPS3D-AR-David/0.10")
             .build()
 
         searchCall = http.newCall(request)
         searchCall?.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 if (call.isCanceled()) return
-                ui.post {
-                    if (navigateFirst) instruction.text = "No se pudo buscar el destino"
-                }
+                fetchNominatimSearch(query, navigateFirst, emptyList())
             }
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
-                    if (!it.isSuccessful) return
-                    val array = JSONArray(it.body?.string().orEmpty())
+                    if (!it.isSuccessful) {
+                        fetchNominatimSearch(query, navigateFirst, emptyList())
+                        return
+                    }
+
+                    val root = JSONObject(it.body?.string().orEmpty())
+                    val array = root.optJSONArray("results") ?: JSONArray()
                     val parsed = ArrayList<SearchResult>()
-                    for (i in 0 until min(5, array.length())) {
-                        val item = array.getJSONObject(i)
+
+                    for (i in 0 until min(10, array.length())) {
+                        val item = array.optJSONObject(i) ?: continue
+                        val position = item.optJSONObject("position") ?: continue
+                        val lat = position.optDouble("lat", Double.NaN)
+                        val lon = position.optDouble("lon", Double.NaN)
+                        if (!lat.isFinite() || !lon.isFinite()) continue
+
+                        val poiName = item.optJSONObject("poi")
+                            ?.optString("name")
+                            ?.trim()
+                            .orEmpty()
+                        val addressObject = item.optJSONObject("address")
+                        val address = addressObject
+                            ?.optString("freeformAddress")
+                            ?.trim()
+                            .orEmpty()
+                        val municipality = addressObject
+                            ?.optString("municipality")
+                            ?.trim()
+                            .orEmpty()
+
+                        val title = when {
+                            poiName.isNotBlank() -> poiName
+                            address.isNotBlank() -> address.substringBefore(",")
+                            else -> "Destino"
+                        }
+                        val detail = listOf(address, municipality)
+                            .filter { value -> value.isNotBlank() }
+                            .distinct()
+                            .joinToString(", ")
+                        val label = listOf(title, detail)
+                            .filter { value -> value.isNotBlank() }
+                            .distinct()
+                            .joinToString(", ")
+
                         parsed.add(
                             SearchResult(
-                                label = item.optString("display_name", "Destino"),
-                                lat = item.getString("lat").toDouble(),
-                                lon = item.getString("lon").toDouble()
+                                label = label,
+                                lat = lat,
+                                lon = lon,
+                                title = title,
+                                address = detail
                             )
                         )
                     }
 
-                    ui.post {
-                        if (!navigateFirst && searchInput.text.toString().trim() != query) return@post
-                        searchResults = parsed
-                        if (navigateFirst) {
-                            val first = parsed.firstOrNull()
-                            val current = displayLocation ?: rawLocation
-                            when {
-                                first == null -> instruction.text = "Destino no encontrado"
-                                current == null -> instruction.text = "Esperando ubicación GPS…"
-                                else -> {
-                                    hideSearchSuggestions()
-                                    requestRoute(current.latitude, current.longitude, first.lat, first.lon)
-                                }
-                            }
-                        } else {
-                            showSearchSuggestions(parsed)
-                        }
+                    if (parsed.size >= 6) {
+                        deliverSearchResults(query, navigateFirst, parsed)
+                    } else {
+                        fetchNominatimSearch(query, navigateFirst, parsed)
                     }
                 }
             }
         })
+    }
+
+    private fun fetchNominatimSearch(
+        query: String,
+        navigateFirst: Boolean,
+        seed: List<SearchResult>
+    ) {
+        val builder = HttpUrl.Builder()
+            .scheme("https")
+            .host("nominatim.openstreetmap.org")
+            .addPathSegment("search")
+            .addQueryParameter("format", "jsonv2")
+            .addQueryParameter("limit", "10")
+            .addQueryParameter("countrycodes", "mx")
+            .addQueryParameter("addressdetails", "1")
+            .addQueryParameter("namedetails", "1")
+            .addQueryParameter("dedupe", "1")
+            .addQueryParameter("accept-language", "es")
+            .addQueryParameter("q", query)
+
+        rawLocation?.let { here ->
+            val left = here.longitude - 2.5
+            val right = here.longitude + 2.5
+            val top = here.latitude + 2.0
+            val bottom = here.latitude - 2.0
+            builder.addQueryParameter(
+                "viewbox",
+                left.toString() + "," + top + "," + right + "," + bottom
+            )
+        }
+
+        val request = Request.Builder()
+            .url(builder.build())
+            .header("User-Agent", "GPS3D-AR-David/0.10")
+            .build()
+
+        searchCall = http.newCall(request)
+        searchCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (call.isCanceled()) return
+                deliverSearchResults(query, navigateFirst, seed)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) {
+                        deliverSearchResults(query, navigateFirst, seed)
+                        return
+                    }
+
+                    val array = JSONArray(it.body?.string().orEmpty())
+                    val combined = ArrayList<SearchResult>()
+                    combined.addAll(seed)
+
+                    for (i in 0 until min(10, array.length())) {
+                        val item = array.optJSONObject(i) ?: continue
+                        val lat = item.optString("lat").toDoubleOrNull() ?: continue
+                        val lon = item.optString("lon").toDoubleOrNull() ?: continue
+                        val display = item.optString("display_name", "Destino").trim()
+                        val namedetails = item.optJSONObject("namedetails")
+                        val title = namedetails?.optString("name")?.takeIf { it.isNotBlank() }
+                            ?: display.substringBefore(",")
+                        val address = display.substringAfter(",", "").trim()
+
+                        val duplicate = combined.any { existing ->
+                            distanceMeters(existing.lat, existing.lon, lat, lon) < 35.0 ||
+                                existing.label.equals(display, ignoreCase = true)
+                        }
+                        if (!duplicate) {
+                            combined.add(
+                                SearchResult(
+                                    label = display,
+                                    lat = lat,
+                                    lon = lon,
+                                    title = title,
+                                    address = address
+                                )
+                            )
+                        }
+                        if (combined.size >= 12) break
+                    }
+
+                    deliverSearchResults(query, navigateFirst, combined)
+                }
+            }
+        })
+    }
+
+    private fun deliverSearchResults(
+        query: String,
+        navigateFirst: Boolean,
+        results: List<SearchResult>
+    ) {
+        ui.post {
+            if (!navigateFirst && searchInput.text.toString().trim() != query) return@post
+            searchResults = results
+            if (navigateFirst) {
+                val first = results.firstOrNull()
+                if (first == null) {
+                    instruction.text = "Destino no encontrado"
+                } else {
+                    hideSearchSuggestions()
+                    showPlacePreview(first, movePin = true)
+                }
+            } else {
+                showSearchSuggestions(results)
+            }
+        }
     }
 
     private fun showSearchSuggestions(results: List<SearchResult>) {
@@ -798,12 +944,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     searchInput.setSelection(searchInput.text.length)
                     suppressSearchWatcher = false
                     hideSearchSuggestions()
-                    val current = displayLocation ?: rawLocation
-                    if (current == null) {
-                        Toast.makeText(this@RealisticMapActivity, "Esperando ubicación GPS…", Toast.LENGTH_SHORT).show()
-                    } else {
-                        requestRoute(current.latitude, current.longitude, result.lat, result.lon)
-                    }
+                    showPlacePreview(result, movePin = true)
                 }
             }
             searchSuggestions.addView(row)
