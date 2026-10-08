@@ -16,6 +16,12 @@
             clip-path: polygon(50% 0%, 89% 100%, 50% 78%, 11% 100%);
             border-radius: 3px;
         }
+        .destination-wrap {
+            width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;
+            border-radius: 50%; background: rgba(255,255,255,.97);
+            border: 3px solid #202124; box-shadow: 0 3px 10px rgba(0,0,0,.35);
+            font-size: 23px; line-height: 1;
+        }
         #loading {
             position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
             z-index: 20; min-width: 180px; max-width: 78vw; padding: 10px 14px; border-radius: 18px;
@@ -41,17 +47,20 @@
     const BUILDING_SOURCE = 'gps-openfreemap';
     const BUILDINGS_ID = 'gps-3d-buildings';
     const HYBRID_ROADS_ID = 'gps-hybrid-roads';
-    const TRAFFIC_SOURCE_ID = 'gps-live-traffic';
-    const TRAFFIC_LAYER_ID = 'gps-live-traffic-layer';
+    const ROUTE_TRAFFIC_SOURCE_ID = 'gps-route-traffic';
+    const ROUTE_TRAFFIC_LAYER_ID = 'gps-route-traffic-layer';
     const TRAFFIC_API_KEY = String((window.GPS3D_CONFIG && window.GPS3D_CONFIG.tomtomApiKey) || '').trim();
 
     let ready = false;
     let setupFinished = false;
     let trafficEnabled = true;
-    let visuals = { is3D: true, terrain: false, buildings: true, satellite: false };
+    let visuals = { is3D: false, terrain: false, buildings: false, satellite: false };
     let lastLocation = [-99.133209, 19.432608];
     let lastBearing = 0;
     let activeRoutePoints = [];
+    let routeProgressStartIndex = 0;
+    let routeTrafficIntervals = [];
+    let routeTrafficGeneration = 0;
 
     function fail(message) {
         loading.textContent = message;
@@ -108,8 +117,8 @@
             container: 'map',
             style: baseStyle,
             center: lastLocation,
-            zoom: 18.2,
-            pitch: 62,
+            zoom: 17.4,
+            pitch: 0,
             bearing: 0,
             maxPitch: 85,
             minZoom: 3,
@@ -139,6 +148,35 @@
         rotationAlignment: 'map',
         pitchAlignment: 'map'
     }).setLngLat(lastLocation).addTo(map);
+
+    let displayedVehicle = lastLocation.slice();
+    let targetVehicle = lastLocation.slice();
+    function animateVehicleMarker() {
+        displayedVehicle[0] += (targetVehicle[0] - displayedVehicle[0]) * 0.58;
+        displayedVehicle[1] += (targetVehicle[1] - displayedVehicle[1]) * 0.58;
+        if (Math.abs(targetVehicle[0] - displayedVehicle[0]) < 1e-8) displayedVehicle[0] = targetVehicle[0];
+        if (Math.abs(targetVehicle[1] - displayedVehicle[1]) < 1e-8) displayedVehicle[1] = targetVehicle[1];
+        vehicleMarker.setLngLat(displayedVehicle);
+        requestAnimationFrame(animateVehicleMarker);
+    }
+    requestAnimationFrame(animateVehicleMarker);
+
+    const destinationElement = document.createElement('div');
+    destinationElement.className = 'destination-wrap';
+    destinationElement.textContent = '🏁';
+    let destinationMarker = null;
+
+    function setDestinationMarker(point) {
+        if (destinationMarker) {
+            destinationMarker.remove();
+            destinationMarker = null;
+        }
+        if (!point || point.length < 2) return;
+        destinationMarker = new maplibregl.Marker({
+            element: destinationElement,
+            anchor: 'bottom'
+        }).setLngLat(point).addTo(map);
+    }
 
     function safeAddSource(id, spec) {
         if (!map.getSource(id)) {
@@ -195,38 +233,121 @@
         setLayerVisible(BUILDINGS_ID, visuals.is3D && visuals.buildings);
         setLayerVisible(SATELLITE_LAYER, visuals.satellite);
         setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
-        setLayerVisible(TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
+        setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         applySky(visuals.is3D);
-        map.easeTo({ pitch: visuals.is3D ? 62 : 0, duration: 260, essential: true });
+        map.easeTo({ pitch: visuals.is3D ? 62 : 0, duration: 180, essential: true });
     }
 
-    function setupTrafficLayer() {
-        if (!TRAFFIC_API_KEY) {
-            console.info('GPS3D traffic: TOMTOM_API_KEY no configurada; tráfico en vivo desactivado.');
+    function distanceMeters(a, b) {
+        const rad = Math.PI / 180;
+        const lat1 = a[1] * rad;
+        const lat2 = b[1] * rad;
+        const dLat = (b[1] - a[1]) * rad;
+        const dLon = (b[0] - a[0]) * rad;
+        const h = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+        return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function sampledRouteIndices(points) {
+        if (!Array.isArray(points) || points.length < 2) return [];
+        let total = 0;
+        for (let i = 1; i < points.length; i++) total += distanceMeters(points[i - 1], points[i]);
+        const spacing = Math.max(550, total / 11);
+        const out = [0];
+        let since = 0;
+        for (let i = 1; i < points.length - 1; i++) {
+            since += distanceMeters(points[i - 1], points[i]);
+            if (since >= spacing) {
+                out.push(i);
+                since = 0;
+            }
+        }
+        if (out[out.length - 1] !== points.length - 1) out.push(points.length - 1);
+        return out.slice(0, 13);
+    }
+
+    function trafficSeverity(data) {
+        if (!data) return 'normal';
+        if (data.roadClosure === true) return 'heavy';
+        const current = Number(data.currentSpeed);
+        const free = Number(data.freeFlowSpeed);
+        const confidence = Number(data.confidence);
+        if (!Number.isFinite(current) || !Number.isFinite(free) || free <= 1) return 'normal';
+        if (Number.isFinite(confidence) && confidence < 0.25) return 'normal';
+        const ratio = current / free;
+        if (ratio < 0.35) return 'heavy';
+        if (ratio < 0.58) return 'slow';
+        if (ratio < 0.80) return 'moderate';
+        return 'normal';
+    }
+
+    function renderRouteTraffic() {
+        const source = map.getSource(ROUTE_TRAFFIC_SOURCE_ID);
+        if (!source) return;
+        if (!trafficEnabled || !TRAFFIC_API_KEY || activeRoutePoints.length < 2) {
+            source.setData(EMPTY);
             return;
         }
 
-        const key = encodeURIComponent(TRAFFIC_API_KEY);
-        safeAddSource(TRAFFIC_SOURCE_ID, {
-            type: 'raster',
-            tiles: [
-                `https://api.tomtom.com/traffic/map/4/tile/flow/relative-delay/{z}/{x}/{y}.png?key=${key}&thickness=8&tileSize=256`
-            ],
-            tileSize: 256,
-            minzoom: 5,
-            maxzoom: 22,
-            attribution: 'Traffic © TomTom'
-        });
-        safeAddLayer({
-            id: TRAFFIC_LAYER_ID,
-            type: 'raster',
-            source: TRAFFIC_SOURCE_ID,
-            minzoom: 5,
-            paint: {
-                'raster-opacity': 0.76,
-                'raster-fade-duration': 0
-            }
-        });
+        const features = [];
+        for (const interval of routeTrafficIntervals) {
+            if (interval.severity === 'normal') continue;
+            const start = Math.max(routeProgressStartIndex, interval.start);
+            const end = Math.min(activeRoutePoints.length - 1, interval.end);
+            if (end - start < 1) continue;
+            features.push({
+                type: 'Feature',
+                properties: { severity: interval.severity },
+                geometry: {
+                    type: 'LineString',
+                    coordinates: activeRoutePoints.slice(start, end + 1)
+                }
+            });
+        }
+        source.setData({ type: 'FeatureCollection', features });
+    }
+
+    async function refreshRouteTraffic() {
+        const generation = ++routeTrafficGeneration;
+        if (!trafficEnabled || !TRAFFIC_API_KEY || activeRoutePoints.length < 2) {
+            routeTrafficIntervals = [];
+            renderRouteTraffic();
+            return;
+        }
+
+        const indices = sampledRouteIndices(activeRoutePoints);
+        try {
+            const samples = await Promise.all(indices.map(async index => {
+                const p = activeRoutePoints[index];
+                const url =
+                    'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/18/json' +
+                    '?key=' + encodeURIComponent(TRAFFIC_API_KEY) +
+                    '&point=' + encodeURIComponent(p[1] + ',' + p[0]) +
+                    '&unit=kmph';
+                const response = await fetch(url, { cache: 'no-store' });
+                if (!response.ok) return { index, severity: 'normal' };
+                const root = await response.json();
+                return {
+                    index,
+                    severity: trafficSeverity(root && root.flowSegmentData)
+                };
+            }));
+
+            if (generation !== routeTrafficGeneration) return;
+            routeTrafficIntervals = samples.map((sample, i) => {
+                const prev = samples[i - 1];
+                const next = samples[i + 1];
+                return {
+                    start: prev ? Math.floor((prev.index + sample.index) / 2) : 0,
+                    end: next ? Math.ceil((sample.index + next.index) / 2) : activeRoutePoints.length - 1,
+                    severity: sample.severity
+                };
+            });
+            renderRouteTraffic();
+        } catch (e) {
+            console.warn('route traffic', e);
+        }
     }
 
     function setupCoreLayers() {
@@ -306,6 +427,7 @@
         safeAddSource('gps-route-alt-1', { type: 'geojson', data: EMPTY });
         safeAddSource('gps-route-alt-2', { type: 'geojson', data: EMPTY });
         safeAddSource('gps-route-active', { type: 'geojson', data: EMPTY });
+        safeAddSource(ROUTE_TRAFFIC_SOURCE_ID, { type: 'geojson', data: EMPTY });
         safeAddSource('gps-signals', { type: 'geojson', data: EMPTY });
 
         safeAddLayer({
@@ -328,10 +450,6 @@
                 'line-dasharray': [1.2, 1.5]
             }
         });
-
-        // Traffic stays under the navigation path so congestion colors never hide the
-        // route the driver must follow.
-        setupTrafficLayer();
 
         safeAddLayer({
             id: 'gps-route-shadow', type: 'line', source: 'gps-route-active',
@@ -358,6 +476,21 @@
             paint: {
                 'line-color': '#087cf0',
                 'line-opacity': 1.0,
+                'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5.5, 18, 8.5, 20, 10.5]
+            }
+        });
+        safeAddLayer({
+            id: ROUTE_TRAFFIC_LAYER_ID, type: 'line', source: ROUTE_TRAFFIC_SOURCE_ID,
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: {
+                'line-color': [
+                    'match', ['get', 'severity'],
+                    'heavy', '#d93025',
+                    'slow', '#f57c00',
+                    'moderate', '#f9ab00',
+                    '#087cf0'
+                ],
+                'line-opacity': 0.98,
                 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5.5, 18, 8.5, 20, 10.5]
             }
         });
@@ -399,6 +532,10 @@
         if (!ready) fail('El mapa base tardó demasiado. Revisa Android System WebView y la conexión.');
     }, 15000);
 
+    setInterval(() => {
+        if (ready && activeRoutePoints.length > 1 && trafficEnabled) refreshRouteTraffic();
+    }, 60000);
+
     window.GPS3D = {
         setVisuals(is3D, terrain, buildings, satellite) {
             visuals = { is3D: !!is3D, terrain: !!terrain, buildings: !!buildings, satellite: !!satellite };
@@ -406,31 +543,37 @@
         },
         setTrafficEnabled(enabled) {
             trafficEnabled = !!enabled;
-            setLayerVisible(TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
+            setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
+            if (trafficEnabled) refreshRouteTraffic(); else renderRouteTraffic();
         },
-        setLocation(lon, lat, bearing) {
+        setLocation(lon, lat, bearing, speedMps) {
             lastLocation = [Number(lon), Number(lat)];
+            targetVehicle = lastLocation.slice();
             lastBearing = Number(bearing) || 0;
-            vehicleMarker.setLngLat(lastLocation);
             if (vehicleMarker.setRotation) vehicleMarker.setRotation(lastBearing);
         },
         setRoutes(active, alt1, alt2) {
             if (!ready) return;
             activeRoutePoints = Array.isArray(active) ? active : [];
+            routeProgressStartIndex = 0;
             const a = map.getSource('gps-route-active');
             const b = map.getSource('gps-route-alt-1');
             const c = map.getSource('gps-route-alt-2');
             if (a) a.setData(lineData(activeRoutePoints));
             if (b) b.setData(lineData(alt1));
             if (c) c.setData(lineData(alt2));
+            setDestinationMarker(activeRoutePoints.length ? activeRoutePoints[activeRoutePoints.length - 1] : null);
+            refreshRouteTraffic();
         },
         setRouteProgress(lon, lat, fromIndex) {
             if (!ready || activeRoutePoints.length < 2) return;
             const source = map.getSource('gps-route-active');
             if (!source) return;
             const index = Math.max(0, Math.min(activeRoutePoints.length - 2, Number(fromIndex) || 0));
+            routeProgressStartIndex = index;
             const remaining = [[Number(lon), Number(lat)], ...activeRoutePoints.slice(index + 1)];
             source.setData(lineData(remaining));
+            renderRouteTraffic();
         },
         setSignals(points) {
             if (!ready) return;
@@ -439,14 +582,18 @@
         },
         follow(lon, lat, bearing, zoom, pitch, duration) {
             if (!ready) return;
-            map.easeTo({
+            const d = Number(duration) || 0;
+            const opts = {
                 center: [Number(lon), Number(lat)],
                 bearing: Number(bearing) || 0,
                 zoom: Number(zoom) || 17,
-                pitch: Number(pitch) || 0,
-                duration: Number(duration) || 650,
-                essential: true
-            });
+                pitch: Number(pitch) || 0
+            };
+            if (d <= 120) {
+                map.jumpTo(opts);
+            } else {
+                map.easeTo({ ...opts, duration: d, essential: true });
+            }
         },
         reload() { location.reload(); }
     };
