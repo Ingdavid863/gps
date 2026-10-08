@@ -47,7 +47,7 @@ class TollRepository(private val client: OkHttpClient, catalogJson: String) {
 
     private fun fetch(query: String, route: List<RouteGeometry.Point>, hasTolls: Boolean, id: Int, retry: Int, completed: (Quote) -> Unit) {
         if (generation.get() != id) return
-        val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+        val endpoints = listOf("https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter")
         val request = Request.Builder().url(endpoints[retry]).post(FormBody.Builder().add("data", query).build())
             .header("User-Agent", "GPS3D-AR-David/0.13").build()
         val requestCall = client.newCall(request)
