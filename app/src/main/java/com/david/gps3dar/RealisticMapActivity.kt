@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.location.Location
 import android.net.Uri
@@ -23,6 +24,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -87,6 +89,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var settingsVoice: TextView
     private lateinit var settingsAutoZoom: TextView
     private lateinit var settingsFollowDelay: TextView
+    private lateinit var placePreview: LinearLayout
+    private lateinit var placePreviewImage: ImageView
+    private lateinit var placePreviewTitle: TextView
+    private lateinit var placePreviewAddress: TextView
+    private lateinit var placePreviewGo: TextView
+    private lateinit var placePreviewClose: TextView
 
     private val http = OkHttpClient()
     private val ui = Handler(Looper.getMainLooper())
@@ -124,6 +132,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var searchCall: Call? = null
     private var searchDebounce: Runnable? = null
     private var suppressSearchWatcher = false
+    private var placePreviewCall: Call? = null
+    private var placeImageCall: Call? = null
+    private var selectedMapPoint: SearchResult? = null
 
     private var trafficSignals: List<SignalPoint> = emptyList()
     private var lastSignalQuery: Location? = null
@@ -210,6 +221,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         settingsVoice = findViewById(R.id.settingsVoice)
         settingsAutoZoom = findViewById(R.id.settingsAutoZoom)
         settingsFollowDelay = findViewById(R.id.settingsFollowDelay)
+        placePreview = findViewById(R.id.placePreview)
+        placePreviewImage = findViewById(R.id.placePreviewImage)
+        placePreviewTitle = findViewById(R.id.placePreviewTitle)
+        placePreviewAddress = findViewById(R.id.placePreviewAddress)
+        placePreviewGo = findViewById(R.id.placePreviewGo)
+        placePreviewClose = findViewById(R.id.placePreviewClose)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -246,15 +263,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         @JavascriptInterface
         fun routeTo(lat: Double, lon: Double) {
-            ui.post {
-                val here = displayLocation ?: rawLocation
-                if (here == null) {
-                    Toast.makeText(this@RealisticMapActivity, "Esperando una ubicación GPS precisa…", Toast.LENGTH_SHORT).show()
-                } else {
-                    hideSearchSuggestions()
-                    requestRoute(here.latitude, here.longitude, lat, lon)
-                }
-            }
+            ui.post { previewMapPoint(lat, lon) }
+        }
+
+        @JavascriptInterface
+        fun previewDestination(lat: Double, lon: Double) {
+            ui.post { previewMapPoint(lat, lon) }
         }
     }
 
@@ -358,6 +372,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ).show()
         }
         stopButton.setOnClickListener { stopNavigation() }
+        placePreviewClose.setOnClickListener { hidePlacePreview() }
+        placePreviewGo.setOnClickListener {
+            val point = selectedMapPoint ?: return@setOnClickListener
+            val current = displayLocation ?: rawLocation
+            if (current == null) {
+                Toast.makeText(this, "Esperando ubicación GPS…", Toast.LENGTH_SHORT).show()
+            } else {
+                hidePlacePreview()
+                requestRoute(current.latitude, current.longitude, point.lat, point.lon)
+            }
+        }
     }
 
     private fun refreshSettingsLabels() {
@@ -1464,6 +1489,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ui.removeCallbacks(ticker)
         searchDebounce?.let { ui.removeCallbacks(it) }
         searchCall?.cancel()
+        placePreviewCall?.cancel()
+        placeImageCall?.cancel()
         routeCall?.cancel()
         fusedLocation.removeLocationUpdates(locationCallback)
         tts.stop()
@@ -1488,7 +1515,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val icon: String,
         val routeIndex: Int = 0
     )
-    data class SearchResult(val label: String, val lat: Double, val lon: Double)
+    data class SearchResult(
+        val label: String,
+        val lat: Double,
+        val lon: Double,
+        val title: String = label.substringBefore(","),
+        val address: String = label.substringAfter(",", "").trim()
+    )
     data class RouteMatch(
         val segmentIndex: Int,
         val lat: Double,
