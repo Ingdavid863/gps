@@ -1313,6 +1313,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun maybeQuerySignals(location: Location) {
+        if (!routeActive || routePoints.size < 2) return
         val previous = lastSignalQuery
         if (previous != null && location.distanceTo(previous) < 450f) return
         lastSignalQuery = Location(location)
@@ -1346,7 +1347,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         )
                     }
                     ui.post {
-                        trafficSignals = found
+                        trafficSignals = found.mapNotNull { signal ->
+                            val routeIndex = nearestRoutePointIndex(routePoints, signal.lat, signal.lon)
+                            val routePoint = routePoints.getOrNull(routeIndex) ?: return@mapNotNull null
+                            val corridorDistance = distanceMeters(signal.lat, signal.lon, routePoint.lat, routePoint.lon)
+                            if (corridorDistance > 45.0 || routeIndex < routeProgressIndex - 3) null
+                            else signal.copy(routeIndex = routeIndex)
+                        }
                         syncSignals()
                         updateSignalPanel()
                     }
@@ -1363,38 +1370,48 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun updateSignalPanel() {
-        val here = displayLocation ?: return
-        val nearest = trafficSignals.minByOrNull {
-            distanceMeters(here.latitude, here.longitude, it.lat, it.lon)
-        } ?: return
-
-        val meters = distanceMeters(here.latitude, here.longitude, nearest.lat, nearest.lon).toInt()
-        val cycle = 70
-        val offset = (nearest.id % cycle).toInt()
-        val t = (((System.currentTimeMillis() / 1000L).toInt() + offset) % cycle + cycle) % cycle
-        val phase: String
-        val remaining: Int
-
-        when {
-            t < 34 -> {
-                phase = "🟢 DEMO"
-                remaining = 34 - t
-            }
-            t < 38 -> {
-                phase = "🟡 DEMO"
-                remaining = 38 - t
-            }
-            else -> {
-                phase = "🔴 DEMO"
-                remaining = 70 - t
-            }
+        if (!routeActive || routePoints.isEmpty()) {
+            signalDistance.text = "🚦 Próximo: --"
+            signalPhase.text = ""
+            signalTime.text = "--"
+            return
         }
 
-        signalDistance.text = "🚦 Próximo: ${formatDistance(meters.toDouble())}"
-        signalPhase.text = phase
-        signalTime.text = "$remaining s"
+        val next = trafficSignals
+            .filter { it.routeIndex >= routeProgressIndex }
+            .minByOrNull { it.routeIndex }
+
+        if (next == null) {
+            signalDistance.text = "🚦 Próximo: --"
+            signalPhase.text = "Sin semáforo en ruta"
+            signalTime.text = "--"
+            return
+        }
+
+        val meters = distanceAlongRouteToIndex(next.routeIndex)
+        signalDistance.text = "🚦 Próximo: ${formatDistance(meters)}"
+        signalPhase.text = "SEÑAL REAL"
+        signalTime.text = "sin SPaT"
     }
 
+    private fun distanceAlongRouteToIndex(targetIndex: Int): Double {
+        if (routePoints.size < 2 || routeRemainingFromIndex.isEmpty()) return 0.0
+        val match = lastRouteMatch
+        val clampedTarget = targetIndex.coerceIn(0, routePoints.lastIndex)
+        if (match == null) {
+            val current = routeProgressIndex.coerceIn(0, routePoints.lastIndex)
+            val currentRemaining = routeRemainingFromIndex.getOrElse(current) { 0.0 }
+            val targetRemaining = routeRemainingFromIndex.getOrElse(clampedTarget) { 0.0 }
+            return (currentRemaining - targetRemaining).coerceAtLeast(0.0)
+        }
+        val segment = max(routeProgressIndex, match.segmentIndex).coerceIn(0, routePoints.lastIndex - 1)
+        val nextIndex = segment + 1
+        val nextPoint = routePoints[nextIndex]
+        val currentRemaining = distanceMeters(match.lat, match.lon, nextPoint.lat, nextPoint.lon) +
+            routeRemainingFromIndex.getOrElse(nextIndex) { 0.0 }
+        val targetRemaining = routeRemainingFromIndex.getOrElse(clampedTarget) { 0.0 }
+        return (currentRemaining - targetRemaining).coerceAtLeast(0.0)
+    }
     private fun pointsJson(points: List<GeoPoint>): String = points.joinToString(prefix = "[", postfix = "]") {
         "[${num(it.lon)},${num(it.lat)}]"
     }
@@ -1458,7 +1475,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     data class GeoPoint(val lat: Double, val lon: Double)
-    data class SignalPoint(val id: Long, val lat: Double, val lon: Double)
+    data class SignalPoint(
+        val id: Long,
+        val lat: Double,
+        val lon: Double,
+        val routeIndex: Int = -1
+    )
     data class NavStep(
         val lat: Double,
         val lon: Double,
