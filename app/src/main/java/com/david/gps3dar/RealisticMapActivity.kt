@@ -962,6 +962,272 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         searchSuggestions.visibility = View.GONE
     }
 
+    private fun previewMapPoint(lat: Double, lon: Double) {
+        hideSearchSuggestions()
+        settingsPanel.visibility = View.GONE
+        val result = SearchResult(
+            label = "Punto seleccionado",
+            lat = lat,
+            lon = lon,
+            title = "Punto seleccionado",
+            address = String.format(Locale("es", "MX"), "%.6f, %.6f", lat, lon)
+        )
+        showPlacePreview(result, movePin = true)
+        resolveMapPoint(lat, lon)
+    }
+
+    private fun showPlacePreview(result: SearchResult, movePin: Boolean) {
+        selectedMapPoint = result
+        placePreviewTitle.text = result.title.ifBlank { result.label.substringBefore(",") }
+        placePreviewAddress.text = result.address.ifBlank { result.label }
+        placePreviewImage.setImageDrawable(null)
+        placePreviewImage.visibility = View.GONE
+        placePreview.visibility = View.VISIBLE
+        if (movePin) {
+            jsCall(
+                "setSelectionPin(" + num(result.lon) + "," + num(result.lat) + ")"
+            )
+        }
+        loadPlaceImage(result)
+    }
+
+    private fun hidePlacePreview() {
+        selectedMapPoint = null
+        placePreviewCall?.cancel()
+        placeImageCall?.cancel()
+        placePreview.visibility = View.GONE
+        jsCall("clearSelectionPin()")
+    }
+
+    private fun resolveMapPoint(lat: Double, lon: Double) {
+        val key = tomTomApiKey()
+        if (key.isBlank()) {
+            reverseGeocodePoint(lat, lon)
+            return
+        }
+
+        placePreviewCall?.cancel()
+        val url = HttpUrl.Builder()
+            .scheme("https")
+            .host("api.tomtom.com")
+            .addPathSegment("search")
+            .addPathSegment("2")
+            .addPathSegment("nearbySearch")
+            .addPathSegment(".json")
+            .addQueryParameter("key", key)
+            .addQueryParameter("lat", lat.toString())
+            .addQueryParameter("lon", lon.toString())
+            .addQueryParameter("radius", "120")
+            .addQueryParameter("limit", "1")
+            .addQueryParameter("countrySet", "MX")
+            .addQueryParameter("language", "es-MX")
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "GPS3D-AR-David/0.10")
+            .build()
+
+        placePreviewCall = http.newCall(request)
+        placePreviewCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (!call.isCanceled()) reverseGeocodePoint(lat, lon)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) {
+                        reverseGeocodePoint(lat, lon)
+                        return
+                    }
+
+                    val root = JSONObject(it.body?.string().orEmpty())
+                    val results = root.optJSONArray("results")
+                    val item = results?.optJSONObject(0)
+                    val position = item?.optJSONObject("position")
+
+                    if (item == null || position == null) {
+                        reverseGeocodePoint(lat, lon)
+                        return
+                    }
+
+                    val poiName = item.optJSONObject("poi")
+                        ?.optString("name")
+                        ?.trim()
+                        .orEmpty()
+                    val addressObject = item.optJSONObject("address")
+                    val freeform = addressObject
+                        ?.optString("freeformAddress")
+                        ?.trim()
+                        .orEmpty()
+                    val municipality = addressObject
+                        ?.optString("municipality")
+                        ?.trim()
+                        .orEmpty()
+                    val pLat = position.optDouble("lat", lat)
+                    val pLon = position.optDouble("lon", lon)
+
+                    val distance = distanceMeters(lat, lon, pLat, pLon)
+                    if (poiName.isBlank() || distance > 120.0) {
+                        reverseGeocodePoint(lat, lon)
+                        return
+                    }
+
+                    val result = SearchResult(
+                        label = listOf(poiName, freeform)
+                            .filter { value -> value.isNotBlank() }
+                            .joinToString(", "),
+                        lat = lat,
+                        lon = lon,
+                        title = poiName,
+                        address = listOf(freeform, municipality)
+                            .filter { value -> value.isNotBlank() }
+                            .distinct()
+                            .joinToString(", ")
+                    )
+                    ui.post {
+                        val selected = selectedMapPoint ?: return@post
+                        if (distanceMeters(selected.lat, selected.lon, lat, lon) > 2.0) return@post
+                        showPlacePreview(result, movePin = false)
+                    }
+                }
+            }
+        })
+    }
+
+    private fun reverseGeocodePoint(lat: Double, lon: Double) {
+        val key = tomTomApiKey()
+        if (key.isBlank()) return
+
+        placePreviewCall?.cancel()
+        val url = HttpUrl.Builder()
+            .scheme("https")
+            .host("api.tomtom.com")
+            .addPathSegment("search")
+            .addPathSegment("2")
+            .addPathSegment("reverseGeocode")
+            .addPathSegment(lat.toString() + "," + lon + ".json")
+            .addQueryParameter("key", key)
+            .addQueryParameter("radius", "100")
+            .addQueryParameter("language", "es-MX")
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "GPS3D-AR-David/0.10")
+            .build()
+
+        placePreviewCall = http.newCall(request)
+        placePreviewCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = Unit
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val root = JSONObject(it.body?.string().orEmpty())
+                    val addresses = root.optJSONArray("addresses") ?: return
+                    val first = addresses.optJSONObject(0) ?: return
+                    val addressObject = first.optJSONObject("address") ?: return
+                    val freeform = addressObject.optString("freeformAddress").trim()
+                    val street = addressObject.optString("streetName").trim()
+                    val municipality = addressObject.optString("municipality").trim()
+                    val title = street.ifBlank {
+                        freeform.substringBefore(",").ifBlank { "Punto seleccionado" }
+                    }
+                    val result = SearchResult(
+                        label = freeform.ifBlank { lat.toString() + "," + lon },
+                        lat = lat,
+                        lon = lon,
+                        title = title,
+                        address = listOf(freeform, municipality)
+                            .filter { value -> value.isNotBlank() }
+                            .distinct()
+                            .joinToString(", ")
+                    )
+                    ui.post {
+                        val selected = selectedMapPoint ?: return@post
+                        if (distanceMeters(selected.lat, selected.lon, lat, lon) > 2.0) return@post
+                        showPlacePreview(result, movePin = false)
+                    }
+                }
+            }
+        })
+    }
+
+    private fun loadPlaceImage(result: SearchResult) {
+        placeImageCall?.cancel()
+        val title = result.title.trim()
+        if (title.length < 4 || title.equals("Punto seleccionado", true)) return
+
+        val query = if (result.address.isBlank()) title
+            else title + " " + result.address.substringAfterLast(",").trim()
+
+        val url = HttpUrl.Builder()
+            .scheme("https")
+            .host("es.wikipedia.org")
+            .addPathSegment("w")
+            .addPathSegment("api.php")
+            .addQueryParameter("action", "query")
+            .addQueryParameter("generator", "search")
+            .addQueryParameter("gsrsearch", query)
+            .addQueryParameter("gsrlimit", "1")
+            .addQueryParameter("prop", "pageimages")
+            .addQueryParameter("piprop", "thumbnail")
+            .addQueryParameter("pithumbsize", "700")
+            .addQueryParameter("format", "json")
+            .addQueryParameter("origin", "*")
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "GPS3D-AR-David/0.10")
+            .build()
+
+        placeImageCall = http.newCall(request)
+        placeImageCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = Unit
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val root = JSONObject(it.body?.string().orEmpty())
+                    val pages = root.optJSONObject("query")?.optJSONObject("pages") ?: return
+                    val keys = pages.keys()
+                    if (!keys.hasNext()) return
+                    val page = pages.optJSONObject(keys.next()) ?: return
+                    val imageUrl = page.optJSONObject("thumbnail")
+                        ?.optString("source")
+                        ?.trim()
+                        .orEmpty()
+                    if (imageUrl.isBlank()) return
+                    loadPreviewBitmap(imageUrl, result.lat, result.lon)
+                }
+            }
+        })
+    }
+
+    private fun loadPreviewBitmap(url: String, lat: Double, lon: Double) {
+        val request = Request.Builder().url(url).build()
+        placeImageCall = http.newCall(request)
+        placeImageCall?.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = Unit
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) return
+                    val bytes = it.body?.bytes() ?: return
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
+                    ui.post {
+                        val selected = selectedMapPoint ?: return@post
+                        if (distanceMeters(selected.lat, selected.lon, lat, lon) > 2.0) return@post
+                        placePreviewImage.setImageBitmap(bitmap)
+                        placePreviewImage.visibility = View.VISIBLE
+                    }
+                }
+            }
+        })
+    }
+
     private fun requestRoute(
         fromLat: Double,
         fromLon: Double,
