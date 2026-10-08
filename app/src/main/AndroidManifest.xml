@@ -33,6 +33,10 @@
             android:name="com.google.android.ar.API_KEY"
             android:value="${arcoreApiKey}" />
 
+        <meta-data
+            android:name="com.david.gps3dar.TOMTOM_API_KEY"
+            android:value="${tomTomApiKey}" />
+
         <activity
             android:name=".MainActivity"
             android:exported="false"
