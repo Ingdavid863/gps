@@ -43,6 +43,7 @@ android {
         versionCode = 14
         versionName = "0.9.0-beta-drive"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
+        manifestPlaceholders["tomTomApiKey"] = tomTomApiKey
     }
 
     compileOptions {
