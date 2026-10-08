@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.location.Location
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -116,6 +117,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var offRouteSinceMs = 0L
     private var lastRerouteAtMs = 0L
     private var rerouting = false
+    private var pendingExternalDestination: GeoPoint? = null
+    private var pendingExternalQuery: String? = null
 
     private var searchResults: List<SearchResult> = emptyList()
     private var searchCall: Call? = null
@@ -173,6 +176,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupSettingsUi()
         setupButtons()
         refreshSettingsLabels()
+        handleNavigationIntent(intent)
         requestLocationPermission()
         ui.post(ticker)
     }
@@ -483,6 +487,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         updateDrivingUi(location, shown)
         updateNavigationStep(shown)
         maybeQuerySignals(location)
+        maybeStartPendingExternalNavigation()
     }
 
     private fun smoothLocation(raw: Location): Location {
@@ -603,6 +608,62 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},0,${if (animated) 180 else 1})"
         )
+    }
+
+    private fun handleNavigationIntent(sourceIntent: Intent?) {
+        val data = sourceIntent?.data ?: return
+        val scheme = data.scheme?.lowercase(Locale.US) ?: return
+        if (scheme != "geo" && scheme != "google.navigation") return
+
+        val query = data.getQueryParameter("q")?.trim().orEmpty()
+        val parsed = parseExternalCoordinate(query)
+            ?: if (scheme == "geo") parseExternalCoordinate(data.schemeSpecificPart.substringBefore('?')) else null
+
+        if (parsed != null) {
+            pendingExternalDestination = parsed
+            pendingExternalQuery = null
+            searchInput.setText("Destino recibido")
+            instruction.text = "Destino recibido · esperando GPS…"
+        } else if (query.isNotBlank()) {
+            pendingExternalQuery = Uri.decode(query).substringBefore('(').trim()
+            pendingExternalDestination = null
+            searchInput.setText(pendingExternalQuery)
+            instruction.text = "Destino recibido · preparando ruta…"
+        }
+
+        maybeStartPendingExternalNavigation()
+    }
+
+    private fun parseExternalCoordinate(value: String?): GeoPoint? {
+        if (value.isNullOrBlank()) return null
+        val clean = value.substringBefore('(').trim()
+        val parts = clean.split(',')
+        if (parts.size < 2) return null
+        val lat = parts[0].trim().toDoubleOrNull() ?: return null
+        val lon = parts[1].trim().toDoubleOrNull() ?: return null
+        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+        return GeoPoint(lat, lon)
+    }
+
+    private fun maybeStartPendingExternalNavigation() {
+        val current = displayLocation ?: rawLocation ?: return
+        pendingExternalDestination?.let { destination ->
+            pendingExternalDestination = null
+            requestRoute(current.latitude, current.longitude, destination.lat, destination.lon)
+            return
+        }
+
+        pendingExternalQuery?.let { query ->
+            pendingExternalQuery = null
+            searchInput.setText(query)
+            fetchSearchSuggestions(query, navigateFirst = true)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNavigationIntent(intent)
     }
 
     private fun searchDestination() {
