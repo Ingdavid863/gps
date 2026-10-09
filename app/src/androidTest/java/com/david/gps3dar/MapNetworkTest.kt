@@ -52,7 +52,7 @@ class MapNetworkTest {
                     .setLong(activity,SystemClock.elapsedRealtime()+120000)
             }
             var preparedCount=0
-            evaluate(scenario,"window.GPS3D.setDarkTheme(false);true")
+            evaluate(scenario,"window.GPS3D.setTrafficEnabled(false);window.GPS3D.setDarkTheme(false);true")
             for(zoom in listOf(17.4,14.0,12.0,10.0,6.0)) {
                 evaluate(scenario,"window.GPS3D.follow(-99.133209,19.432608,0,$zoom,0,1);true")
                 val state=waitMap(scenario,zoom,30)
@@ -93,3 +93,4 @@ class MapNetworkTest {
         }
     }
 }
+

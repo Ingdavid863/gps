@@ -41,6 +41,7 @@ let browser,server;
  await page.addInitScript(()=>{window.AndroidBridge={onMapReady(){window.mapReady=true}}});
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
  await page.waitForFunction(()=>window.mapReady===true);
+ await page.evaluate(()=>window.GPS3D.setTrafficEnabled(false));
  const measurements=[];
  for(const zoom of [17.4,16,14,12,10,6,3,18.65]){
   await page.evaluate(z=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);g.follow(-99.133209,19.432608,0,z,0,1)},zoom);
@@ -83,3 +84,4 @@ let browser,server;
  console.log('Live map QA passed',JSON.stringify(report));
 })().catch(e=>{console.error(String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]'));process.exitCode=1})
  .finally(async()=>{if(browser)await browser.close();if(server)server.close()});
+

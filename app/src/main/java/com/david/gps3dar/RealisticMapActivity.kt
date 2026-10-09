@@ -2268,6 +2268,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         is3D = viewMode == 1
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
+        if (mapReady) jsCall("setTrafficPaused(false)")
         sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         updateAutoTheme()
         syncVisualSettings()
@@ -2278,6 +2279,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sensorManager.unregisterListener(this)
         webMapView.onPause()
+        if (mapReady) jsCall("setTrafficPaused(true)")
         super.onPause()
     }
 
