@@ -214,7 +214,7 @@
             // moving and prevents cached zooms from settling. Only apply a real change.
             if (Math.abs(current.lng-center[0])>1e-8 || Math.abs(current.lat-center[1])>1e-8 ||
                 Math.abs(map.getZoom()-displayedCamera[3])>1e-6 || Math.abs(map.getPitch()-displayedCamera[4])>1e-6 ||
-                Math.abs(map.getBearing()-bearing)>1e-6 || Object.keys(padding).some(k=>Math.abs(actualPadding[k]-padding[k])>.01)) {
+                Math.abs((map.getBearing()-bearing+540)%360-180)>1e-6 || Object.keys(padding).some(k=>Math.abs(actualPadding[k]-padding[k])>.01)) {
                 map.jumpTo({center, bearing, zoom:displayedCamera[3], pitch:displayedCamera[4], padding});
             }
         }
@@ -636,7 +636,13 @@
     map.on('style.load', () => {
         // Declare the map ready BEFORE loading optional 3D providers. This prevents one
         // failing DEM/building service from producing an infinite black loading screen.
-        if (setupFinished) { applyVisuals(); renderManeuvers(); renderRouteTraffic(); return; }
+        if (setupFinished) {
+            applyVisuals();
+            const route = map.getSource('gps-route-active');
+            if (route) route.setData(lineData(viewMode === 2 ? activeRoutePoints : remainingRoutePoints));
+            renderManeuvers(); renderRouteTraffic(); renderOrigin();
+            return;
+        }
         ready = true;
         loading.textContent = 'Preparando relieve 3D…';
         try { setupCoreLayers(); } catch (e) { console.warn('optional 3D setup', e); }
@@ -698,9 +704,12 @@
             prepareViewport();
         },
         mapState() {
+            const snapshot=map.getStyle();
+            if (!snapshot || !snapshot.layers) return {provider, dark:darkTheme, zoom:map.getZoom(),
+                tilesLoaded:false, layerIds:[], failures:{...resourceFailures}, rendered:0, roads:0, areas:0};
             const features=map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
             return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
-                layerIds:map.getStyle().layers.map(l=>l.id), failures:{...resourceFailures},
+                layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
                 rendered:features.length, roads:features.filter(f=>f.layer.type==='line'&&/road/i.test(f.layer['source-layer']||'')).length,
                 areas:features.filter(f=>f.layer.type==='fill').length};
         },
