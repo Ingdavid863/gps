@@ -1,6 +1,5 @@
 package com.david.gps3dar
 
-import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -9,6 +8,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 
@@ -62,8 +62,8 @@ class AutoRouteSetupActivity : AppCompatActivity() {
             }.show()
     }
     private fun openAccessibility() {
-        val detail = Intent(Settings.ACTION_ACCESSIBILITY_DETAILS_SETTINGS)
-            .putExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName(this, AutoRouteShareService::class.java))
-        runCatching { startActivity(detail) }.onFailure { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.onFailure {
+            Toast.makeText(this, "Abre Ajustes → Accesibilidad → GPS3D: envío automático de rutas", Toast.LENGTH_LONG).show()
+        }
     }
 }
