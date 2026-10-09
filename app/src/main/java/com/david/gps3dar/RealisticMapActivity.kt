@@ -181,6 +181,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             val lat = result.data?.getDoubleExtra(WalkingRoute.EXTRA_LAT, Double.NaN) ?: Double.NaN
             val lon = result.data?.getDoubleExtra(WalkingRoute.EXTRA_LON, Double.NaN) ?: Double.NaN
             if (walking != null && RouteGeometry.distance(walking.destination, RouteGeometry.Point(lat, lon)) < 3.0) {
+                voiceEnabled = result.data?.getBooleanExtra("walking_voice", voiceEnabled) ?: voiceEnabled
                 routeCall?.cancel(); routeGeneration++; rerouting = false
                 val points = walking.points.map { GeoPoint(it.lat, it.lon) }
                 routeDestination = GeoPoint(walking.destination.lat, walking.destination.lon)
@@ -1876,7 +1877,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         turnDistance.setTypeface(null, Typeface.BOLD)
         turnDistance.setTextColor(Color.WHITE)
 
-        if (voiceEnabled && ttsReady) {
+        if (voiceEnabled && ttsReady && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
             val id = "$voiceRouteId:$currentStepIndex"
             val phase = announcements.pending(id, distance, (rawLocation?.speed ?: location.speed).toDouble())
             if (phase > 0 && audioManager.requestAudioFocus(audioFocus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
@@ -2330,6 +2331,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         sensorManager.unregisterListener(this)
         webMapView.onPause()
         if (mapReady) jsCall("setTrafficPaused(true)")
+        tts.stop()
+        audioManager.abandonAudioFocusRequest(audioFocus)
         super.onPause()
     }
 

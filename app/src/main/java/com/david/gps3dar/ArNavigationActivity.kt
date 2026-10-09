@@ -61,6 +61,7 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var target: RouteGeometry.Point? = null
     private var here: RouteGeometry.Point? = null
     private var hereAt = 0L
+    private var visualFixAt = 0L
     private var route: WalkingRoute? = null
     private var routeGeometry: ArRouteGeometry? = null
     private var stepAlong = DoubleArray(0)
@@ -84,8 +85,11 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         override fun onLocationResult(result: LocationResult) {
             val location = result.lastLocation ?: return
             if (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 15_000_000_000L) return
-            here = RouteGeometry.Point(location.latitude, location.longitude)
-            hereAt = SystemClock.elapsedRealtime()
+            val now = SystemClock.elapsedRealtime()
+            if (now - visualFixAt > 1500L) {
+                here = RouteGeometry.Point(location.latitude, location.longitude)
+                hereAt = now
+            }
             speedKmh = if (location.hasSpeed()) (location.speed * 3.6f).toInt().coerceAtLeast(0) else 0
             if (speedKmh > 20) {
                 Toast.makeText(this@ArNavigationActivity, "VR es para caminar. Volviendo al mapa.", Toast.LENGTH_LONG).show()
@@ -205,6 +209,18 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             val now = SystemClock.elapsedRealtime()
                             if (now - lastFrameAt >= 100L) {
                                 lastFrameAt = now
+                                if (ground.geospatialConfigured) {
+                                    val earth = session.earth
+                                    if (earth?.earthState == com.google.ar.core.Earth.EarthState.ENABLED &&
+                                        earth.trackingState == TrackingState.TRACKING) {
+                                        val pose = earth.cameraGeospatialPose
+                                        if (pose.horizontalAccuracy <= 10.0) {
+                                            here = RouteGeometry.Point(pose.latitude, pose.longitude)
+                                            hereAt = now; visualFixAt = now
+                                            if (route == null && routeCall == null) requestWalkingRoute()
+                                        }
+                                    }
+                                }
                                 val location = here?.takeIf { now - hereAt < 15000L }
                                 val placing = ground.requestManualPlacement
                                 groundState = ground.update(session, frame, location, now, width, height)
@@ -291,10 +307,14 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         stepAlong = walking.steps.map { RouteGeometry.project(walking.points, it.point)?.along ?: 0.0 }.toDoubleArray()
         routeActive = true; lastSpokenStep = -1; offRouteSince = 0L
         ground.setRoute(walking); groundState = GroundRouteController.State()
-        setResult(RESULT_OK, Intent().putExtra(EXTRA_WALKING_ROUTE, true)
+        updateResult(walking)
+        here?.let { updateDirections(RouteGeometry.project(walking.points, it)?.along ?: 0.0, it) }
+    }
+
+    private fun updateResult(walking: WalkingRoute) {
+        setResult(RESULT_OK, Intent().putExtra(EXTRA_WALKING_ROUTE, true).putExtra("walking_voice", voiceEnabled)
             .putExtra(WalkingRoute.EXTRA_LAT, walking.destination.lat)
             .putExtra(WalkingRoute.EXTRA_LON, walking.destination.lon))
-        here?.let { updateDirections(RouteGeometry.project(walking.points, it)?.along ?: 0.0, it) }
     }
 
     private fun updateDirections(along: Double, location: RouteGeometry.Point?) {
@@ -337,6 +357,7 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         voiceEnabled = !voiceEnabled
         if (!voiceEnabled && ::tts.isInitialized) tts.stop()
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("voice_enabled", voiceEnabled).apply()
+        route?.let { updateResult(it) }
     }
     override fun onInit(status: Int) {
         ttsReady = status == TextToSpeech.SUCCESS
