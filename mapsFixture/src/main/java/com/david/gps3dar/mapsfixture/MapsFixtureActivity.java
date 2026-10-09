@@ -13,6 +13,14 @@ public class MapsFixtureActivity extends Activity {
     private String url;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        incoming();
+    }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        incoming();
+    }
+    private void incoming() {
         destination = getIntent().getStringExtra("destination");
         url = getIntent().getStringExtra("url");
         if (getIntent().getBooleanExtra("navigation", false)) navigation(); else preview();

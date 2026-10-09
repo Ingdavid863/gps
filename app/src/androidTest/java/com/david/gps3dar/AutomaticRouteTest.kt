@@ -40,7 +40,8 @@ class AutomaticRouteTest {
             val second = "https://www.google.com/maps/dir/?api=1&destination=19.7301,-99.2103&travelmode=driving"
             fun launchAndWait(title: String, url: String, navigation: Boolean): RealisticMapActivity {
                 context.startActivity(Intent().setClassName(AutoShareFlow.MAPS, "com.david.gps3dar.mapsfixture.MapsFixtureActivity")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("destination", title).putExtra("url", url).putExtra("navigation", navigation))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra("destination", title).putExtra("url", url).putExtra("navigation", navigation))
                 val deadline = SystemClock.elapsedRealtime() + 25_000
                 var received: RealisticMapActivity? = null
                 while (SystemClock.elapsedRealtime() < deadline && received == null) {
