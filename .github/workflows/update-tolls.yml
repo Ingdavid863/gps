@@ -1,0 +1,39 @@
+name: Update Mexico toll tariffs
+on:
+  schedule:
+    - cron: '20 9 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/update-tolls.yml']
+
+permissions:
+  contents: write
+concurrency:
+  group: mexico-toll-catalog
+  cancel-in-progress: false
+
+jobs:
+  tariffs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/gps3d-0.14.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PDF reader
+        run: pip install pdfplumber==0.11.7
+      - name: Validate source mapping
+        run: python -m unittest discover -s scripts -p 'test_*.py'
+      - name: Refresh national inventory and published operator tariffs
+        run: python scripts/update_tolls.py
+      - name: Publish the small catalog for installed apps
+        run: |
+          git add app/src/main/assets/mx-tolls.json
+          if ! git diff --cached --quiet; then
+            git -c user.name='gps3d-tariffs' -c user.email='gps3d-tariffs@users.noreply.github.com' commit -m 'Update verified Mexico toll catalog'
+            git push origin HEAD:codex/gps3d-0.14.0
+          fi
