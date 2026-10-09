@@ -62,17 +62,25 @@ class SignalRepositoryTest {
     }
     @Test fun liveMexicoSignalLocationsHaveDocumentedOsmNodesWhenLiveQaIsEnabled() {
         if (System.getenv("GPS3D_SIGNAL_LIVE_QA") != "1") return
-        val service = SignalRepository(OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build())
-        val finished = CountDownLatch(1)
-        var snapshot: SignalRepository.Snapshot? = null
-        var failure: String? = null
-        val start = System.currentTimeMillis()
-        service.load(center) { s, e -> snapshot = s; failure = e; finished.countDown() }
-        assertTrue(finished.await(45, TimeUnit.SECONDS))
-        assertNull("Live OSM endpoint must be reachable", failure)
-        assertNotNull(snapshot); assertTrue(snapshot!!.signals.isNotEmpty()); assertTrue(snapshot!!.loadedAt >= start)
-        java.io.File("build/signal-qa").mkdirs()
-        java.io.File("build/signal-qa/real-mexico-signals.json").writeText(SignalRepository.encode(snapshot!!))
-        service.close()
+        val regions = linkedMapOf("real-mexico-signals" to center,
+            "huehuetoca-route-area" to RouteGeometry.Point(19.7356, -99.2060),
+            "cuautitlan-izcalli-area" to RouteGeometry.Point(19.65, -99.21))
+        val directory = java.io.File("build/signal-qa").apply { mkdirs() }
+        for ((name, point) in regions) {
+            val service = SignalRepository(OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build())
+            try {
+                val finished = CountDownLatch(1)
+                var snapshot: SignalRepository.Snapshot? = null
+                var failure: String? = null
+                val start = System.currentTimeMillis()
+                service.load(point) { s, e -> snapshot = s; failure = e; finished.countDown() }
+                assertTrue("Live lookup finishes for $name", finished.await(45, TimeUnit.SECONDS))
+                assertNull("Live OSM endpoint must be reachable for $name", failure)
+                assertNotNull(snapshot); assertTrue(snapshot!!.loadedAt >= start)
+                if (name == "real-mexico-signals") assertTrue(snapshot!!.signals.isNotEmpty())
+                // An empty local response documents missing map coverage; it does not invent traffic lights.
+                java.io.File(directory, "$name.json").writeText(SignalRepository.encode(snapshot!!))
+            } finally { service.close() }
+        }
     }
 }

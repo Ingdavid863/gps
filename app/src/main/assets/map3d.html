@@ -832,6 +832,14 @@
             if (s) s.setData(pointData(points));
             document.getElementById('signal-status').textContent = String(status || '');
         },
+        signalState() {
+            const layer = map.getLayer('gps-signals-layer');
+            return {source:!!map.getSource('gps-signals'), layer:!!layer,
+                icon:map.hasImage('gps-signal-neutral'),
+                rendered:layer ? map.queryRenderedFeatures({layers:['gps-signals-layer']}).length : 0,
+                coordinates:map.getSource('gps-signals') ? map.querySourceFeatures('gps-signals').map(f=>f.geometry.coordinates) : [],
+                status:document.getElementById('signal-status').textContent};
+        },
         setSelectionPin(lon, lat) {
             if (!ready) return;
             selectedPoint = [Number(lon), Number(lat)];
