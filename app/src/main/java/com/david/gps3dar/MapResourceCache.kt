@@ -46,13 +46,13 @@ class MapResourceCache(directory: File, transport: OkHttpClient = OkHttpClient()
     }.getOrDefault(false)
     private fun request(url: String) = Request.Builder().url(url)
         .header("User-Agent", "GPS3D-AR-David/0.15").build()
-    internal fun bytes(url: String): Pair<ByteArray, String>? {
+    internal fun bytes(url: String, refresh: Boolean = false): Pair<ByteArray, String>? {
         if (!allowed(url)) return null
         val address = canonical(url)
         val request = request(address)
         // Reuse prepared resources immediately, including after their freshness expires.
         // A background route-buffer pass refreshes expired responses when online.
-        client.newCall(request.newBuilder().cacheControl(stale).build()).execute().use { r ->
+        if (!refresh || !online) client.newCall(request.newBuilder().cacheControl(stale).build()).execute().use { r ->
             if (r.isSuccessful) return r.body?.bytes()?.let { it to r.header("Content-Type", "application/octet-stream")!! }
         }
         if (!online) return null
@@ -95,7 +95,7 @@ class MapResourceCache(directory: File, transport: OkHttpClient = OkHttpClient()
                     Thread.sleep(40)
                     if (viewportGeneration.get() != id) return@execute
                 }
-                if (bytes(tileUrl(tile)) == null) return@execute
+                if (bytes(tileUrl(tile), refresh = true) == null) return@execute
             }
             }
         }
@@ -114,7 +114,7 @@ class MapResourceCache(directory: File, transport: OkHttpClient = OkHttpClient()
                     Thread.sleep(40)
                     if (generation.get() != id) return@execute
                 }
-                val ok = runCatching { bytes(tileUrl(tile))?.first?.isNotEmpty() == true }.getOrDefault(false)
+                val ok = runCatching { bytes(tileUrl(tile), refresh = true)?.first?.isNotEmpty() == true }.getOrDefault(false)
                 if (ok) completed++
                 done(completed, tiles.size)
                 // Bounded single-worker look-ahead, shared cache with the visible map.

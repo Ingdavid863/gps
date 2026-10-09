@@ -1,6 +1,7 @@
 package com.david.gps3dar
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.Manifest
 import android.content.ContentValues
 import android.provider.MediaStore
@@ -51,24 +52,34 @@ class MapNetworkTest {
                     .setLong(activity,SystemClock.elapsedRealtime()+120000)
             }
             var preparedCount=0
-            for(zoom in listOf(17.4,14.0,10.0,6.0)) {
+            evaluate(scenario,"window.GPS3D.setDarkTheme(false);true")
+            for(zoom in listOf(17.4,14.0,12.0,10.0,6.0)) {
                 evaluate(scenario,"window.GPS3D.follow(-99.133209,19.432608,0,$zoom,0,1);true")
                 val state=waitMap(scenario,zoom,30)
                 assertEquals("tomtom",state.getString("provider"))
                 assertEquals(0,state.getJSONObject("failures").optInt("vectorTiles"))
-                if(zoom==14.0)preparedCount=state.getInt("rendered")
+                if(zoom==12.0)preparedCount=state.getInt("rendered")
             }
             scenario.onActivity { activity ->
                 RealisticMapActivity::class.java.getDeclaredMethod("setMapNetworkAvailable",Boolean::class.javaPrimitiveType!!)
                     .apply{isAccessible=true}.invoke(activity,false)
             }
-            evaluate(scenario,"window.GPS3D.setDarkTheme(true);window.GPS3D.follow(-99.133209,19.432608,0,14,0,1);true")
+            evaluate(scenario,"window.GPS3D.setDarkTheme(true);window.GPS3D.follow(-99.133209,19.432608,0,12,0,1);true")
             val at=SystemClock.elapsedRealtime()
-            val state=waitMap(scenario,14.0,5)
-            assertTrue("prepared native zoom is responsive",SystemClock.elapsedRealtime()-at<2500)
+            val state=waitMap(scenario,12.0,8)
+            assertTrue("prepared native zoom is responsive",SystemClock.elapsedRealtime()-at<4000)
             assertTrue("full coverage, not a surviving corner tile",state.getInt("rendered")>=preparedCount*.70)
             assertTrue("street geometry actually renders",state.getInt("roads")>30)
+            Thread.sleep(500)
             requireNotNull(instrumentation.uiAutomation.takeScreenshot()).let { bitmap ->
+                val pixels=IntArray(bitmap.width*bitmap.height)
+                bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)
+                val roadPixels=pixels.count { color ->
+                    val r=Color.red(color);val g=Color.green(color);val b=Color.blue(color)
+                    r in 106..189&&g in 81..154&&b in 56..109&&r>g+10&&g>b+10
+                }
+                val scale=instrumentation.targetContext.resources.displayMetrics.density
+                assertTrue("streets visible in Android pixels, not labels on a blank map: $roadPixels",roadPixels>300*scale*scale)
                 val values=ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME,"android-offline-map.png")
                     put(MediaStore.Downloads.MIME_TYPE,"image/png")

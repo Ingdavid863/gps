@@ -70,6 +70,7 @@ let browser,server;
  const pixels=PNG.sync.read(screenshot);
  let roadPixels=0;
  for(let i=0;i<pixels.data.length;i+=4){const [r,g,b]=pixels.data.subarray(i,i+3);if(r>105&&r<190&&g>80&&g<155&&b>55&&b<110&&r>g+10&&g>b+10)roadPixels++;}
+ fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({measurements,statuses,cachedMs,roadPixels,offline:{rendered:offline.rendered,roads:offline.roads,areas:offline.areas}},null,2));
  assert.ok(roadPixels>300,'streets must be drawn on screen, not just labels on a gray background; pixels='+roadPixels);
  await context.setOffline(false);
  await page.evaluate(()=>{window.GPS3D.setNetworkAvailable(true);window.GPS3D.setDarkTheme(false)});

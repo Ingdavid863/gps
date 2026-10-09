@@ -9,7 +9,7 @@ const styles = context.window.NavigationStyles;
 test('full night style removes daytime land cover and keeps route and traffic data', () => {
  const day = basemap.themedStyle(styles,'tomtom',false,'test');
  const night = basemap.themedStyle(styles,'tomtom',true,'test');
- assert.equal(day.sprite,night.sprite,'theme switches must preserve loaded tile memory');
+ assert.equal(day.sprite,night.sprite,'theme switches reuse the cached icon atlas');
  assert.ok(night.layers.filter(l=>l.type==='symbol').every(l=>l.paint['text-color']==='#e5ecf3'),'night labels have sufficient contrast');
  assert.ok(day.layers.some(l=>l.id==='Earth Cover 0-4'));
  const data={type:'Feature',geometry:{type:'LineString',coordinates:[[-99.13,19.43],[-99.14,19.44]]}};

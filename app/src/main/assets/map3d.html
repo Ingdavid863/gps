@@ -326,7 +326,10 @@
             const themed = NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY);
             // Day and night have different layers, filters and label layouts. Painting
             // matching IDs alone leaves bright daytime land cover and missing night layers.
-            map.setStyle(NavigationBasemap.preserveNavigation(themed, map.getStyle()), {diff: true});
+            // Rebuild GPU buckets on a theme change. Retaining daytime buckets can leave
+            // cached lower zooms with labels but no road/fill geometry. Native HTTP assets
+            // remain cached, so this also works offline without downloading them again.
+            map.setStyle(NavigationBasemap.preserveNavigation(themed, map.getStyle()), {diff: false});
         }
         applySky(visuals.is3D && !darkTheme);
     }
