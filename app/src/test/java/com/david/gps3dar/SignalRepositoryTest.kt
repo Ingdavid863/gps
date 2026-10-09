@@ -63,10 +63,13 @@ class SignalRepositoryTest {
     @Test fun liveMexicoSignalLocationsHaveDocumentedOsmNodesWhenLiveQaIsEnabled() {
         if (System.getenv("GPS3D_SIGNAL_LIVE_QA") != "1") return
         val regions = linkedMapOf("real-mexico-signals" to center,
-            "huehuetoca-route-area" to RouteGeometry.Point(19.7356, -99.2060),
+            "route-area-north-mexico-valley" to RouteGeometry.Point(19.7356, -99.2060),
             "cuautitlan-izcalli-area" to RouteGeometry.Point(19.65, -99.21))
         val directory = java.io.File("build/signal-qa").apply { mkdirs() }
+        var previousAttempt = 0L
         for ((name, point) in regions) {
+            if (previousAttempt > 0) Thread.sleep((61_000 - (System.currentTimeMillis() - previousAttempt)).coerceAtLeast(0))
+            previousAttempt = System.currentTimeMillis()
             val service = SignalRepository(OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build())
             try {
                 val finished = CountDownLatch(1)
@@ -75,8 +78,8 @@ class SignalRepositoryTest {
                 val start = System.currentTimeMillis()
                 service.load(point) { s, e -> snapshot = s; failure = e; finished.countDown() }
                 assertTrue("Live lookup finishes for $name", finished.await(45, TimeUnit.SECONDS))
-                println("Live signal lookup $name: nodes=${snapshot?.signals?.size}, error=$failure")
-                assertNull("Live OSM endpoint must be reachable for $name", failure)
+                println("Live signal lookup $name: nodes=${snapshot?.signals?.size}, error=$failure, reason=${service.failureReason}")
+                assertNull("Live OSM endpoint must be reachable for $name: ${service.failureReason}", failure)
                 assertNotNull(snapshot); assertTrue(snapshot!!.loadedAt >= start)
                 if (name == "real-mexico-signals") assertTrue(snapshot!!.signals.isNotEmpty())
                 // An empty local response documents missing map coverage; it does not invent traffic lights.

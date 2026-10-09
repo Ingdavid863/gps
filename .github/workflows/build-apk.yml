@@ -52,7 +52,6 @@ jobs:
           echo "ARCore and TomTom credentials are configured."
       - name: Test navigation and build debug APK
         env:
-          GPS3D_SIGNAL_LIVE_QA: '1'
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
         run: |
@@ -104,6 +103,20 @@ jobs:
           path: |
             build/native-map-qa/
             app/build/outputs/androidTest-results/connected/
+      - name: Verify live signal data in Mexico
+        env:
+          GPS3D_SIGNAL_LIVE_QA: '1'
+          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          gradle testDebugUnitTest --tests '*SignalRepositoryTest' --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GPS3D-0.18-signal-validation
+          path: |
+            app/build/signal-qa/
+            app/build/test-results/testDebugUnitTest/
       - name: Verify APK identity and update signature
         run: |
           python3 - <<'PY'

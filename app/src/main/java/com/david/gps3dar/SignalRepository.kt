@@ -5,10 +5,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /** Observed OSM signal locations only: neither congestion nor clock time supplies a signal phase. */
-class SignalRepository(private val client: OkHttpClient, private val cache: File? = null,
+class SignalRepository(client: OkHttpClient, private val cache: File? = null,
     private val endpoints: List<String> = listOf("https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter")) {
+    private val client = client.newBuilder().callTimeout(20, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
     data class Signal(val id: Long, val point: RouteGeometry.Point, val pedestrian: Boolean = false)
     data class Snapshot(val center: RouteGeometry.Point, val signals: List<Signal>, val osmTimestamp: String,
         val loadedAt: Long, val cached: Boolean = false)
@@ -17,6 +19,8 @@ class SignalRepository(private val client: OkHttpClient, private val cache: File
     }.getOrNull()
         private set
     @Volatile var lastError: String? = null
+        private set
+    @Volatile var failureReason: String? = null
         private set
     private var call: Call? = null
     private var epoch = 0
@@ -27,6 +31,7 @@ class SignalRepository(private val client: OkHttpClient, private val cache: File
         if (previous != null && now - previous.loadedAt in 0..3_600_000 && RouteGeometry.distance(center, previous.center) < 450) return
         lastAttempt = now
         lastError = null
+        failureReason = null
         val token = ++epoch
         request(center, now, token, 0, done)
     }
@@ -35,25 +40,31 @@ class SignalRepository(private val client: OkHttpClient, private val cache: File
         val request = Request.Builder().url(endpoints[index]).post(FormBody.Builder().add("data", query).build())
             .header("User-Agent", "GPS3D-AR-David/0.18 (OSM signal locations)").build()
         val current = client.newCall(request); call = current
-        fun failed() {
+        fun failed(reason: String) {
             synchronized(this) {
                 if (token != epoch) return
+                failureReason = reason
                 call = null
                 if (index + 1 < endpoints.size) request(center, now, token, index + 1, done)
                 else { lastError = "Servicio de ubicaciones OSM no disponible"; done(snapshot, lastError) }
             }
         }
         current.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) { if (!call.isCanceled()) failed() }
+            override fun onFailure(call: Call, e: IOException) { if (!call.isCanceled()) failed(e.javaClass.simpleName) }
             override fun onResponse(call: Call, response: Response) {
-                val result = runCatching { response.use {
-                    if (!it.isSuccessful) throw IOException("Signal service unavailable")
+                val outcome = runCatching { response.use {
+                    if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
                     parse(it.body?.string().orEmpty(), center, now)
-                } }.getOrNull()
-                if (result == null) { failed(); return }
+                } }
+                val result = outcome.getOrNull()
+                if (result == null) {
+                    val error = outcome.exceptionOrNull()
+                    failed(error?.message?.takeIf { it.startsWith("HTTP ") } ?: error?.javaClass?.simpleName ?: "Respuesta OSM inválida")
+                    return
+                }
                 synchronized(this@SignalRepository) {
                     if (token != epoch) return
-                    this@SignalRepository.call = null; snapshot = result
+                    this@SignalRepository.call = null; snapshot = result; failureReason = null
                     runCatching { cache?.writeText(encode(result)) }
                     done(result, null)
                 }
