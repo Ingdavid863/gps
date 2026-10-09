@@ -3,7 +3,6 @@ package com.david.gps3dar
 import android.os.Handler
 import android.os.Looper
 import com.google.ar.core.Anchor
-import com.google.ar.core.DepthPoint
 import com.google.ar.core.Earth
 import com.google.ar.core.Frame
 import com.google.ar.core.HitResult
@@ -92,7 +91,7 @@ class GroundRouteController {
             val pose = Pose(floatArrayOf(frame.camera.pose.tx(), hit.hitPose.ty() + .025f, frame.camera.pose.tz()),
                 floatArrayOf(0f, sin(yaw / 2).toFloat(), 0f, cos(yaw / 2).toFloat()))
             clear()
-            manual = ManualReference(session.createAnchor(pose), origin)
+            manual = ManualReference(hit.trackable.createAnchor(pose), origin)
         }
 
         val isManual = manual != null
@@ -210,9 +209,8 @@ class GroundRouteController {
             val trackable = hit.trackable
             val heightBelowCamera = frame.camera.pose.ty() - hit.hitPose.ty()
             hit.distance < 8f && heightBelowCamera in .6f..3f &&
-                ((trackable is Plane && trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING &&
-                    trackable.trackingState == TrackingState.TRACKING && trackable.isPoseInPolygon(hit.hitPose)) ||
-                    (trackable is DepthPoint && trackable.trackingState == TrackingState.TRACKING))
+                trackable is Plane && trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING &&
+                    trackable.trackingState == TrackingState.TRACKING && trackable.isPoseInPolygon(hit.hitPose)
         }
     }
 }
