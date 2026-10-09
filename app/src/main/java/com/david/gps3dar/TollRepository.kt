@@ -1,22 +1,19 @@
 package com.david.gps3dar
 
 import okhttp3.Call
-import okhttp3.Callback
-import okhttp3.FormBody
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
 import org.json.JSONObject
-import java.io.IOException
 import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.Executors
 import kotlin.math.abs
 
 /** Booths are projected on the chosen route, not counted from nearby roads or toll sections. */
 class TollRepository(private val client: OkHttpClient, catalogJson: String) {
     data class Booth(val id: Long, val name: String, val lat: Double, val lon: Double,
-                     val alongMeters: Double, val carMxn: Double?, val effective: String? = null)
+                     val alongMeters: Double, val carMxn: Double?, val effective: String? = null,
+                     val source: String? = null, val role: String? = null, val maxCarMxn: Double? = carMxn)
     data class Quote(val booths: List<Booth>, val hasTollSections: Boolean, val lookupSucceeded: Boolean) {
         // A known toll section with no booth records is unknown, never a free route.
         val coverageKnown get() = lookupSucceeded && (!hasTollSections || booths.isNotEmpty())
@@ -30,40 +27,23 @@ class TollRepository(private val client: OkHttpClient, catalogJson: String) {
         }.groupBy { it.name }
     }.getOrDefault(emptyMap())
     private val generation = AtomicInteger()
+    private val worker = Executors.newSingleThreadExecutor()
+    @Volatile private var national = runCatching { TollCatalog(JSONObject(catalogJson)) }.getOrNull()
     private var call: Call? = null
 
     fun cancel() { generation.incrementAndGet(); call?.cancel(); call = null }
+    fun close() { cancel(); worker.shutdownNow() }
+    fun replaceCatalog(json: String) { national = TollCatalog(JSONObject(json)) }
 
-    fun load(route: List<RouteGeometry.Point>, hasTollSections: Boolean, completed: (Quote) -> Unit) {
+    fun load(route: List<RouteGeometry.Point>, hasTollSections: Boolean, sections: List<IntRange> = emptyList(), entered: List<Long> = emptyList(), completed: (Quote) -> Unit) {
         cancel()
         val id = generation.get()
         if (route.size < 2) { completed(Quote(emptyList(), hasTollSections, false)); return }
         if (!hasTollSections) { completed(Quote(emptyList(), false, true)); return }
-        val corridor = RouteGeometry.simplify(route)
-            .joinToString(",") { "${it.lat},${it.lon}" }
-        val query = "[out:json][timeout:25];node[\"barrier\"=\"toll_booth\"](around:80,$corridor);out;"
-        fetch(query, route, hasTollSections, id, 0, completed)
-    }
-
-    private fun fetch(query: String, route: List<RouteGeometry.Point>, hasTolls: Boolean, id: Int, retry: Int, completed: (Quote) -> Unit) {
-        if (generation.get() != id) return
-        val endpoints = listOf("https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter")
-        val request = Request.Builder().url(endpoints[retry]).post(FormBody.Builder().add("data", query).build())
-            .header("User-Agent", "GPS3D-AR-David/0.13").build()
-        val requestCall = client.newCall(request)
-        call = requestCall
-        requestCall.enqueue(object : Callback {
-            fun finish(body: String?) {
-                if (requestCall.isCanceled() || generation.get() != id) return
-                val parsed = runCatching { body?.let { parse(JSONObject(it), route) } }.getOrNull()
-                if (parsed == null && retry == 0) fetch(query, route, hasTolls, id, 1, completed)
-                else completed(Quote(parsed.orEmpty(), hasTolls, parsed != null))
-            }
-            override fun onFailure(call: Call, e: IOException) { finish(null) }
-            override fun onResponse(call: Call, response: Response) {
-                finish(response.use { if (it.isSuccessful) runCatching { it.body?.string() }.getOrNull() else null })
-            }
-        })
+        worker.execute {
+            val quote = national?.quote(route, hasTollSections, sections, entered) ?: Quote(emptyList(), hasTollSections, false)
+            if (generation.get() == id) completed(quote)
+        }
     }
 
     fun parse(root: JSONObject, route: List<RouteGeometry.Point>): List<Booth> {

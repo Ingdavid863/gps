@@ -651,7 +651,7 @@
     window.GPS3D = {
         setDarkTheme: applyTheme,
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
-        setTrafficIntervals(intervals) { routeTrafficIntervals=Array.isArray(intervals)?intervals:[]; renderRouteTraffic(); },
+        setTrafficIntervals(intervals) { routeTrafficGeneration++; routeTrafficIntervals=Array.isArray(intervals)?intervals:[]; renderRouteTraffic(); },
         cameraState() { const c=map.getCenter(); return {mode:viewMode,pitch:map.getPitch(),center:[c.lng,c.lat],route:activeRoutePoints.map(p=>{const s=map.project(p);return [s.x,s.y]}),padding:currentPadding(true),dark:darkTheme}; },
         setVisuals(is3D, terrain, buildings, satellite) {
             visuals = { is3D: !!is3D, terrain: !!terrain, buildings: !!buildings, satellite: !!satellite };

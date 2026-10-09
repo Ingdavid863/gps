@@ -125,10 +125,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private var tollQuote: TollRepository.Quote? = null
     private var tollProgressDistances = DoubleArray(0)
     private var tollLookupPending = false
+    private val enteredTollPlazas = mutableListOf<Long>()
+    private val passedTollPlazas = mutableSetOf<Long>()
     private var avoidTolls = false
     private var viewMode = 0
     private var externalLinkCall: Call? = null
     private var routeGeneration = 0
+    private var lastCatalogRevision = 0L
 
     private var mapReady = false
     private var rawLocation: Location? = null
@@ -239,7 +242,21 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         tts = TextToSpeech(this, this)
 
         bindViews()
-        tollRepository = TollRepository(http, assets.open("capufe-tarifas-2026.json").bufferedReader().use { it.readText() })
+        val catalogJson = TollCatalogStore.load(this)
+        lastCatalogRevision = JSONObject(catalogJson).getLong("revision")
+        tollRepository = TollRepository(http, catalogJson)
+        TariffSyncWorker.schedule(this)
+        val catalogUpdated: () -> Unit = {
+            val json = TollCatalogStore.load(this)
+            val revision = JSONObject(json).getLong("revision")
+            if (revision > lastCatalogRevision) {
+                lastCatalogRevision = revision
+                tollRepository.replaceCatalog(json)
+                if (routeActive) refreshTolls()
+            }
+        }
+        androidx.work.WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("mx-tolls-daily").observe(this) { catalogUpdated() }
+        androidx.work.WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("mx-tolls-now").observe(this) { catalogUpdated() }
         avoidTolls = getPreferences(MODE_PRIVATE).getBoolean("avoidTolls", false)
         setupWebMap()
         setupSearchUi()
@@ -1326,6 +1343,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun requestRoute(
         fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, isReroute: Boolean = false
     ) {
+        if (!isReroute && routeDestination?.let { distanceMeters(it.lat,it.lon,toLat,toLon)>50 } != false) {
+            enteredTollPlazas.clear(); passedTollPlazas.clear()
+        }
         val generation = ++routeGeneration
         val requestedAvoid = avoidTolls
         rerouting = true
@@ -1389,7 +1409,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                             RouteOption(points, parseTomTomSteps(route, points),
                                 if (live > 0.0) live else duration, summary.optDouble("lengthInMeters", 0.0),
                                 summary.optDouble("trafficDelayInSeconds", 0.0),
-                                summary.optDouble("noTrafficTravelTimeInSeconds", duration), hasTolls, requestedAvoid)
+                                summary.optDouble("noTrafficTravelTimeInSeconds", duration), hasTolls, requestedAvoid,
+                                (0 until sections.length()).mapNotNull { j ->
+                                    val section=sections.optJSONObject(j) ?: return@mapNotNull null
+                                    if (section.optString("sectionType") !in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")) return@mapNotNull null
+                                    section.optInt("startPointIndex",0)..section.optInt("endPointIndex",points.lastIndex)
+                                })
                         }
                     }.getOrNull()
                 }
@@ -1729,6 +1754,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun stopNavigation() {
         routeActive = false
+        enteredTollPlazas.clear(); passedTollPlazas.clear()
         routeGeneration++
         tollRepository.cancel()
         tollQuote = null
@@ -1937,6 +1963,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun refreshTolls() {
+        remainingTolls() // Preserve a passed closed-system entrance before replacing the quote.
         tollQuote = null
         tollLookupPending = true
         syncTolls()
@@ -1949,7 +1976,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 RouteGeometry.Point(a.lat, a.lon), RouteGeometry.Point(b.lat, b.lon))
         }
         val option = routeAlternatives.getOrNull(activeRouteIndex) ?: return
-        tollRepository.load(snapshot.map { RouteGeometry.Point(it.lat, it.lon) }, option.hasTolls) { quote ->
+        tollRepository.load(snapshot.map { RouteGeometry.Point(it.lat, it.lon) }, option.hasTolls, option.tollSections, enteredTollPlazas.toList()) { quote ->
             ui.post {
                 if (isDestroyed || !routeActive || routePoints !== snapshot) return@post
                 tollLookupPending = false
@@ -1972,7 +1999,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             traveled += RouteGeometry.project(listOf(RouteGeometry.Point(a.lat, a.lon),
                 RouteGeometry.Point(b.lat, b.lon)), RouteGeometry.Point(match.lat, match.lon))?.along ?: 0.0
         }
-        return tollQuote?.booths.orEmpty().filter { it.alongMeters + 35.0 >= traveled }
+        val booths=tollQuote?.booths.orEmpty()
+        for (booth in booths.filter { it.alongMeters+35.0<traveled }) {
+            if (!passedTollPlazas.add(booth.id)) continue
+            if (booth.role=="Entrada") enteredTollPlazas.add(booth.id)
+            else if (booth.role=="Salida") enteredTollPlazas.clear()
+        }
+        return booths.filter { it.alongMeters + 35.0 >= traveled }
     }
 
     private fun syncTolls() {
@@ -1994,9 +2027,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             else -> {
                 tollCount.text = "Casetas: ${booths.size}\ndetectadas"
                 val known = booths.filter { it.carMxn != null }.sumOf { it.carMxn!! }
+                val maximum = booths.filter { it.carMxn != null }.sumOf { it.maxCarMxn ?: it.carMxn!! }
                 tollTotal.text = when {
-                    booths.all { it.carMxn != null } -> String.format(Locale("es", "MX"), "$%.0f MXN\nestimado", known)
-                    known > 0 -> String.format(Locale("es", "MX"), "≥ $%.0f MXN\nfaltan tarifas", known)
+                    booths.all { it.carMxn != null } && maximum > known + .001 -> String.format(Locale("es", "MX"), "$%.2f–$%.2f\nMXN estimado", known, maximum)
+                    booths.all { it.carMxn != null } -> String.format(Locale("es", "MX"), "$%.2f MXN\nestimado", known)
+                    known > 0 -> String.format(Locale("es", "MX"), "≥ $%.2f MXN\nfaltan tarifas", known)
                     else -> "Tarifa\npendiente"
                 }
             }
@@ -2008,10 +2043,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val message = if (booths.isEmpty()) {
             if (tollQuote?.coverageKnown == true) "No hay casetas pendientes en esta ruta." else "Aún no hay datos suficientes para contar o cotizar las casetas."
         } else booths.mapIndexed { index, b ->
-            "${index + 1}. ${b.name}: " + (b.carMxn?.let { "$${it.toInt()} MXN (${b.effective})" } ?: "tarifa pendiente")
+            "${index + 1}. ${b.name}: " + (b.carMxn?.let {
+                if ((b.maxCarMxn ?: it)>it+.001) String.format(Locale("es", "MX"), "$%.2f–$%.2f MXN",it,b.maxCarMxn)
+                else String.format(Locale("es", "MX"), "$%.2f MXN",it)
+            }?.plus(" (${b.effective})") ?: "tarifa pendiente") + "\nFuente: ${b.source ?: "sin tarifa publicada"}"
         }.joinToString("\n")
         AlertDialog.Builder(this).setTitle("Casetas hasta tu destino")
-            .setMessage(message + "\n\nEstimación para auto de 2 ejes, sin remolque. Plazas detectadas en OpenStreetMap y tarifas CAPUFE 2026. Puede faltar información de concesiones o cobros por entrada/salida.")
+            .setMessage(message + "\n\nAuto de 2 ejes, sin remolque. Catálogo nacional INEGI/IMT, CAPUFE y concesiones. Se conserva la fecha de cada tarifa; los cobros cerrados dependen de la entrada y salida. Actualización automática al recuperar conexión.")
             .setPositiveButton("Cerrar", null).show()
     }
 
@@ -2116,7 +2154,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         searchCall?.cancel()
         destinationSearch.cancel()
         externalLinkCall?.cancel()
-        tollRepository.cancel()
+        tollRepository.close()
         placePreviewCall?.cancel()
         placeImageCall?.cancel()
         routeCall?.cancel()
@@ -2163,7 +2201,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val trafficDelaySeconds: Double = 0.0,
         val noTrafficDurationSeconds: Double = durationSeconds,
         val hasTolls: Boolean = false,
-        val avoidsTolls: Boolean = false
+        val avoidsTolls: Boolean = false,
+        val tollSections: List<IntRange> = emptyList()
     )
 
     companion object {
