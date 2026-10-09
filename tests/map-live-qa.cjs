@@ -15,13 +15,27 @@ let browser,server;
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  const context=await browser.newContext({viewport:{width:390,height:840}});
- const page=await context.newPage(),errors=[],statuses={};
+ const page=await context.newPage(),errors=[],statuses={},preparedResources=new Map();
  page.on('pageerror',e=>errors.push(e.message.replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]')));
  page.on('response',r=>{if(/\/map\/1\/tile\/basic\//.test(r.url()))statuses[r.status()]=(statuses[r.status()]||0)+1;});
  // Optional 3D/traffic services should not influence the basemap regression.
- await page.route(/^https:\/\//,r=>{
+ await page.route(/^https:\/\//,async r=>{
   const u=new URL(r.request().url());
-  if(u.hostname.endsWith('api.tomtom.com')&&(/^\/map\//.test(u.pathname)||/^\/style\//.test(u.pathname)))r.continue();else r.abort();
+  if(u.hostname.endsWith('api.tomtom.com')&&(/^\/map\//.test(u.pathname)||/^\/style\//.test(u.pathname))){
+   // Model the Android HTTP map cache. Route interception disables Chromium's own
+   // HTTP cache, so continuing requests would falsely test only a partial GPU cache.
+   if(/^\/map\//.test(u.pathname))u.hostname='a.api.tomtom.com';
+   const id=u.toString(),cached=preparedResources.get(id);
+   if(cached){await r.fulfill(cached);return;}
+   try{
+    const response=await r.fetch();
+    const headers={...response.headers(),'access-control-allow-origin':'*'};
+    delete headers['content-encoding'];delete headers['content-length'];
+    const resource={status:response.status(),headers,body:await response.body()};
+    if(response.ok())preparedResources.set(id,resource);
+    await r.fulfill(resource);
+   }catch{await r.abort();}
+  }else await r.abort();
  });
  await page.addInitScript(()=>{window.AndroidBridge={onMapReady(){window.mapReady=true}}});
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
@@ -45,9 +59,11 @@ let browser,server;
  await page.evaluate(()=>window.GPS3D.setNetworkAvailable(false));await context.setOffline(true);
  const start=Date.now();
  await page.evaluate(()=>window.GPS3D.follow(-99.133209,19.432608,0,12,0,1));
- await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return Math.abs(s.zoom-12)<.02&&s.rendered>0},{},{timeout:5000});
+ await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return Math.abs(s.zoom-12)<.02&&s.tilesLoaded&&s.rendered>0},{},{timeout:5000});
  const cachedMs=Date.now()-start;
- assert.ok(cachedMs<1500,'prepared zoom stays responsive offline');
+ assert.ok(cachedMs<1500,'complete prepared viewport stays responsive offline');
+ const offline=await page.evaluate(()=>window.GPS3D.mapState());
+ assert.ok(offline.rendered>=measurements.find(m=>m.zoom===12).rendered*.70,'offline viewport must have full coverage, not a single surviving tile');
  await page.screenshot({path:path.join(output,'offline-zoom-12.png')});
  await context.setOffline(false);
  await page.evaluate(()=>{window.GPS3D.setNetworkAvailable(true);window.GPS3D.setDarkTheme(false)});

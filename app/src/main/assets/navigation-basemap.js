@@ -14,6 +14,12 @@
             }
         }
         if (provider === 'tomtom') {
+            // Changing the sprite URL forces MapLibre to rebuild its entire style and
+            // discard loaded tiles. Keep the same atlas across day/night transitions.
+            style.sprite = JSON.parse(JSON.stringify(styles.day.sprite).replaceAll('{{TOMTOM_API_KEY}}', encodeURIComponent(key || '')));
+            if (dark) for (const layer of style.layers) if (layer.type === 'symbol') {
+                layer.paint = {...layer.paint, 'text-color':'#e5ecf3', 'text-halo-color':'#1d2732', 'text-halo-width':1.2};
+            }
             // Browser connection limits should not serialize all visible tiles onto one host.
             style.sources.vectorTiles.tiles = ['a', 'b', 'c', 'd'].map(host =>
                 `https://${host}.api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key || '')}`);

@@ -1120,7 +1120,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun resizeSearchSuggestions() {
         val container = findViewById<View>(R.id.searchSuggestionsContainer)
         if (container.visibility != View.VISIBLE || webMapView.height <= 0) return
-        val height = min(dp(360), (webMapView.height - dp(88)).coerceAtLeast(dp(96)))
+        val width = (webMapView.width - dp(24)).coerceAtLeast(1)
+        searchSuggestions.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val available = min(dp(360), (webMapView.height - dp(88)).coerceAtLeast(dp(96)))
+        val height = min(available, searchSuggestions.measuredHeight.coerceAtLeast(dp(80)))
         if (container.layoutParams.height != height) { container.layoutParams.height = height; container.requestLayout() }
     }
 
