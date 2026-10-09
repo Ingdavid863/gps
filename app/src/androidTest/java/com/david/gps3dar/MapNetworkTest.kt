@@ -2,6 +2,8 @@ package com.david.gps3dar
 
 import android.graphics.Bitmap
 import android.Manifest
+import android.content.ContentValues
+import android.provider.MediaStore
 import android.os.SystemClock
 import android.webkit.WebView
 import androidx.test.core.app.ActivityScenario
@@ -65,9 +67,16 @@ class MapNetworkTest {
             val state=waitMap(scenario,14.0,5)
             assertTrue("prepared native zoom is responsive",SystemClock.elapsedRealtime()-at<2500)
             assertTrue("full coverage, not a surviving corner tile",state.getInt("rendered")>=preparedCount*.70)
-            val output=File(instrumentation.targetContext.externalCacheDir,"map-qa").apply{mkdirs()}
+            assertTrue("street geometry actually renders",state.getInt("roads")>30)
             requireNotNull(instrumentation.uiAutomation.takeScreenshot()).let { bitmap ->
-                File(output,"android-offline-map.png").outputStream().use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+                val values=ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME,"android-offline-map.png")
+                    put(MediaStore.Downloads.MIME_TYPE,"image/png")
+                    put(MediaStore.Downloads.RELATIVE_PATH,"Download/GPS3DQA")
+                }
+                val resolver=instrumentation.targetContext.contentResolver
+                val uri=requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values))
+                requireNotNull(resolver.openOutputStream(uri)).use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
                 bitmap.recycle()
             }
         }

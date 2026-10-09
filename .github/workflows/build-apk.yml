@@ -62,7 +62,7 @@ jobs:
         env:
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
         run: |
-          npm install --prefix "$RUNNER_TEMP/gps3d-qa" playwright@1.51.1
+          npm install --prefix "$RUNNER_TEMP/gps3d-qa" playwright@1.51.1 pngjs@7.0.0
           "$RUNNER_TEMP/gps3d-qa/node_modules/.bin/playwright" install --with-deps chromium
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-live-qa.cjs
@@ -88,7 +88,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             gradle connectedDebugAndroidTest --stacktrace
-            adb pull /sdcard/Android/data/com.david.gps3dar/cache/map-qa build/native-map-qa
+            adb pull /sdcard/Download/GPS3DQA build/native-map-qa
       - uses: actions/upload-artifact@v4
         if: always()
         with:

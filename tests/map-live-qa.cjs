@@ -1,6 +1,7 @@
 // Exercise the real vector service with CI credentials. Diagnostics never include URLs/keys.
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {chromium}=require(process.env.GPS3D_QA_NODE_MODULES+'/playwright');
+const {PNG}=require(process.env.GPS3D_QA_NODE_MODULES+'/pngjs');
 const key=process.env.TOMTOM_API_KEY;
 assert.ok(key,'Map service credential configured for rendering QA');
 const output=path.resolve(__dirname,'../build/map-qa');fs.mkdirSync(output,{recursive:true});
@@ -47,7 +48,7 @@ let browser,server;
   const state=await page.evaluate(()=>window.GPS3D.mapState());
   assert.equal(state.provider,'tomtom','primary service must render the actual map');
   assert.equal(state.failures.vectorTiles||0,0,'no missing vector tiles while zooming');
-  measurements.push({zoom,rendered:state.rendered});
+  measurements.push({zoom,rendered:state.rendered,roads:state.roads,areas:state.areas});
   if(zoom===14||zoom===3)await page.screenshot({path:path.join(output,`day-zoom-${zoom}.png`)});
  }
  await page.evaluate(()=>{const g=window.GPS3D;g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
@@ -64,12 +65,17 @@ let browser,server;
  assert.ok(cachedMs<1500,'complete prepared viewport stays responsive offline');
  const offline=await page.evaluate(()=>window.GPS3D.mapState());
  assert.ok(offline.rendered>=measurements.find(m=>m.zoom===12).rendered*.70,'offline viewport must have full coverage, not a single surviving tile');
- await page.screenshot({path:path.join(output,'offline-zoom-12.png')});
+ await page.waitForTimeout(500);
+ const screenshot=await page.screenshot({path:path.join(output,'offline-zoom-12.png')});
+ const pixels=PNG.sync.read(screenshot);
+ let roadPixels=0;
+ for(let i=0;i<pixels.data.length;i+=4){const [r,g,b]=pixels.data.subarray(i,i+3);if(r>105&&r<190&&g>80&&g<155&&b>55&&b<110&&r>g+10&&g>b+10)roadPixels++;}
+ assert.ok(roadPixels>300,'streets must be drawn on screen, not just labels on a gray background; pixels='+roadPixels);
  await context.setOffline(false);
  await page.evaluate(()=>{window.GPS3D.setNetworkAvailable(true);window.GPS3D.setDarkTheme(false)});
  await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return !s.dark&&s.layerIds.includes('Earth Cover 9-22')&&s.tilesLoaded&&s.rendered>0});
  assert.deepEqual(errors,[],'no renderer/script errors');
- const report={measurements,statuses,cachedMs,nightLayersCorrect:true};
+ const report={measurements,statuses,cachedMs,roadPixels,nightLayersCorrect:true};
  fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(report,null,2));
  console.log('Live map QA passed',JSON.stringify(report));
 })().catch(e=>{console.error(String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]'));process.exitCode=1})

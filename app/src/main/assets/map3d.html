@@ -207,9 +207,16 @@
             const t = Math.min(1, (now - cameraMotion.at) / cameraMotion.duration);
             displayedCamera = NavigationMotion.mix(cameraMotion.from, cameraMotion.to, t);
             const delta = motionStarted === null ? [0, 0] : displayedVehicle.map((v, i) => v - targetVehicle[i]);
-            map.jumpTo({center: displayedCamera.slice(0, 2).map((v, i) => v + delta[i]),
-                bearing: NavigationMotion.bearingMix(cameraMotion.from[2], cameraMotion.to[2], t),
-                zoom: displayedCamera[3], pitch: displayedCamera[4], padding: currentPadding()});
+            const center = displayedCamera.slice(0, 2).map((v, i) => v + delta[i]);
+            const bearing = NavigationMotion.bearingMix(cameraMotion.from[2], cameraMotion.to[2], t);
+            const padding = currentPadding(), current = map.getCenter(), actualPadding = map.getPadding();
+            // Repeating identical jumpTo calls every frame keeps the renderer permanently
+            // moving and prevents cached zooms from settling. Only apply a real change.
+            if (Math.abs(current.lng-center[0])>1e-8 || Math.abs(current.lat-center[1])>1e-8 ||
+                Math.abs(map.getZoom()-displayedCamera[3])>1e-6 || Math.abs(map.getPitch()-displayedCamera[4])>1e-6 ||
+                Math.abs(map.getBearing()-bearing)>1e-6 || Object.keys(padding).some(k=>Math.abs(actualPadding[k]-padding[k])>.01)) {
+                map.jumpTo({center, bearing, zoom:displayedCamera[3], pitch:displayedCamera[4], padding});
+            }
         }
         requestAnimationFrame(animateVehicleMarker);
     }
@@ -688,9 +695,11 @@
             prepareViewport();
         },
         mapState() {
+            const features=map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
             return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
                 layerIds:map.getStyle().layers.map(l=>l.id), failures:{...resourceFailures},
-                rendered:map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles').length};
+                rendered:features.length, roads:features.filter(f=>f.layer.type==='line'&&/road/i.test(f.layer['source-layer']||'')).length,
+                areas:features.filter(f=>f.layer.type==='fill').length};
         },
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
         setTrafficIntervals(intervals) { routeTrafficGeneration++; routeTrafficIntervals=Array.isArray(intervals)?intervals:[]; renderRouteTraffic(); },
