@@ -42,6 +42,14 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  await page.waitForTimeout(400);
  const canvasAfter=await page.locator('canvas.maplibregl-canvas').screenshot();
  assert.equal(Buffer.compare(canvasBefore,canvasAfter),0,'GPS follow must not override overview');
+ await page.setViewportSize({width:412,height:915});
+ await page.evaluate(()=>window.GPS3D.setViewport(.30,.22));
+ const resized=await page.evaluate(()=>window.GPS3D.cameraState());
+ assert.equal(resized.moving,false,'overview must fit immediately after a native panel resize');
+ for(const [x,y] of resized.route) {
+  assert.ok(x>=resized.padding.left-1&&x<=412-resized.padding.right+1,'resized route fits horizontally: '+JSON.stringify(resized));
+  assert.ok(y>=resized.padding.top-1&&y<=915-resized.padding.bottom+1,'resized route fits above footer: '+JSON.stringify(resized));
+ }
  await page.evaluate(()=>{window.GPS3D.setViewMode(1);window.GPS3D.follow(-99.13,19.43,0,17.4,55,1);});
  await page.waitForTimeout(500);
  await page.evaluate(()=>{window.GPS3D.setDarkTheme(true);window.GPS3D.setManeuvers([{index:1,maneuver:'TURN_LEFT'}]);});

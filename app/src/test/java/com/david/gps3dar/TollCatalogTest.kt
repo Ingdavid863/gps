@@ -41,6 +41,15 @@ class TollCatalogTest {
         bad.put("revision",0)
         assertTrue(runCatching { TollCatalog(bad) }.isFailure)
     }
+    @Test fun scheduledFareRangeSurvivesLocalRouteQuote() {
+        val root=JSONObject("""{"schema":2,"revision":1,"plazas":[{"id":1,"name":"Con horario","lat":19.405,"lon":-99.2,"fares":[
+            {"entryId":1,"carMxn":50.89,"carMxnMax":78.5,"effective":"Variable por horario","source":"Concesión"}]}]}""")
+        val booth=TollCatalog(root).quote(route,true).booths.single()
+        assertEquals(50.89,booth.carMxn!!,.001)
+        assertEquals(78.5,booth.maxCarMxn!!,.001)
+        root.getJSONArray("plazas").getJSONObject(0).getJSONArray("fares").getJSONObject(0).put("carMxnMax",40)
+        assertTrue(runCatching { TollCatalog(root) }.isFailure)
+    }
     @Test fun bundledNationalDataRetainsDifferentRoadsAndAccessRamps() {
         val root=JSONObject(File("src/main/assets/mx-tolls.json").readText())
         val catalog=TollCatalog(root)

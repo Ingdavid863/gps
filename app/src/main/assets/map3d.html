@@ -102,10 +102,13 @@
         if (!ready) return;
         cameraMotion = null;
         map.stop();
+        // Android can deliver panel/layout changes before WebView's next render frame.
+        // Re-measure before fitting and apply the overview atomically.
+        map.resize();
         // Follow uses an asymmetric anchor. Clear its padding before fitting full-route bounds.
         map.jumpTo({pitch:0, bearing:0, padding:{top:0,bottom:0,left:0,right:0}});
         const points = NavigationView.overviewPoints(activeRoutePoints, lastLocation, selectedPoint);
-        const options = { padding: currentPadding(true), pitch: 0, bearing: 0, duration: 350, essential: true };
+        const options = { padding: currentPadding(true), pitch: 0, bearing: 0, duration: 0, essential: true };
         if (points.length < 2) {
             map.easeTo({ ...options, center: lastLocation, zoom: 14 });
         } else {
@@ -207,6 +210,7 @@
         requestAnimationFrame(animateVehicleMarker);
     }
     requestAnimationFrame(animateVehicleMarker);
+    window.addEventListener('resize', () => { if (ready && viewMode===2) showOverview(); });
 
     const destinationElement = document.createElement('div');
     destinationElement.className = 'destination-flag';
@@ -652,7 +656,7 @@
         setDarkTheme: applyTheme,
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
         setTrafficIntervals(intervals) { routeTrafficGeneration++; routeTrafficIntervals=Array.isArray(intervals)?intervals:[]; renderRouteTraffic(); },
-        cameraState() { const c=map.getCenter(); return {mode:viewMode,pitch:map.getPitch(),center:[c.lng,c.lat],route:activeRoutePoints.map(p=>{const s=map.project(p);return [s.x,s.y]}),padding:currentPadding(true),dark:darkTheme}; },
+        cameraState() { const c=map.getCenter(); return {ready:setupFinished,moving:map.isMoving(),width:map.getContainer().clientWidth,height:map.getContainer().clientHeight,mode:viewMode,pitch:map.getPitch(),center:[c.lng,c.lat],route:activeRoutePoints.map(p=>{const s=map.project(p);return [s.x,s.y]}),padding:currentPadding(true),dark:darkTheme}; },
         setVisuals(is3D, terrain, buildings, satellite) {
             visuals = { is3D: !!is3D, terrain: !!terrain, buildings: !!buildings, satellite: !!satellite };
             applyVisuals();
@@ -726,11 +730,13 @@
             setSelectionMarker(null);
         },
         setViewport(top, bottom) {
-            viewportTop = Math.max(0, Number(top) || 0);
-            viewportBottom = Math.max(0, Number(bottom) || 0);
+            const nextTop = Math.max(0, Number(top) || 0), nextBottom = Math.max(0, Number(bottom) || 0);
+            const changed = Math.abs(viewportTop-nextTop)>0.00001 || Math.abs(viewportBottom-nextBottom)>0.00001;
+            viewportTop = nextTop;
+            viewportBottom = nextBottom;
             const attribution = document.querySelectorAll('.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right');
             attribution.forEach(el => { el.style.bottom = (viewportBottom * map.getContainer().clientHeight + 6) + 'px'; });
-            if (viewMode === 2) showOverview();
+            if (viewMode === 2 && changed) showOverview();
         },
         setViewMode(mode) {
             const next = Math.max(0, Math.min(2, Number(mode) || 0));

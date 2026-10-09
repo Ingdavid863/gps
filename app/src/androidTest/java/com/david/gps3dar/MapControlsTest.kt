@@ -31,8 +31,10 @@ class MapControlsTest {
         }
         ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
             val deadline = System.currentTimeMillis() + 30000
-            while (evaluate(scenario, "!!window.GPS3D") != "true" && System.currentTimeMillis() < deadline) Thread.sleep(250)
-            assertEquals("true", evaluate(scenario, "!!window.GPS3D"))
+            val ready="!!window.GPS3D && window.GPS3D.cameraState().ready"
+            while (evaluate(scenario, ready) != "true" && System.currentTimeMillis() < deadline) Thread.sleep(250)
+            assertEquals("true", evaluate(scenario, ready))
+            instrumentation.waitForIdleSync()
             evaluate(scenario, "window.GPS3D.setRoutes([[-99.13,19.43],[-99.135,19.44],[-99.15,19.46]],[],[]);true;")
             scenario.onActivity { it.findViewById<ImageButton>(R.id.viewModeButton).performClick() }
             Thread.sleep(700)
@@ -42,6 +44,8 @@ class MapControlsTest {
             Thread.sleep(700)
             state = JSONObject(evaluate(scenario, "window.GPS3D.cameraState()"))
             assertEquals(2, state.getInt("mode"));assertEquals(0.0, state.getDouble("pitch"), 1.0)
+            assertEquals("complete route supplied",3,state.getJSONArray("route").length())
+            assertFalse("overview applied immediately: $state",state.getBoolean("moving"))
             val padding = state.getJSONObject("padding")
             scenario.onActivity { activity ->
                 val map = activity.findViewById<WebView>(R.id.webMapView)
@@ -49,8 +53,8 @@ class MapControlsTest {
                 val width = map.width / density;val height = map.height / density
                 for (i in 0 until state.getJSONArray("route").length()) {
                     val point = state.getJSONArray("route").getJSONArray(i)
-                    assertTrue("origin/destination visible", point.getDouble(0) in (padding.getDouble("left")-2)..(width-padding.getDouble("right")+2))
-                    assertTrue("route fits above footer", point.getDouble(1) in (padding.getDouble("top")-2)..(height-padding.getDouble("bottom")+2))
+                    assertTrue("origin/destination visible; native=${width}x$height; state=$state", point.getDouble(0) in (padding.getDouble("left")-2)..(width-padding.getDouble("right")+2))
+                    assertTrue("route fits above footer; native=${width}x$height; state=$state", point.getDouble(1) in (padding.getDouble("top")-2)..(height-padding.getDouble("bottom")+2))
                 }
             }
             scenario.onActivity { it.findViewById<ImageButton>(R.id.viewModeButton).performClick() }
