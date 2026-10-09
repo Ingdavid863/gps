@@ -19,6 +19,15 @@
             if (dark) for (const layer of style.layers) if (layer.type === 'symbol') {
                 layer.paint = {...layer.paint, 'text-color':'#e5ecf3', 'text-halo-color':'#1d2732', 'text-halo-width':1.2};
             }
+            // Administrative boundaries are screen decorations, not road widths.
+            // Imported legacy stops reached 4096 px at zoom 19 and interpolated to
+            // about 1490 px at zoom 12, painting over streets while labels survived.
+            for (const layer of style.layers) if (layer.type === 'line' && /border/i.test(layer['source-layer'] || '')) {
+                const background = /background/i.test(layer.id);
+                layer.paint = {...layer.paint, 'line-width': background
+                    ? ['interpolate',['linear'],['zoom'],3,0.8,8,1.5,14,2,19.3,3]
+                    : ['interpolate',['linear'],['zoom'],3,0.6,8,1,14,1.2,19.3,1.6]};
+            }
             // Browser connection limits should not serialize all visible tiles onto one host.
             style.sources.vectorTiles.tiles = ['a', 'b', 'c', 'd'].map(host =>
                 `https://${host}.api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key || '')}`);
