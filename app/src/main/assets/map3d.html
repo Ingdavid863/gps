@@ -62,6 +62,7 @@
 <script src="navigation-motion.js"></script>
 <script src="navigation-view.js"></script>
 <script src="navigation-styles.js"></script>
+<script src="navigation-basemap.js"></script>
 <script src="navigation-maneuvers.js"></script>
 <script>
 (() => {
@@ -93,6 +94,10 @@
     let remainingRoutePoints = [];
     let selectedPoint = null;
     let maneuverSteps = [], darkTheme = false, currentSeverity = '';
+    let provider = TRAFFIC_API_KEY ? 'tomtom' : 'openfreemap';
+    let appliedTheme = false, baseFailures = 0, viewportSignature = '';
+    let networkAvailable = navigator.onLine;
+    const resourceFailures = {};
 
     function currentPadding(overview = false) {
         return NavigationView.padding(map.getContainer().clientWidth, map.getContainer().clientHeight,
@@ -138,9 +143,7 @@
     }
 
     // Local vector styles can start immediately, even when individual tiles are offline.
-    const baseStyle = TRAFFIC_API_KEY
-        ? JSON.parse(JSON.stringify(NavigationStyles.day).replaceAll('{{TOMTOM_API_KEY}}', encodeURIComponent(TRAFFIC_API_KEY)))
-        : JSON.parse(JSON.stringify(NavigationStyles.fallback));
+    const baseStyle = NavigationBasemap.themedStyle(NavigationStyles, provider, false, TRAFFIC_API_KEY);
 
     let map;
     try {
@@ -159,7 +162,8 @@
             fadeDuration: 0,
             crossSourceCollisions: false,
             maxTileCacheSize: 320,
-            maxTileCacheZoomLevels: 5
+            maxTileCacheZoomLevels: 12,
+            cancelPendingTileRequestsWhileZooming: false
         });
     } catch (e) {
         fail('Error al crear el mapa 3D: ' + (e && e.message ? e.message : e));
@@ -310,21 +314,27 @@
         document.documentElement.style.background = darkTheme ? '#1c2430' : '#d9e2e8';
         map.getContainer().style.background = darkTheme ? '#1c2430' : '#d9e2e8';
         if (!ready) return;
-        const style = TRAFFIC_API_KEY ? (darkTheme ? NavigationStyles.night : NavigationStyles.day) : NavigationStyles.fallback;
-        for (const layer of style.layers) {
-            if (!map.getLayer(layer.id)) continue;
-            for (const [name, value] of Object.entries(layer.paint || {})) {
-                try { map.setPaintProperty(layer.id, name, value); } catch (_) {}
-            }
-        }
-        if (!TRAFFIC_API_KEY && darkTheme) {
-            for (const layer of style.layers) {
-                const property = {background:'background-color',fill:'fill-color',line:'line-color',symbol:'text-color'}[layer.type];
-                if (property && map.getLayer(layer.id)) try { map.setPaintProperty(layer.id, property, layer.type==='symbol'?'#d9e3ed':layer.type==='line'?'#526578':'#232f3e'); } catch (_) {}
-            }
+        if (appliedTheme !== darkTheme) {
+            appliedTheme = darkTheme;
+            const themed = NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY);
+            // Day and night have different layers, filters and label layouts. Painting
+            // matching IDs alone leaves bright daytime land cover and missing night layers.
+            map.setStyle(NavigationBasemap.preserveNavigation(themed, map.getStyle()), {diff: true});
         }
         applySky(visuals.is3D && !darkTheme);
     }
+
+    function prepareViewport() {
+        if (!ready || !window.AndroidBridge || !AndroidBridge.prepareMapViewport) return;
+        const bounds = map.getBounds(), z = Math.min(18, Math.floor(map.getZoom()));
+        const n = 2 ** z;
+        const signature = [z, ...[bounds.getWest(), bounds.getEast()].map(l => Math.floor((l + 180) / 360 * n)),
+            ...[bounds.getSouth(), bounds.getNorth()].map(l => Math.floor((1 - Math.asinh(Math.tan(l * Math.PI / 180)) / Math.PI) / 2 * n))].join(':');
+        if (signature === viewportSignature) return;
+        viewportSignature = signature;
+        AndroidBridge.prepareMapViewport(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(), map.getZoom());
+    }
+    setInterval(prepareViewport, 2000);
     function renderManeuvers() {
         const source=map.getSource('gps-maneuvers');
         if(source) source.setData(NavigationManeuvers.features(activeRoutePoints,maneuverSteps,routeProgressStartIndex,viewMode===2));
@@ -616,7 +626,7 @@
     map.on('style.load', () => {
         // Declare the map ready BEFORE loading optional 3D providers. This prevents one
         // failing DEM/building service from producing an infinite black loading screen.
-        if (setupFinished) return;
+        if (setupFinished) { applyVisuals(); renderManeuvers(); renderRouteTraffic(); return; }
         ready = true;
         loading.textContent = 'Preparando relieve 3D…';
         try { setupCoreLayers(); } catch (e) { console.warn('optional 3D setup', e); }
@@ -625,6 +635,7 @@
         applyTheme(darkTheme);
         loading.style.display = 'none';
         try { if (window.AndroidBridge && AndroidBridge.onMapReady) AndroidBridge.onMapReady(); } catch (_) {}
+        setTimeout(prepareViewport, 500);
     });
 
     NavigationMotion.installLongPress(map.getCanvas(), point => {
@@ -639,6 +650,13 @@
     map.on('error', e => {
         const msg = e && e.error && e.error.message ? e.error.message : String(e && e.error ? e.error : e);
         console.warn('GPS3D map:', msg);
+        if (e && e.sourceId) resourceFailures[e.sourceId] = (resourceFailures[e.sourceId] || 0) + 1;
+        if (provider === 'tomtom' && e && e.sourceId === 'vectorTiles' && ++baseFailures >= 4 && networkAvailable &&
+            map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles').length === 0) {
+            provider = 'openfreemap';
+            const fallback = NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, '');
+            map.setStyle(NavigationBasemap.preserveNavigation(fallback, map.getStyle()), {diff:true});
+        }
         // Once the base map is ready, tile/provider failures are non-fatal and should
         // never cover the entire UI with the loader again.
         // Tile failures do not block route geometry, cached resources or voice guidance.
@@ -654,6 +672,26 @@
 
     window.GPS3D = {
         setDarkTheme: applyTheme,
+        setNetworkAvailable(available) {
+            networkAvailable = !!available;
+            if (!available || !ready) return;
+            if (TRAFFIC_API_KEY && provider !== 'tomtom') {
+                provider = 'tomtom'; baseFailures = 0;
+                map.setStyle(NavigationBasemap.preserveNavigation(
+                    NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY), map.getStyle()), {diff:true});
+            }
+            viewportSignature = '';
+            if (map.refreshTiles) {
+                const source = provider === 'tomtom' ? 'vectorTiles' : 'openmaptiles';
+                if (map.getSource(source)) map.refreshTiles(source);
+            }
+            prepareViewport();
+        },
+        mapState() {
+            return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
+                layerIds:map.getStyle().layers.map(l=>l.id), failures:{...resourceFailures},
+                rendered:map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles').length};
+        },
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
         setTrafficIntervals(intervals) { routeTrafficGeneration++; routeTrafficIntervals=Array.isArray(intervals)?intervals:[]; renderRouteTraffic(); },
         cameraState() { const c=map.getCenter(); return {ready:setupFinished,moving:map.isMoving(),width:map.getContainer().clientWidth,height:map.getContainer().clientHeight,mode:viewMode,pitch:map.getPitch(),center:[c.lng,c.lat],route:activeRoutePoints.map(p=>{const s=map.project(p);return [s.x,s.y]}),padding:currentPadding(true),dark:darkTheme}; },

@@ -1,0 +1,25 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const basemap = require('../app/src/main/assets/navigation-basemap.js');
+const context = {window:{}}; vm.createContext(context);
+vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../app/src/main/assets/navigation-styles.js'),'utf8'), context);
+const styles = context.window.NavigationStyles;
+test('full night style removes daytime land cover and keeps route and traffic data', () => {
+ const day = basemap.themedStyle(styles,'tomtom',false,'test');
+ const night = basemap.themedStyle(styles,'tomtom',true,'test');
+ assert.ok(day.layers.some(l=>l.id==='Earth Cover 0-4'));
+ const data={type:'Feature',geometry:{type:'LineString',coordinates:[[-99.13,19.43],[-99.14,19.44]]}};
+ const current={sources:{...day.sources,'gps-route-active':{type:'geojson',data}}, layers:[...day.layers,{id:'gps-route-active-layer',type:'line',source:'gps-route-active'}]};
+ const changed=basemap.preserveNavigation(night,current);
+ assert.ok(!changed.layers.some(l=>l.id==='Earth Cover 0-4'),'daytime fills must disappear at night');
+ assert.ok(changed.layers.some(l=>l.id==='Woodland'),'night layers must actually be added');
+ assert.deepEqual(changed.sources['gps-route-active'].data,data);
+ assert.equal(changed.sources.vectorTiles.tiles.length,4);
+ assert.equal(changed.layers.at(-1).id,'gps-route-active-layer');
+ const restored=basemap.preserveNavigation(day,changed);
+ assert.ok(restored.layers.some(l=>l.id==='Earth Cover 0-4'));
+ assert.ok(!restored.layers.some(l=>l.id==='Woodland'));
+ assert.deepEqual(restored.sources['gps-route-active'].data,data);
+});

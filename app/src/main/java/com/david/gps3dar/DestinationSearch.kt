@@ -10,6 +10,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.TimeUnit
+import java.util.Locale
 
 /** Combines address geocoding and POI search; a generation owns every response. */
 class DestinationSearch(private val client: OkHttpClient) {
@@ -18,6 +20,17 @@ class DestinationSearch(private val client: OkHttpClient) {
     }
     private val generation = AtomicInteger()
     private val calls = mutableListOf<Call>()
+    private val fastClient = client.newBuilder().connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS).callTimeout(5, TimeUnit.SECONDS).build()
+    private data class Cached(val at: Long, val results: List<Result>)
+    private val cache = object : LinkedHashMap<String, Cached>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?) = size > 24
+    }
+    private fun cacheKey(query: String, here: SharedDestination.Point?): String =
+        RecentDestinations.normalize(query) + (here?.let { String.format(Locale.ROOT, ":%.2f,%.2f", it.lat, it.lon) } ?: "")
+
+    @Synchronized fun cached(query: String, here: SharedDestination.Point?): List<Result> =
+        cache[cacheKey(query, here)]?.takeIf { System.currentTimeMillis() - it.at < 300000 }?.results.orEmpty()
 
     @Synchronized fun cancel() {
         generation.incrementAndGet()
@@ -29,6 +42,8 @@ class DestinationSearch(private val client: OkHttpClient) {
                completed: (List<Result>, String?) -> Unit) {
         cancel()
         val id = generation.get()
+        val existing = cached(query, here)
+        if (existing.isNotEmpty()) { completed(existing, null); return }
         if (key.isBlank()) {
             if (!explicit) { completed(emptyList(), "Escribe la dirección y toca Ir"); return }
             searchFallback(query, id, completed)
@@ -49,17 +64,24 @@ class DestinationSearch(private val client: OkHttpClient) {
             }
             enqueue(Request.Builder().url(url.build()).header("User-Agent", "GPS3D-AR-David/0.13").build(), id) { body ->
                 val parsed = runCatching { body?.let { parseTomTom(JSONObject(it)) } }.getOrNull()
-                synchronized(results) { results[index] = parsed ?: emptyList() }
                 if (parsed == null) failures.incrementAndGet()
-                if (remaining.decrementAndGet() == 0 && generation.get() == id) {
+                synchronized(results) {
+                    results[index] = parsed ?: emptyList()
+                    val finished = remaining.decrementAndGet() == 0
+                    if (generation.get() != id) return@synchronized
                     // Address results go first when the user supplies a street number.
                     val addressQuery = Regex("\\d").containsMatchIn(query)
                     val order = if (addressQuery) listOf(1, 0) else listOf(0, 1)
                     val combined = order.flatMap { results[it].orEmpty() }.distinctBy {
                         "${(it.lat * 100000).toLong()},${(it.lon * 100000).toLong()}:${it.title.lowercase()}"
                     }.take(10)
-                    if (combined.isEmpty() && explicit) searchFallback(query, id, completed)
-                    else completed(combined, if (failures.get() == 2) "No se pudo consultar el buscador" else null)
+                    if (finished && combined.isNotEmpty()) synchronized(this) {
+                        cache[cacheKey(query, here)] = Cached(System.currentTimeMillis(), combined)
+                    }
+                    if (finished && combined.isEmpty() && explicit) searchFallback(query, id, completed)
+                    else if ((!explicit && combined.isNotEmpty()) || finished) {
+                        completed(combined, if (failures.get() == 2) "Sin conexión con el buscador. Puedes elegir un destino reciente." else null)
+                    }
                 }
             }
         }
@@ -108,12 +130,16 @@ class DestinationSearch(private val client: OkHttpClient) {
     }
 
     private fun enqueue(request: Request, id: Int, completed: (String?) -> Unit) {
-        val call = client.newCall(request)
+        val call = fastClient.newCall(request)
         synchronized(this) { if (generation.get() != id) return; calls.add(call) }
         call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) { if (!call.isCanceled() && generation.get() == id) completed(null) }
+            override fun onFailure(call: Call, e: IOException) {
+                synchronized(this@DestinationSearch) { calls.remove(call) }
+                if (!call.isCanceled() && generation.get() == id) completed(null)
+            }
             override fun onResponse(call: Call, response: Response) {
                 val body = response.use { if (it.isSuccessful) runCatching { it.body?.string() }.getOrNull() else null }
+                synchronized(this@DestinationSearch) { calls.remove(call) }
                 if (!call.isCanceled() && generation.get() == id) completed(body)
             }
         })

@@ -19,6 +19,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.location.Location
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -31,6 +34,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.ViewGroup
+import android.graphics.Typeface
+import android.text.TextUtils
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
@@ -121,6 +126,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private val http = OkHttpClient()
     private val ui = Handler(Looper.getMainLooper())
     private val destinationSearch = DestinationSearch(http)
+    private lateinit var recentDestinations: RecentDestinations
+    private var searchEditing = false
+    private var searchEpoch = 0
     private lateinit var tollRepository: TollRepository
     private var tollQuote: TollRepository.Quote? = null
     private var tollProgressDistances = DoubleArray(0)
@@ -146,6 +154,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private lateinit var audioManager: AudioManager
     private lateinit var audioFocus: AudioFocusRequest
     private lateinit var mapCache: MapResourceCache
+    private lateinit var connectivity: ConnectivityManager
+    private var networkAvailable = true
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            setMapNetworkAvailable(capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+        }
+        override fun onLost(network: Network) { setMapNetworkAvailable(false) }
+    }
     private var lastPreparedAt = 0L
     private var lastPreparedIndex = -1
     private lateinit var sensorManager: SensorManager
@@ -242,6 +258,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         tts = TextToSpeech(this, this)
 
         bindViews()
+        val recentPrefs = getSharedPreferences("destinations", MODE_PRIVATE)
+        recentDestinations = RecentDestinations({ recentPrefs.getString("recent", "[]") ?: "[]" },
+            { recentPrefs.edit().putString("recent", it).apply() })
         val catalogJson = TollCatalogStore.load(this)
         lastCatalogRevision = JSONObject(catalogJson).getLong("revision")
         tollRepository = TollRepository(http, catalogJson)
@@ -259,6 +278,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         androidx.work.WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("mx-tolls-now").observe(this) { catalogUpdated() }
         avoidTolls = getPreferences(MODE_PRIVATE).getBoolean("avoidTolls", false)
         setupWebMap()
+        connectivity = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectivity.registerDefaultNetworkCallback(networkCallback)
+        setMapNetworkAvailable(connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true)
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
@@ -270,6 +293,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         findViewById<View>(R.id.bottomPanel).addOnLayoutChangeListener(viewportChanged)
         findViewById<View>(R.id.turnBanner).addOnLayoutChangeListener(viewportChanged)
         webMapView.addOnLayoutChangeListener(viewportChanged)
+        webMapView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> resizeSearchSuggestions() }
         handleNavigationIntent(intent)
         requestLocationPermission()
         ui.post(ticker)
@@ -347,6 +371,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 mapReady = true
                 syncMapAll()
                 jsCall("setDarkTheme($darkTheme)")
+                jsCall("setNetworkAvailable($networkAvailable)")
             }
         }
 
@@ -365,9 +390,34 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             if (severity !in listOf("normal", "moderate", "slow", "heavy")) return
             ui.post { trafficSeverity = severity; updateEtaColor() }
         }
+
+        @JavascriptInterface
+        fun prepareMapViewport(west: Double, south: Double, east: Double, north: Double, zoom: Double) {
+            if (!isDestroyed) mapCache.prepareViewport(west, south, east, north, zoom)
+        }
+    }
+
+    private fun setMapNetworkAvailable(available: Boolean) {
+        mapCache.setNetworkAvailable(available)
+        ui.post {
+            if (isDestroyed) return@post
+            val restored = !networkAvailable && available
+            networkAvailable = available
+            jsCall("setNetworkAvailable($available)")
+            if (restored) { lastPreparedAt = 0; prepareMapAhead(true) }
+        }
     }
 
     private fun setupSearchUi() {
+        findViewById<View>(android.R.id.content).apply { isFocusableInTouchMode = true; requestFocus() }
+        searchInput.setOnFocusChangeListener { _, focused ->
+            if (focused) {
+                searchEditing = true
+                updateSearchChrome()
+                showRecentDestinations()
+            }
+        }
+        searchInput.setOnClickListener { if (searchInput.text.isBlank()) showRecentDestinations() }
         findViewById<TextView>(R.id.searchButton).setOnClickListener { searchDestination() }
         searchInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
@@ -388,10 +438,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 searchDebounce?.let { ui.removeCallbacks(it) }
                 searchCall?.cancel()
                 destinationSearch.cancel()
+                searchEpoch++
+
+                if (!searchInput.hasFocus()) return
+                searchEditing = true
+                updateSearchChrome()
+                val local = recentDestinations.list(query) + destinationSearch.cached(query, searchBias())
+                showSearchSuggestions(local.distinctBy { RecentDestinations.identity(it) }.map { it.toSearchResult() },
+                    if (query.isBlank()) "Destinos recientes" else "Sugerencias",
+                    if (query.length >= 3) "Buscando direcciones…" else if (local.isEmpty()) "Escribe una dirección para buscar" else null)
 
                 if (query.length < 3) {
-                    searchResults = emptyList()
-                    hideSearchSuggestions()
                     return
                 }
 
@@ -447,6 +504,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun setupButtons() {
+        findViewById<View>(R.id.changeDestinationButton).setOnClickListener {
+            hidePlacePreview()
+            searchEditing = true
+            updateSearchChrome()
+            suppressSearchWatcher = true
+            searchInput.setText("")
+            suppressSearchWatcher = false
+            searchInput.requestFocus()
+            showRecentDestinations()
+            (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
+        }
         findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(0); recenter(true) }
         viewModeButton.setOnClickListener { setViewMode((viewMode + 1) % 3) }
         avoidTollsButton.setOnClickListener {
@@ -496,6 +564,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun hideKeyboard() {
         searchInput.clearFocus()
+        searchEditing = false
+        updateSearchChrome()
         val input = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
         input?.hideSoftInputFromWindow(searchInput.windowToken, 0)
     }
@@ -660,7 +730,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 val toll = view.id == R.id.avoidTollsButton
                 (bg.mutate() as GradientDrawable).setColor(if (banner) Color.parseColor(if (darkTheme) "#111A25" else "#14344A")
                     else if (toll) Color.parseColor(if (darkTheme) "#193C2C" else "#ECF8F0") else surface)
-            } else if (bg is ColorDrawable && Color.alpha(bg.color) < 100) {
+            } else if (bg is ColorDrawable && Color.alpha(bg.color) in 1..99) {
                 val original = originalBackgroundColors.getOrPut(view) { bg.color }
                 view.setBackgroundColor(if (darkTheme) Color.parseColor("#445E6B79") else original)
             }
@@ -682,7 +752,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         mapCache.prepare(routePoints.map { RouteGeometry.Point(it.lat, it.lon) }, routeProgressIndex) { prepared, total ->
             ui.post {
                 if (!isDestroyed) findViewById<TextView>(R.id.mapCacheStatus).apply {
-                    visibility = if (routeActive) View.VISIBLE else View.GONE
+                    visibility = if (routeActive && !searchEditing) View.VISIBLE else View.GONE
                     text = if (prepared == total) "Mapa próximo preparado" else "Mapa próximo guardado: ${prepared * 100 / total.coerceAtLeast(1)}%"
                 }
             }
@@ -980,6 +1050,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun fetchSearchSuggestions(query: String, navigateFirst: Boolean) {
         searchDebounce?.let { ui.removeCallbacks(it) }
+        val epoch = ++searchEpoch
         SharedDestination.coordinates(query)?.let { point ->
             showPlacePreview(SearchResult(query, point.lat, point.lon), movePin = true)
             return
@@ -989,15 +1060,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             return
         }
         if (navigateFirst) instruction.text = "Buscando $query…"
-        val here = rawLocation?.let { SharedDestination.Point(it.latitude, it.longitude) }
+        val here = searchBias()
         destinationSearch.search(query, tomTomApiKey(), here, navigateFirst) { found, error ->
             ui.post {
-                if (isDestroyed || searchInput.text.toString().trim() != query) return@post
+                if (isDestroyed || searchEpoch != epoch || searchInput.text.toString().trim() != query) return@post
                 if (found.isEmpty()) {
-                    hideSearchSuggestions()
-                    if (navigateFirst) instruction.text = error ?: "No encontré esa dirección. Incluye municipio o código postal."
+                    val local = recentDestinations.list(query).map { it.toSearchResult() }
+                    showSearchSuggestions(local, "Sugerencias", error ?: "No encontré esa dirección. Incluye municipio o código postal.")
                 } else {
-                    deliverSearchResults(query, navigateFirst, found.map { SearchResult(it.label, it.lat, it.lon, it.title, it.address) })
+                    val merged = (if (navigateFirst) found else recentDestinations.list(query) + found)
+                        .distinctBy { RecentDestinations.identity(it) }.take(12)
+                    deliverSearchResults(query, navigateFirst, merged.map { it.toSearchResult() })
                 }
             }
         }
@@ -1021,30 +1094,66 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
     }
 
-    private fun showSearchSuggestions(results: List<SearchResult>) {
-        searchSuggestions.removeAllViews()
-        if (results.isEmpty()) {
-            hideSearchSuggestions()
-            return
-        }
+    private fun searchBias() = rawLocation?.let { SharedDestination.Point(it.latitude, it.longitude) }
+    private fun DestinationSearch.Result.toSearchResult() = SearchResult(label, lat, lon, title, address)
 
+    private fun showRecentDestinations() {
+        showSearchSuggestions(recentDestinations.list().map { it.toSearchResult() }, "Destinos recientes",
+            if (recentDestinations.list().isEmpty()) "Aquí aparecerán los destinos que selecciones" else null)
+    }
+
+    private fun updateSearchChrome() {
+        if (!::searchInput.isInitialized) return
+        findViewById<View>(R.id.searchPanel).visibility = if (routeActive && !searchEditing) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.changeDestinationButton).visibility = if (routeActive && !searchEditing) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.mapControls).visibility = if (searchEditing) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.turnBanner).visibility = if (searchEditing) View.GONE else View.VISIBLE
+        gpsStatus.visibility = if (searchEditing) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.bottomPanel).visibility = if (searchEditing) View.GONE else View.VISIBLE
+        if (searchEditing) {
+            routeChoices.visibility = View.GONE
+            findViewById<View>(R.id.mapCacheStatus).visibility = View.GONE
+        } else if (routeActive && routeAlternatives.size > 1) routeChoices.visibility = View.VISIBLE
+        webMapView.post { syncViewport() }
+    }
+
+    private fun resizeSearchSuggestions() {
+        val container = findViewById<View>(R.id.searchSuggestionsContainer)
+        if (container.visibility != View.VISIBLE || webMapView.height <= 0) return
+        val height = min(dp(360), (webMapView.height - dp(88)).coerceAtLeast(dp(96)))
+        if (container.layoutParams.height != height) { container.layoutParams.height = height; container.requestLayout() }
+    }
+
+    private fun showSearchSuggestions(results: List<SearchResult>, heading: String = "Sugerencias", status: String? = null) {
+        searchEditing = true
+        updateSearchChrome()
+        searchSuggestions.removeAllViews()
         settingsPanel.visibility = View.GONE
+        searchSuggestions.addView(TextView(this).apply {
+            setPadding(dp(14), dp(10), dp(12), dp(8)); text = heading; textSize = 13f
+            setTextColor(Color.parseColor("#606B76"))
+            setTypeface(null, Typeface.BOLD)
+        })
         results.forEachIndexed { index, result ->
             val label = result.label.split(",").take(3).joinToString(",")
             val row = TextView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                minimumHeight = dp(60)
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(dp(14), 0, dp(12), 0)
+                setPadding(dp(14), dp(8), dp(12), dp(8))
                 text = "${index + 1}. $label"
-                textSize = 14f
-                setTextColor(Color.rgb(39, 49, 58))
+                textSize = 16f
+                setTextColor(Color.parseColor("#27313A"))
                 maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
                 setOnClickListener {
                     suppressSearchWatcher = true
                     searchInput.setText(label)
                     searchInput.setSelection(searchInput.text.length)
                     suppressSearchWatcher = false
                     hideSearchSuggestions()
+                    searchEpoch++
+                    destinationSearch.cancel()
                     showPlacePreview(result, movePin = true)
                 }
             }
@@ -1052,15 +1161,20 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             if (index < results.lastIndex) {
                 searchSuggestions.addView(View(this).apply {
                     layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
-                    setBackgroundColor(Color.argb(25, 0, 0, 0))
+                    setBackgroundColor(Color.parseColor("#19000000"))
                 })
             }
         }
+        status?.let { message -> searchSuggestions.addView(TextView(this).apply {
+            setPadding(dp(14), dp(12), dp(14), dp(12)); text = message; textSize = 14f
+            setTextColor(Color.parseColor("#606B76"))
+        }) }
         searchSuggestions.visibility = View.VISIBLE
         findViewById<View>(R.id.searchSuggestionsContainer).apply {
-            layoutParams.height = dp(min(240, results.size * 51 + 8))
             visibility = View.VISIBLE
         }
+        resizeSearchSuggestions()
+        applyPalette()
     }
 
     private fun hideSearchSuggestions() {
@@ -1084,6 +1198,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun showPlacePreview(result: SearchResult, movePin: Boolean) {
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        searchDebounce = null
+        recentDestinations.select(DestinationSearch.Result(result.lat, result.lon, result.title.ifBlank { result.label }, result.address))
+        destinationSearch.cancel()
+        searchEpoch++
+        hideSearchSuggestions()
         hideKeyboard()
         selectedMapPoint = result
         placePreviewTitle.text = result.title.ifBlank { result.label.substringBefore(",") }
@@ -1528,6 +1648,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         routeDurationSeconds = option.durationSeconds
         routeDistanceMeters = option.distanceMeters
         routeActive = routePoints.isNotEmpty()
+        hideSearchSuggestions()
+        hideKeyboard()
+        updateSearchChrome()
         announcements.reset(); voiceRouteId++
         routeProgressIndex = 0
         lastRenderedProgressIndex = -1
@@ -1680,6 +1803,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 instruction.text = "Busca un destino o mantén pulsado el mapa"
                 turnIcon.text = "↑"
                 turnDistance.text = "GPS3D · mapa de conducción"
+                turnDistance.textSize = 13f
+                turnDistance.setTypeface(null, Typeface.NORMAL)
             }
             return
         }
@@ -1703,6 +1828,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         instruction.text = message
         turnIcon.text = step.icon
         turnDistance.text = "En ${formatDistance(distance)}"
+        turnDistance.textSize = 32f
+        turnDistance.setTypeface(null, Typeface.BOLD)
+        turnDistance.setTextColor(Color.WHITE)
 
         if (voiceEnabled && ttsReady) {
             val id = "$voiceRouteId:$currentStepIndex"
@@ -1754,6 +1882,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun stopNavigation() {
         routeActive = false
+        updateSearchChrome()
         enteredTollPlazas.clear(); passedTollPlazas.clear()
         routeGeneration++
         tollRepository.cancel()
@@ -2162,6 +2291,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         tts.stop()
         tts.shutdown()
         audioManager.abandonAudioFocusRequest(audioFocus)
+        if (::connectivity.isInitialized) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         mapCache.close()
         rerouteTone.release()
         webMapView.removeJavascriptInterface("AndroidBridge")
@@ -2206,7 +2336,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     )
 
     companion object {
-        const val SEARCH_DEBOUNCE_MS = 500L
+        const val SEARCH_DEBOUNCE_MS = 150L
         const val DEFAULT_FOLLOW_RESUME_MS = 8000L
         const val VR_MAX_SPEED_KMH = 20f
         const val DEFAULT_ZOOM_PRESET_INDEX = 2

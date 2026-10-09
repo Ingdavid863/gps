@@ -59,10 +59,18 @@ jobs:
           python -m unittest discover -s scripts -p 'test_*.py'
           gradle testDebugUnitTest assembleDebug --stacktrace
       - name: Verify map rendering and camera modes
+        env:
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
         run: |
           npm install --prefix "$RUNNER_TEMP/gps3d-qa" playwright@1.51.1
           "$RUNNER_TEMP/gps3d-qa/node_modules/.bin/playwright" install --with-deps chromium
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-live-qa.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GPS3D-0.15-map-validation
+          path: build/map-qa/
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -81,5 +89,5 @@ jobs:
           script: gradle connectedDebugAndroidTest --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.14.0-beta-navigation
+          name: GPS3D-AR-David-0.15.0-beta-search-map
           path: app/build/outputs/apk/debug/app-debug.apk

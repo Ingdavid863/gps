@@ -10,6 +10,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.net.InetAddress
+import kotlin.system.measureTimeMillis
 
 class MapBufferTest {
     @get:Rule val temp = TemporaryFolder()
@@ -34,9 +35,23 @@ class MapBufferTest {
         first.close()
         server.shutdown()
         val restarted = MapResourceCache(directory, transport)
+        restarted.setNetworkAvailable(false)
+        val elapsed = measureTimeMillis { assertEquals("vector-tile", restarted.bytes(url)!!.first.toString(Charsets.UTF_8)) }
+        assertTrue("prepared tile remains immediate without network", elapsed < 500)
         assertEquals("vector-tile", restarted.bytes(url)!!.first.toString(Charsets.UTF_8))
+        assertNull(restarted.bytes(url.replace("/18/1/1", "/17/1/1")))
         assertNull(restarted.bytes("https://api.tomtom.com/search/2/geocode/private-address.json"))
         assertNull(restarted.bytes("https://example.com/map/1/tile/basic/main/18/1/1.pbf"))
         restarted.close()
+    }
+
+    @Test fun zoomOutPreparesEveryParentAndVisibleTilesWithABoundedBudget() {
+        val planned = MapTilePlanner.viewport(-99.132, 19.428, -99.128, 19.432, 17.4)
+        assertTrue(planned.size <= 96)
+        assertEquals(planned.size, planned.toSet().size)
+        for (z in 3..17) assertTrue("zoom $z prepared", planned.any { it.z == z })
+        assertTrue(planned.contains(MapTilePlanner.tile(-99.13,19.43,17)))
+        assertTrue(planned.contains(MapTilePlanner.tile(-99.13,19.43,18)))
+        assertTrue(MapTilePlanner.viewport(Double.NaN,19.0,-99.0,20.0,12.0).isEmpty())
     }
 }

@@ -50,7 +50,7 @@ class NavigationReliabilityTest {
         val after = MapTilePlanner.plan(route, 200)
         assertTrue(before.size <= 320)
         assertEquals(before.size, before.toSet().size)
-        assertNotEquals(before.first(), after.first())
+        assertNotEquals(before.filter { it.z == 18 }, after.filter { it.z == 18 })
         assertTrue(before.any { it.z == 18 })
         assertTrue(MapTilePlanner.plan(emptyList(), 0).isEmpty())
     }
