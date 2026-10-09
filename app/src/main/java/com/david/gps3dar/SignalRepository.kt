@@ -8,7 +8,7 @@ import java.io.IOException
 
 /** Observed OSM signal locations only: neither congestion nor clock time supplies a signal phase. */
 class SignalRepository(private val client: OkHttpClient, private val cache: File? = null,
-    private val endpoints: List<String> = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")) {
+    private val endpoints: List<String> = listOf("https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter")) {
     data class Signal(val id: Long, val point: RouteGeometry.Point, val pedestrian: Boolean = false)
     data class Snapshot(val center: RouteGeometry.Point, val signals: List<Signal>, val osmTimestamp: String,
         val loadedAt: Long, val cached: Boolean = false)

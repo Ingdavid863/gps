@@ -40,6 +40,16 @@ class MapTrafficTest {
         listOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION).forEach {
             instrumentation.uiAutomation.executeShellCommand("pm grant ${instrumentation.targetContext.packageName} $it").close()
         }
+        fun save(name: String, bitmap: Bitmap) {
+            val values=ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME,name)
+                put(MediaStore.Downloads.MIME_TYPE,"image/png")
+                put(MediaStore.Downloads.RELATIVE_PATH,"Download/GPS3DQA")
+            }
+            val resolver=instrumentation.targetContext.contentResolver
+            val uri=requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values))
+            requireNotNull(resolver.openOutputStream(uri)).use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
+        }
         ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
             val deadline=SystemClock.elapsedRealtime()+30000
             while(evaluate(scenario,"!!window.GPS3D && window.GPS3D.cameraState().ready")!="true"&&SystemClock.elapsedRealtime()<deadline)Thread.sleep(100)
@@ -55,6 +65,7 @@ class MapTrafficTest {
             assertTrue("Real traffic records determine the colors: $night",night.optInt("rendered")>3)
             Thread.sleep(500)
             val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            save("android-street-traffic.png", bitmap)
             val colors=IntArray(bitmap.width*bitmap.height);bitmap.getPixels(colors,0,bitmap.width,0,0,bitmap.width,bitmap.height)
             fun trafficColors(pixels: IntArray) = pixels.count { color ->
                 val r=android.graphics.Color.red(color);val g=android.graphics.Color.green(color);val b=android.graphics.Color.blue(color)
@@ -65,6 +76,7 @@ class MapTrafficTest {
             evaluate(scenario,"window.GPS3D.setTrafficEnabled(false);true")
             Thread.sleep(500)
             val baseline=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            save("android-traffic-disabled.png", baseline)
             val baseColors=IntArray(baseline.width*baseline.height)
             baseline.getPixels(baseColors,0,baseline.width,0,0,baseline.width,baseline.height)
             val additional=colored-trafficColors(baseColors)
@@ -72,14 +84,6 @@ class MapTrafficTest {
             assertTrue("Android traffic pixels must exceed the marker/background alone: $additional",additional>300)
             evaluate(scenario,"window.GPS3D.setTrafficEnabled(true);true")
             waitTraffic(scenario)
-            val values=ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME,"android-street-traffic.png")
-                put(MediaStore.Downloads.MIME_TYPE,"image/png")
-                put(MediaStore.Downloads.RELATIVE_PATH,"Download/GPS3DQA")
-            }
-            val resolver=instrumentation.targetContext.contentResolver
-            val uri=requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values))
-            requireNotNull(resolver.openOutputStream(uri)).use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
             bitmap.recycle()
             evaluate(scenario,"window.GPS3D.setNetworkAvailable(false);true")
             val offline=JSONObject(evaluate(scenario,"window.GPS3D.trafficState()"))

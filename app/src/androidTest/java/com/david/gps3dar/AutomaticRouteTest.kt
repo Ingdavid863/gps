@@ -1,8 +1,11 @@
 package com.david.gps3dar
 
+import android.Manifest
 import android.app.UiAutomation
+import android.content.ContentValues
 import android.content.Intent
 import android.os.SystemClock
+import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -10,7 +13,6 @@ import androidx.test.runner.lifecycle.Stage
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 
 /** Real OS service activation, accessible external fixture, Android Sharesheet and Activity receipt. */
 @RunWith(AndroidJUnit4::class)
@@ -27,6 +29,9 @@ class AutomaticRouteTest {
         val prefs = AutoRouteShareService.prefs(context)
         prefs.edit().clear().putBoolean("enabled", true).commit()
         try {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).forEach {
+                shell("pm grant ${context.packageName} $it")
+            }
             assertTrue("CI must install the observed-controls fixture", shell("pm path com.google.android.apps.maps").contains("package:"))
             shell("settings put secure enabled_accessibility_services com.david.gps3dar/com.david.gps3dar.AutoRouteShareService")
             shell("settings put secure accessibility_enabled 1")
@@ -63,13 +68,26 @@ class AutomaticRouteTest {
                 assertFalse("Incoming driving destination must replace a previous walking mode",
                     RealisticMapActivity::class.java.getDeclaredField("pedestrianRoute").apply { isAccessible = true }.getBoolean(received))
             }
-            val output = File("/sdcard/Download/GPS3DQA").apply { mkdirs() }
-            File(output, "automatic-route-result.json").writeText("""{"enabled_once":true,"real_android_share_receipts":2,"active_navigation":true,"walking_reset":true,"maps_source":"observed-controls QA fixture, not a live Google Maps build"}""")
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, "automatic-route-result.json")
+                put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                put(MediaStore.Downloads.RELATIVE_PATH, "Download/GPS3DQA")
+            }
+            val uri = requireNotNull(context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
+            requireNotNull(context.contentResolver.openOutputStream(uri)).bufferedWriter().use {
+                it.write("""{"enabled_once":true,"real_android_share_receipts":2,"active_navigation":true,"walking_reset":true,"maps_source":"observed-controls QA fixture, not a live Google Maps build"}""")
+            }
         } finally {
             prefs.edit().putBoolean("enabled", false).commit()
             if (oldServices == "null" || oldServices.isEmpty()) shell("settings delete secure enabled_accessibility_services")
             else shell("settings put secure enabled_accessibility_services $oldServices")
             shell("settings put secure accessibility_enabled ${if (oldEnabled == "1") "1" else "0"}")
+            instrumentation.runOnMainSync {
+                val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+                listOf(Stage.CREATED, Stage.STARTED, Stage.RESUMED, Stage.PAUSED, Stage.STOPPED)
+                    .flatMap { monitor.getActivitiesInStage(it) }.distinct().forEach { it.finish() }
+            }
+            shell("am force-stop com.google.android.apps.maps")
         }
     }
 }

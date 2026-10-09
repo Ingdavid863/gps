@@ -168,15 +168,6 @@
                 android:textSize="14sp" />
 
             <TextView
-                android:id="@+id/settingsClose"
-                android:layout_width="match_parent"
-                android:layout_height="40dp"
-                android:gravity="center_vertical|end"
-                android:text="Cerrar"
-                android:textColor="#1469D8"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-            <TextView
                 android:id="@+id/settingsAutomaticRoutes"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
@@ -184,6 +175,15 @@
                 android:text="Destinos automáticos desde Maps →"
                 android:textColor="#1469D8"
                 android:textSize="16sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/settingsClose"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:gravity="center_vertical|end"
+                android:text="Cerrar"
+                android:textColor="#1469D8"
+                android:textSize="15sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
