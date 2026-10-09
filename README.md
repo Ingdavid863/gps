@@ -24,7 +24,7 @@ Aplicación Android de navegación experimental sin claves API propietarias.
 - ruta mediante OSRM público.
 - semáforos mediante OpenStreetMap/Overpass.
 - distancia al semáforo más cercano.
-- interfaz visual de color + cuenta regresiva.
+- ubicaciones de semáforos con estado desconocido cuando falta una fuente en vivo.
 
 ## MUY IMPORTANTE
 OpenStreetMap aporta la ubicación de los semáforos, no su estado en vivo. El ciclo simulado original fue eliminado. Para fases reales hay que conectar SPaT/V2X o una API de la autoridad vial correspondiente y comprobar cobertura, dirección y caducidad de las observaciones.
@@ -42,6 +42,6 @@ gradle assembleDebug
 
 El APK queda en `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Fase siguiente
-ARCore Geospatial + Terrain Anchors para dibujar una cinta 3D animada aparentemente pegada al pavimento. El render AR debe limitarse a los siguientes ~80–150 m y reciclar anclas/segmentos a medida que avanza el usuario.
+## Ruta a pie en AR
+ARCore Geospatial + Terrain Anchors y anclaje manual a planos permiten dibujar la cinta del recorrido sobre el piso. La alineación y disponibilidad de posicionamiento visual requieren comprobación en el teléfono y en la calle donde se utilice.
 

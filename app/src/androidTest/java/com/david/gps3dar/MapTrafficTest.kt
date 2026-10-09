@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.os.SystemClock
+import android.os.PowerManager
 import android.provider.MediaStore
 import android.webkit.WebView
 import androidx.test.core.app.ActivityScenario
@@ -37,6 +38,8 @@ class MapTrafficTest {
     }
     @Test fun streetTrafficRendersWithoutDestinationInActualAndroidWebView() {
         val instrumentation=InstrumentationRegistry.getInstrumentation()
+        assertTrue("A real pixel comparison needs the Android display awake",
+            instrumentation.targetContext.getSystemService(PowerManager::class.java).isInteractive)
         listOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION).forEach {
             instrumentation.uiAutomation.executeShellCommand("pm grant ${instrumentation.targetContext.packageName} $it").close()
         }
@@ -75,6 +78,8 @@ class MapTrafficTest {
             val colored=trafficColors(colors)
             evaluate(scenario,"window.GPS3D.setTrafficEnabled(false);true")
             Thread.sleep(500)
+            assertTrue("The display must stay awake until the baseline is captured",
+                instrumentation.targetContext.getSystemService(PowerManager::class.java).isInteractive)
             val baseline=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
             save("android-traffic-disabled.png", baseline)
             val baseColors=IntArray(baseline.width*baseline.height)

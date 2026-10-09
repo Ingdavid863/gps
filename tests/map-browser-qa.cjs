@@ -18,6 +18,18 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  await page.addInitScript(()=>{window.AndroidBridge={onMapReady(){window.mapReady=true},onMapError(){}}});
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
  await page.waitForFunction(()=>window.mapReady===true);
+ const credits=page.locator('.maplibregl-ctrl-attrib');
+ await page.waitForFunction(()=>{
+  const e=document.querySelector('.maplibregl-ctrl-attrib');
+  return e?.classList.contains('maplibregl-compact')&&!e.classList.contains('maplibregl-attrib-empty');
+ });
+ const compact=await credits.boundingBox();
+ assert.ok(compact.width<=32&&compact.height<=32,'initial credits must not cover the road');
+ await credits.locator('summary').click();
+ assert.equal(await credits.locator('.maplibregl-ctrl-attrib-inner').isVisible(),true,'full credits remain available on tap');
+ assert.match(await credits.innerText(),/OpenStreetMap/);
+ await credits.locator('summary').click();
+ assert.equal(await credits.locator('.maplibregl-ctrl-attrib-inner').isVisible(),false,'credits collapse after closing');
  await page.evaluate(()=>{
   const g=window.GPS3D;g.setViewport(.25,.16);g.setLocation(-99.13,19.43,0,0);g.follow(-99.13,19.43,0,17.4,0,1);
  });
@@ -61,3 +73,4 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  console.log('Browser map QA passed: green marker anchor, overview lock, isometric switch; no JS errors.');
  await browser.close();server.close();
 })().catch(e=>{console.error(e);process.exit(1)});
+

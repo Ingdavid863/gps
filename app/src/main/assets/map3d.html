@@ -179,7 +179,7 @@
             maxPitch: 55,
             minZoom: 3,
             maxZoom: 19.3,
-            attributionControl: {compact: true},
+            attributionControl: false,
             canvasContextAttributes: { antialias: true },
             fadeDuration: 0,
             crossSourceCollisions: false,
@@ -191,6 +191,21 @@
         fail('Error al crear el mapa 3D: ' + (e && e.message ? e.message : e));
         return;
     }
+
+    // MapLibre initially expands compact credits until a user drags the map.
+    // Navigation moves the camera programmatically, so start with the info button
+    // and keep the full credits available on tap, away from the native controls.
+    map.addControl(new maplibregl.AttributionControl({compact: true}), 'bottom-left');
+    function minimizeInitialAttribution() {
+        const credits = document.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact');
+        if (!credits || credits.classList.contains('maplibregl-attrib-empty')) return;
+        credits.classList.remove('maplibregl-compact-show');
+        map.off('styledata', minimizeInitialAttribution);
+        map.off('sourcedata', minimizeInitialAttribution);
+    }
+    map.on('styledata', minimizeInitialAttribution);
+    map.on('sourcedata', minimizeInitialAttribution);
+    minimizeInitialAttribution();
 
     map.touchZoomRotate.enable();
     map.dragRotate.enable();

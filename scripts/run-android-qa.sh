@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# Pixel comparisons need an awake display throughout the full instrumented suite.
+adb shell input keyevent KEYCODE_WAKEUP
+adb shell wm dismiss-keyguard
+adb shell settings put system screen_off_timeout 1800000
+adb shell svc power stayon true
+
 GPS3D_AUTO_SHARE_QA=1 gradle :app:connectedDebugAndroidTest --stacktrace
 qa_status=$?
 mkdir -p build/native-map-qa
