@@ -70,10 +70,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.16-map-validation
+          name: GPS3D-0.17-map-validation
           path: |
             build/map-qa/
             build/traffic-qa/
+            app/build/ar-qa/
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -95,7 +96,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.16-android-validation
+          name: GPS3D-0.17-android-validation
           path: build/native-map-qa/
       - name: Verify APK identity and update signature
         run: |
@@ -109,9 +110,9 @@ jobs:
           assert certificate == expected, 'APK must preserve the installed 0.14 signing certificate'
           badging = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'badging', str(apk)], text=True)
           package = badging.splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='21'" in package and "versionName='0.16.0-beta-traffic'" in package, package
+          assert "name='com.david.gps3dar'" in package and "versionCode='22'" in package and "versionName='0.17.0-beta-ar-walk'" in package, package
           assert re.search(r"sdkVersion:'26'", badging), 'Android minimum version must remain compatible'
-          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.16.0-beta-traffic.apk')
+          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.17.0-beta-ar-walk.apk')
           destination.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, destination)
           print(package)
@@ -121,6 +122,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.16.0-beta-traffic
-          path: build/delivery/GPS3D-AR-David-0.16.0-beta-traffic.apk
+          name: GPS3D-AR-David-0.17.0-beta-ar-walk
+          path: build/delivery/GPS3D-AR-David-0.17.0-beta-ar-walk.apk
 

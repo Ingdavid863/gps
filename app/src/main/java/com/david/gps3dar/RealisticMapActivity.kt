@@ -174,6 +174,24 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private val originalBackgroundColors = WeakHashMap<View, Int>()
 
     private var routePoints: List<GeoPoint> = emptyList()
+    private var pedestrianRoute = false
+    private val arLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data?.getBooleanExtra(ArNavigationActivity.EXTRA_WALKING_ROUTE, false) == true) {
+            val walking = runCatching { WalkingRoute.decode(java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE).readText()) }.getOrNull()
+            val lat = result.data?.getDoubleExtra(WalkingRoute.EXTRA_LAT, Double.NaN) ?: Double.NaN
+            val lon = result.data?.getDoubleExtra(WalkingRoute.EXTRA_LON, Double.NaN) ?: Double.NaN
+            if (walking != null && RouteGeometry.distance(walking.destination, RouteGeometry.Point(lat, lon)) < 3.0) {
+                routeCall?.cancel(); routeGeneration++; rerouting = false
+                val points = walking.points.map { GeoPoint(it.lat, it.lon) }
+                routeDestination = GeoPoint(walking.destination.lat, walking.destination.lon)
+                routeAlternatives = listOf(RouteOption(points, walking.steps.map { step ->
+                    NavStep(step.point.lat, step.point.lon, step.message, iconForTomTomManeuver(step.maneuver),
+                        nearestRoutePointIndex(points, step.point.lat, step.point.lon), step.maneuver)
+                }, walking.durationSeconds, ArRouteGeometry(walking.points).length, pedestrian = true))
+                activateRoute(0, recenterMap = true)
+            }
+        }
+    }
     private var navSteps: List<NavStep> = emptyList()
     private var currentStepIndex = 0
     private var routeActive = false
@@ -518,6 +536,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(0); recenter(true) }
         viewModeButton.setOnClickListener { setViewMode((viewMode + 1) % 3) }
         avoidTollsButton.setOnClickListener {
+            if (pedestrianRoute) return@setOnClickListener
             avoidTolls = !avoidTolls
             getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
             updateTollPanel()
@@ -632,7 +651,19 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             ).show()
             return
         }
-        startActivity(Intent(this, ArNavigationActivity::class.java))
+        val selected = selectedMapPoint?.takeIf { placePreview.visibility == View.VISIBLE }
+        val destination = selected?.let { GeoPoint(it.lat, it.lon) } ?: routeDestination
+            ?: selectedMapPoint?.let { GeoPoint(it.lat, it.lon) }
+        if (destination == null) {
+            Toast.makeText(this, "Elige un destino y pulsa VR para calcular la ruta a pie", Toast.LENGTH_LONG).show()
+            searchInput.requestFocus(); showRecentDestinations()
+            return
+        }
+        arLauncher.launch(Intent(this, ArNavigationActivity::class.java)
+            .putExtra(WalkingRoute.EXTRA_LAT, destination.lat)
+            .putExtra(WalkingRoute.EXTRA_LON, destination.lon)
+            .putExtra(WalkingRoute.EXTRA_LABEL, selected?.label ?: searchInput.text.toString())
+            .putExtra("walking_voice", voiceEnabled))
     }
 
     private fun syncMapAll() {
@@ -883,7 +914,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             val remaining = estimateRemainingDistance(shown)
             val ratio = (remaining / routeDistanceMeters).coerceIn(0.0, 1.0)
             val seconds = routeDurationSeconds * ratio
-            etaText.text = formatDuration(seconds)
+            etaText.text = (if (pedestrianRoute) "A pie · " else "") + formatDuration(seconds)
             routeDistance.text = formatDistance(remaining)
             arrivalText.text = "Llegada aprox. ${formatArrival(seconds)}"
         }
@@ -1471,9 +1502,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             enteredTollPlazas.clear(); passedTollPlazas.clear()
         }
         val generation = ++routeGeneration
-        val requestedAvoid = avoidTolls
+        val requestedPedestrian = pedestrianRoute
+        val requestedAvoid = avoidTolls && !requestedPedestrian
         rerouting = true
-        instruction.text = if (requestedAvoid) "Calculando ruta sin casetas…" else if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
+        instruction.text = if (requestedPedestrian) "Calculando ruta para caminar…" else if (requestedAvoid) "Calculando ruta sin casetas…" else if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
         turnIcon.text = "…"
         hideSearchSuggestions(); hidePlacePreview(); hideKeyboard()
         routeCall?.cancel()
@@ -1498,15 +1530,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val builder = HttpUrl.Builder().scheme("https").host("api.tomtom.com")
             .addPathSegment("routing").addPathSegment("1").addPathSegment("calculateRoute")
             .addPathSegment("$fromLat,$fromLon:$toLat,$toLon").addPathSegment("json")
-            .addQueryParameter("key", key).addQueryParameter("traffic", "true")
-            .addQueryParameter("routeType", "fastest").addQueryParameter("travelMode", "car")
+            .addQueryParameter("key", key).addQueryParameter("traffic", if (requestedPedestrian) "false" else "true")
+            .addQueryParameter("routeType", if (requestedPedestrian) "shortest" else "fastest")
+            .addQueryParameter("travelMode", if (requestedPedestrian) "pedestrian" else "car")
             .addQueryParameter("routeRepresentation", "polyline").addQueryParameter("instructionsType", "text")
             .addQueryParameter("language", "es-ES").addQueryParameter("computeTravelTimeFor", "all")
             .addQueryParameter("sectionType", "traffic").addQueryParameter("sectionType", "toll")
             .addQueryParameter("sectionType", "tollVignette")
             .addQueryParameter("maxAlternatives", if (isReroute) "0" else "2")
         if (requestedAvoid) builder.addQueryParameter("avoid", "tollRoads")
-        rawLocation?.takeIf { it.hasBearing() && it.speed > 1.0f }?.let {
+        if (requestedPedestrian) builder.addQueryParameter("sectionType", "travelMode")
+        rawLocation?.takeIf { !requestedPedestrian && it.hasBearing() && it.speed > 1.0f }?.let {
             builder.addQueryParameter("vehicleHeading", (((it.bearing % 360f) + 360f) % 360f).toInt().toString())
         }
         val request = Request.Builder().url(builder.build()).header("User-Agent", "GPS3D-AR-David/0.13").build()
@@ -1527,6 +1561,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                             val duration = summary.optDouble("travelTimeInSeconds", 0.0)
                             val live = summary.optDouble("liveTrafficIncidentsTravelTimeInSeconds", duration)
                             val sections = route.optJSONArray("sections") ?: JSONArray()
+                            if (requestedPedestrian && (0 until sections.length()).any {
+                                val section = sections.optJSONObject(it)
+                                section?.optString("sectionType") == "TRAVEL_MODE" &&
+                                    section.optString("travelMode", "pedestrian") != "pedestrian"
+                            }) return@mapNotNull null
                             val hasTolls = (0 until sections.length()).any {
                                 sections.optJSONObject(it)?.optString("sectionType") in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")
                             }
@@ -1538,7 +1577,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                                     val section=sections.optJSONObject(j) ?: return@mapNotNull null
                                     if (section.optString("sectionType") !in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")) return@mapNotNull null
                                     section.optInt("startPointIndex",0)..section.optInt("endPointIndex",points.lastIndex)
-                                })
+                                }, pedestrian = requestedPedestrian)
                         }
                     }.getOrNull()
                 }
@@ -1646,6 +1685,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun activateRoute(index: Int, recenterMap: Boolean) {
         val option = routeAlternatives.getOrNull(index) ?: return
         activeRouteIndex = index
+        pedestrianRoute = option.pedestrian
         routePoints = option.points
         navSteps = option.steps
         currentStepIndex = navSteps.indexOfFirst { !it.maneuver.startsWith("DEPART") }.coerceAtLeast(0)
@@ -1667,7 +1707,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         prepareMapAhead(true)
         syncRouteProgress(force = true)
         stopButton.visibility = if (routeActive) View.VISIBLE else View.GONE
-        etaText.text = formatDuration(routeDurationSeconds)
+        etaText.text = (if (pedestrianRoute) "A pie · " else "") + formatDuration(routeDurationSeconds)
         routeDistance.text = formatDistance(routeDistanceMeters)
         arrivalText.text = "Llegada aprox. ${formatArrival(routeDurationSeconds)}"
         updateNavigationStep(displayLocation)
@@ -1886,6 +1926,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun stopNavigation() {
         routeActive = false
+        pedestrianRoute = false
         updateSearchChrome()
         enteredTollPlazas.clear(); passedTollPlazas.clear()
         routeGeneration++
@@ -2096,6 +2137,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun refreshTolls() {
+        if (pedestrianRoute) {
+            tollQuote = null; tollLookupPending = false; tollProgressDistances = DoubleArray(0)
+            enteredTollPlazas.clear(); passedTollPlazas.clear(); syncTolls(); updateTollPanel(); return
+        }
         remainingTolls() // Preserve a passed closed-system entrance before replacing the quote.
         tollQuote = null
         tollLookupPending = true
@@ -2147,6 +2192,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun updateTollPanel() {
+        avoidTollsButton.isEnabled = !pedestrianRoute
+        if (pedestrianRoute) {
+            tollCount.text = "Ruta\npeatonal"; tollTotal.text = "A pie"; avoidTollsButton.text = "Caminar"
+            return
+        }
         avoidTollsButton.text = if (avoidTolls) "Evitar caseta ✓" else "Evitar caseta"
         avoidTollsButton.isSelected = avoidTolls
         avoidTollsButton.contentDescription = if (avoidTolls) "Evitar casetas activado. Tocar para permitir casetas" else "Evitar casetas y recalcular ruta"
@@ -2338,7 +2388,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val noTrafficDurationSeconds: Double = durationSeconds,
         val hasTolls: Boolean = false,
         val avoidsTolls: Boolean = false,
-        val tollSections: List<IntRange> = emptyList()
+        val tollSections: List<IntRange> = emptyList(),
+        val pedestrian: Boolean = false
     )
 
     companion object {
@@ -2349,3 +2400,4 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val ZOOM_PRESETS = doubleArrayOf(16.20, 16.80, 17.40, 18.00, 18.65)
     }
 }
+

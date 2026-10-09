@@ -32,6 +32,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +63,10 @@ fun ARNavigationScreen(
     arStatus: String,
     voiceEnabled: Boolean,
     trafficEnabled: Boolean,
+    walkingMode: Boolean = false,
+    routeActive: Boolean = false,
+    onAnchorFloor: () -> Unit = {},
+    onAutomaticGround: () -> Unit = {},
     interactionSpeedThresholdKmh: Int = 20,
     onOpenMap: () -> Unit,
     onSearch: () -> Unit,
@@ -89,10 +95,10 @@ fun ARNavigationScreen(
         Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 142.dp, end = 14.dp),
+                .padding(top = if (walkingMode) 184.dp else 142.dp, end = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            HudRoundButton(
+            if (!walkingMode) HudRoundButton(
                 label = if (trafficEnabled) "Tráfico" else "Sin tráfico",
                 active = trafficEnabled,
                 onClick = onToggleTraffic
@@ -121,9 +127,9 @@ fun ARNavigationScreen(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            SpeedometerWidget(speedKmh = speedKmh, speedLimitKmh = speedLimitKmh)
+            if (!walkingMode) SpeedometerWidget(speedKmh = speedKmh, speedLimitKmh = speedLimitKmh)
 
-            AnimatedVisibility(visible = !drivingFast) {
+            AnimatedVisibility(visible = !drivingFast && !walkingMode) {
                 FloatingReportButton(
                     expanded = showActionMenu,
                     onToggle = { showActionMenu = !showActionMenu },
@@ -143,7 +149,24 @@ fun ARNavigationScreen(
             visible = !drivingFast,
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            BottomSearchPanel(onClick = onSearch)
+            BottomSearchPanel(onClick = onSearch, walkingRoute = walkingMode)
+        }
+        if (walkingMode && routeActive) {
+            Text("Manual: apunta al piso en el sentido del primer tramo del mapa.",
+                color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(start = 20.dp, end = 20.dp, bottom = 156.dp)
+                    .background(Color(0xCC102231), RoundedCornerShape(8.dp)).padding(8.dp))
+            Text("+", color = Color.White, fontSize = 30.sp,
+                modifier = Modifier.align(Alignment.Center).padding(top = 150.dp))
+            Row(modifier = Modifier.align(Alignment.BottomCenter)
+                .padding(start = 16.dp, end = 16.dp, bottom = 100.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onAnchorFloor,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9A5700))) {
+                    Text("Anclar al piso")
+                }
+                Button(onClick = onAutomaticGround) { Text("Automático") }
+            }
         }
     }
 }
@@ -187,7 +210,7 @@ private fun TopDirectionHud(
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     if (roadText.isNotBlank()) {
@@ -207,7 +230,7 @@ private fun TopDirectionHud(
                 text = arStatus,
                 color = Color(0xFFA9C4D8),
                 fontSize = 11.sp,
-                maxLines = 1,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -326,11 +349,11 @@ fun FloatingReportButton(
 }
 
 @Composable
-fun BottomSearchPanel(onClick: () -> Unit) {
+fun BottomSearchPanel(onClick: () -> Unit, walkingRoute: Boolean = false) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 104.dp, bottom = 18.dp)
+            .padding(start = 16.dp, end = if (walkingRoute) 16.dp else 104.dp, bottom = 18.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(19.dp),
         color = Color.White.copy(alpha = 0.94f),
@@ -344,13 +367,13 @@ fun BottomSearchPanel(onClick: () -> Unit) {
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(
-                    text = "¿A dónde quieres ir?",
+                    text = if (walkingRoute) "Ver ruta a pie" else "¿A dónde quieres ir?",
                     color = Color(0xFF27333C),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "Buscar destino en el mapa 3D",
+                    text = if (walkingRoute) "Volver al mapa del recorrido" else "Buscar destino en el mapa 3D",
                     color = Color(0xFF74828C),
                     fontSize = 11.sp
                 )
@@ -358,3 +381,4 @@ fun BottomSearchPanel(onClick: () -> Unit) {
         }
     }
 }
+
