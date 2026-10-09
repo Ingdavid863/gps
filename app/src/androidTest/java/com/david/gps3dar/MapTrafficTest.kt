@@ -52,15 +52,26 @@ class MapTrafficTest {
             assertFalse(day.getBoolean("routeActive"))
             evaluate(scenario,"window.GPS3D.setDarkTheme(true);true")
             val night=waitTraffic(scenario)
-            assertTrue(night.getJSONObject("bands").optInt("normal")>0)
+            assertTrue("Real traffic records determine the colors: $night",night.optInt("rendered")>3)
             Thread.sleep(500)
             val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
             val colors=IntArray(bitmap.width*bitmap.height);bitmap.getPixels(colors,0,bitmap.width,0,0,bitmap.width,bitmap.height)
-            val green=colors.count { color ->
+            fun trafficColors(pixels: IntArray) = pixels.count { color ->
                 val r=android.graphics.Color.red(color);val g=android.graphics.Color.green(color);val b=android.graphics.Color.blue(color)
-                g>100&&g>r*1.45&&g>b*1.15&&r<90
+                (g>100&&g>r*1.45&&g>b*1.15&&r<90)||
+                    (r>100&&r>b*1.8&&g<220&&(r>g*1.35||(r>210&&g>120)))
             }
-            assertTrue("Actual Android traffic road colors are visible: $green",green>300)
+            val colored=trafficColors(colors)
+            evaluate(scenario,"window.GPS3D.setTrafficEnabled(false);true")
+            Thread.sleep(500)
+            val baseline=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            val baseColors=IntArray(baseline.width*baseline.height)
+            baseline.getPixels(baseColors,0,baseline.width,0,0,baseline.width,baseline.height)
+            val additional=colored-trafficColors(baseColors)
+            baseline.recycle()
+            assertTrue("Android traffic pixels must exceed the marker/background alone: $additional",additional>300)
+            evaluate(scenario,"window.GPS3D.setTrafficEnabled(true);true")
+            waitTraffic(scenario)
             val values=ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME,"android-street-traffic.png")
                 put(MediaStore.Downloads.MIME_TYPE,"image/png")

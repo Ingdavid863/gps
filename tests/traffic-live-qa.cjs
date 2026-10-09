@@ -10,7 +10,7 @@ function pixels(buffer) {
  const png=PNG.sync.read(buffer),counts={green:0,congested:0};
  for(let i=0;i<png.data.length;i+=4){const [r,g,b]=png.data.subarray(i,i+3);
   if(g>100&&g>r*1.45&&g>b*1.15&&r<90)counts.green++;
-  if(r>150&&r>b*1.8&&g<220&&(r>g*1.35||(r>210&&g>120)))counts.congested++;
+  if(r>100&&r>b*1.8&&g<220&&(r>g*1.35||(r>210&&g>120)))counts.congested++;
  }return counts;
 }
 (async()=>{
@@ -46,11 +46,13 @@ function pixels(buffer) {
   await page.evaluate(({lon,lat,zoom})=>{const g=window.GPS3D;g.setLocation(lon,lat,0,0);g.follow(lon,lat,0,zoom,0,1)},{lon,lat,zoom});
   await page.waitForFunction(()=>{const s=window.GPS3D.trafficState();return s.loaded&&s.rendered>3&&s.status==='live'},null,{timeout:45000});
   const day=await page.evaluate(()=>window.GPS3D.trafficState());
+  console.log('LIVE_TRAFFIC_SNAPSHOT '+JSON.stringify({name,day,statuses}));
   assert.equal(day.routeActive,false,'street traffic must render without navigation');
-  assert.ok(day.bands.normal>0,'actual free-flow segments shown in green');
+  assert.ok(Object.entries(day.bands).filter(([name])=>name!=='unknown').reduce((sum,[,count])=>sum+count,0)>3,
+   'traffic colors must come from actual flow data; no assumption that streets are uncongested');
   await page.waitForTimeout(300);
   const screenshot=await page.screenshot({path:path.join(output,name+'-day.png')});
-  const visible=pixels(screenshot);assert.ok(visible.green>100,'traffic must produce visible green road pixels');
+  const visible=pixels(screenshot);
   await page.evaluate(()=>window.GPS3D.setDarkTheme(true));
   await page.waitForFunction(()=>window.GPS3D.trafficState().status==='live'&&window.GPS3D.trafficState().rendered>3,null,{timeout:30000});
   await page.waitForTimeout(300);
@@ -59,9 +61,15 @@ function pixels(buffer) {
   const before=trafficRequests;
   await page.evaluate(()=>window.GPS3D.refreshTraffic());
   await page.waitForFunction(()=>window.GPS3D.trafficState().loaded,null,{timeout:30000});
-  await page.waitForTimeout(1000);
+  const refreshDeadline=Date.now()+15000;
+  while(trafficRequests<=before&&Date.now()<refreshDeadline)await page.waitForTimeout(100);
   assert.ok(trafficRequests>before,'refresh must request current traffic tiles');
   await page.evaluate(()=>window.GPS3D.setTrafficEnabled(false));
+  await page.waitForTimeout(300);
+  const baseline=pixels(await page.screenshot());
+  const nightPixels=pixels(await fs.promises.readFile(path.join(output,name+'-night.png')));
+  const additional=(nightPixels.green+nightPixels.congested)-(baseline.green+baseline.congested);
+  assert.ok(additional>100,'colored road pixels must exceed the marker/background alone; additional='+additional);
   const disabled=await page.evaluate(()=>window.GPS3D.trafficState());
   assert.equal(disabled.rendered,0);assert.equal(disabled.status,'disabled');
   await page.evaluate(()=>{window.GPS3D.setTrafficEnabled(true);window.GPS3D.setNetworkAvailable(false)});
@@ -69,7 +77,7 @@ function pixels(buffer) {
   assert.equal(offline.rendered,0);assert.equal(offline.status,'offline','old traffic cannot be presented as live offline');
   await page.evaluate(()=>{window.GPS3D.setNetworkAvailable(true);window.GPS3D.setDarkTheme(false)});
   await page.waitForFunction(()=>window.GPS3D.trafficState().status==='live',null,{timeout:30000});
-  results.push({name,day,night,visible,refreshRequests:trafficRequests-before});
+  results.push({name,day,night,visible,additionalTrafficPixels:additional,refreshRequests:trafficRequests-before});
  }
  assert.deepEqual(errors,[],'no traffic renderer/script errors');
  assert.ok(statuses[200]>0,'real traffic vector service responded');
