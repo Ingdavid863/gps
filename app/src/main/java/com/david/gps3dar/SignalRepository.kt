@@ -10,8 +10,9 @@ import java.util.concurrent.TimeUnit
 /** Observed OSM signal locations only: neither congestion nor clock time supplies a signal phase. */
 class SignalRepository(client: OkHttpClient, private val cache: File? = null,
     private val endpoints: List<String> = listOf("https://overpass.private.coffee/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass-api.de/api/interpreter")) {
-    private val client = client.newBuilder().callTimeout(20, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass-api.de/api/interpreter"),
+    callTimeoutMs: Long = 20_000) {
+    private val client = client.newBuilder().callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS).readTimeout(20, TimeUnit.SECONDS).build()
     data class Signal(val id: Long, val point: RouteGeometry.Point, val pedestrian: Boolean = false)
     data class Snapshot(val center: RouteGeometry.Point, val signals: List<Signal>, val osmTimestamp: String,
         val loadedAt: Long, val cached: Boolean = false)
@@ -52,7 +53,9 @@ class SignalRepository(client: OkHttpClient, private val cache: File? = null,
             }
         }
         current.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) { if (!call.isCanceled()) failed(e.javaClass.simpleName) }
+            // A call timeout also marks OkHttp's call canceled. The epoch guard
+            // distinguishes it from close(), which must never launch a backup.
+            override fun onFailure(call: Call, e: IOException) { failed(e.javaClass.simpleName) }
             override fun onResponse(call: Call, response: Response) {
                 val outcome = runCatching { response.use {
                     if (!it.isSuccessful) throw IOException("HTTP ${it.code}")

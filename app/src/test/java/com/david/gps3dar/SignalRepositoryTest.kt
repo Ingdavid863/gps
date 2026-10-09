@@ -3,6 +3,7 @@ package com.david.gps3dar
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -58,6 +59,38 @@ class SignalRepositoryTest {
             assertEquals("POST", request.method); assertTrue(query.contains("around:2500")); assertTrue(query.contains("highway\"=\"traffic_signals"))
             service.load(center, 1_001_000) { _, _ -> fail("A fresh stationary cache should avoid repeated requests") }
             assertEquals(1, backup.requestCount); service.close()
+        } }
+    }
+    @Test fun aCanceledCallTimeoutStillReachesTheBackupAndCompletes() {
+        MockWebServer().use { first -> MockWebServer().use { backup ->
+            first.start(); backup.start()
+            first.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            backup.enqueue(MockResponse().setBody(real).setHeader("Content-Type", "application/json"))
+            // The call watchdog expires before the socket read timeout, reproducing
+            // OkHttp's isCanceled=true timeout rather than an explicit user close.
+            val service = SignalRepository(OkHttpClient(), endpoints = listOf(
+                first.url("/api/interpreter").toString(), backup.url("/api/interpreter").toString()), callTimeoutMs = 250)
+            val finished = CountDownLatch(1)
+            var result: SignalRepository.Snapshot? = null
+            var failure: String? = null
+            service.load(center, 1_000_000) { s, e -> result = s; failure = e; finished.countDown() }
+            assertTrue("A watchdog timeout must not leave the repository busy forever", finished.await(5, TimeUnit.SECONDS))
+            assertNull(failure); assertEquals(3, result!!.signals.size)
+            assertEquals(1, backup.requestCount); service.close()
+        } }
+    }
+    @Test fun closingACallPreventsAnyBackupOrLateCallback() {
+        MockWebServer().use { first -> MockWebServer().use { backup ->
+            first.start(); backup.start()
+            first.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            val service = SignalRepository(OkHttpClient(), endpoints = listOf(
+                first.url("/api/interpreter").toString(), backup.url("/api/interpreter").toString()), callTimeoutMs = 250)
+            val unexpected = CountDownLatch(1)
+            service.load(center, 1_000_000) { _, _ -> unexpected.countDown() }
+            assertNotNull(first.takeRequest(2, TimeUnit.SECONDS))
+            service.close()
+            assertFalse(unexpected.await(400, TimeUnit.MILLISECONDS))
+            assertEquals(0, backup.requestCount)
         } }
     }
     @Test fun liveMexicoSignalLocationsHaveDocumentedOsmNodesWhenLiveQaIsEnabled() {
