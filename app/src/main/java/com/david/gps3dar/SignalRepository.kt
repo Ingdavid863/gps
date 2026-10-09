@@ -9,7 +9,8 @@ import java.util.concurrent.TimeUnit
 
 /** Observed OSM signal locations only: neither congestion nor clock time supplies a signal phase. */
 class SignalRepository(client: OkHttpClient, private val cache: File? = null,
-    private val endpoints: List<String> = listOf("https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter")) {
+    private val endpoints: List<String> = listOf("https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass-api.de/api/interpreter")) {
     private val client = client.newBuilder().callTimeout(20, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
     data class Signal(val id: Long, val point: RouteGeometry.Point, val pedestrian: Boolean = false)
     data class Snapshot(val center: RouteGeometry.Point, val signals: List<Signal>, val osmTimestamp: String,
@@ -43,7 +44,8 @@ class SignalRepository(client: OkHttpClient, private val cache: File? = null,
         fun failed(reason: String) {
             synchronized(this) {
                 if (token != epoch) return
-                failureReason = reason
+                val detail = "${current.request().url.host}: $reason"
+                failureReason = failureReason?.let { "$it; $detail" } ?: detail
                 call = null
                 if (index + 1 < endpoints.size) request(center, now, token, index + 1, done)
                 else { lastError = "Servicio de ubicaciones OSM no disponible"; done(snapshot, lastError) }

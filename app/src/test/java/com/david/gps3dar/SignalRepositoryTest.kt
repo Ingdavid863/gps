@@ -77,7 +77,7 @@ class SignalRepositoryTest {
                 var failure: String? = null
                 val start = System.currentTimeMillis()
                 service.load(point) { s, e -> snapshot = s; failure = e; finished.countDown() }
-                assertTrue("Live lookup finishes for $name", finished.await(45, TimeUnit.SECONDS))
+                assertTrue("Live lookup finishes for $name", finished.await(65, TimeUnit.SECONDS))
                 println("Live signal lookup $name: nodes=${snapshot?.signals?.size}, error=$failure, reason=${service.failureReason}")
                 assertNull("Live OSM endpoint must be reachable for $name: ${service.failureReason}", failure)
                 assertNotNull(snapshot); assertTrue(snapshot!!.loadedAt >= start)
