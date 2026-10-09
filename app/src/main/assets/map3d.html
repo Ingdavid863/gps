@@ -26,6 +26,7 @@
             filter: drop-shadow(0 3px 3px rgba(0,0,0,.38));
             user-select: none; pointer-events: none;
         }
+        .route-origin { width: 14px; height: 14px; border-radius:50%; background:#16834b; border:3px solid #fff; box-shadow:0 1px 5px #0006; }
         .selection-pin {
             width: 28px; height: 38px; position: relative;
             filter: drop-shadow(0 3px 4px rgba(0,0,0,.35));
@@ -101,6 +102,8 @@
         if (!ready) return;
         cameraMotion = null;
         map.stop();
+        // Follow uses an asymmetric anchor. Clear its padding before fitting full-route bounds.
+        map.jumpTo({pitch:0, bearing:0, padding:{top:0,bottom:0,left:0,right:0}});
         const points = NavigationView.overviewPoints(activeRoutePoints, lastLocation, selectedPoint);
         const options = { padding: currentPadding(true), pitch: 0, bearing: 0, duration: 350, essential: true };
         if (points.length < 2) {
@@ -294,7 +297,7 @@
         setLayerVisible(SATELLITE_LAYER, visuals.satellite);
         setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
         setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
-        applySky(visuals.is3D);
+        applySky(visuals.is3D && !darkTheme);
         if (viewMode !== 2) map.easeTo({ pitch: viewMode === 1 ? 45 : 0, duration: 180, essential: true });
     }
 
@@ -321,6 +324,11 @@
     function renderManeuvers() {
         const source=map.getSource('gps-maneuvers');
         if(source) source.setData(NavigationManeuvers.features(activeRoutePoints,maneuverSteps,routeProgressStartIndex,viewMode===2));
+    }
+    const originElement = document.createElement('div'); originElement.className='route-origin'; originElement.title='Inicio de la ruta';
+    const originMarker = new maplibregl.Marker({element:originElement});
+    function renderOrigin() {
+        if(viewMode===2 && activeRoutePoints.length>1) originMarker.setLngLat(activeRoutePoints[0]).addTo(map); else originMarker.remove();
     }
     function notifyTraffic() {
         const severity = trafficEnabled ? NavigationManeuvers.severityAt(routeTrafficIntervals,routeProgressStartIndex) : 'normal';
@@ -685,6 +693,7 @@
             if (c) c.setData(lineData(alt2));
             setDestinationMarker(activeRoutePoints.length ? activeRoutePoints[activeRoutePoints.length - 1] : null);
             renderManeuvers();
+            renderOrigin();
             notifyTraffic();
             refreshRouteTraffic();
             if (viewMode === 2) showOverview();
@@ -736,6 +745,7 @@
             if (viewMode === 2) showOverview();
             renderRouteTraffic();
             renderManeuvers();
+            renderOrigin();
         },
         showOverview,
         previewPoint(lon, lat) {

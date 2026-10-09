@@ -6,6 +6,7 @@ import okhttp3.Cache
 import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.concurrent.Executors
@@ -13,9 +14,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /** A separate persistent HTTP cache for public map assets. Routing/search/traffic bypass it. */
-class MapResourceCache(context: Context) {
-    private val cache = Cache(File(context.filesDir, "map-buffer"), 250L * 1024 * 1024)
-    private val client = OkHttpClient.Builder().cache(cache)
+class MapResourceCache(directory: File, transport: OkHttpClient = OkHttpClient()) {
+    constructor(context: Context) : this(File(context.filesDir, "map-buffer"))
+    private val cache = Cache(directory, 250L * 1024 * 1024)
+    private val client = transport.newBuilder().cache(cache)
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).build()
     private val worker = Executors.newSingleThreadExecutor()
     private val generation = AtomicInteger()
@@ -23,14 +25,14 @@ class MapResourceCache(context: Context) {
     private var key = ""
     fun configure(apiKey: String) { key = apiKey }
     private fun allowed(url: String): Boolean = runCatching {
-        val u = android.net.Uri.parse(url)
-        val host = u.host.orEmpty()
+        val u = url.toHttpUrlOrNull() ?: return false
+        val host = u.host
         u.scheme == "https" && (host == "api.tomtom.com" || host in listOf("a.api.tomtom.com", "b.api.tomtom.com", "c.api.tomtom.com", "d.api.tomtom.com")) &&
-            (u.path.orEmpty().startsWith("/map/1/tile/basic/") || u.path.orEmpty().startsWith("/style/1/"))
+            (u.encodedPath.startsWith("/map/1/tile/basic/") || u.encodedPath.startsWith("/style/1/"))
     }.getOrDefault(false)
     private fun request(url: String) = Request.Builder().url(url)
         .header("User-Agent", "GPS3D-AR-David/0.14").build()
-    private fun bytes(url: String): Pair<ByteArray, String>? {
+    internal fun bytes(url: String): Pair<ByteArray, String>? {
         if (!allowed(url)) return null
         val request = request(url)
         // Reuse prepared resources immediately, including after their freshness expires.

@@ -14,11 +14,12 @@
     function features(route,steps,progress,overview) {
         const out=[];
         if(!Array.isArray(route)||route.length<2) return {type:'FeatureCollection',features:out};
+        const along=[0];
+        for(let j=1;j<route.length;j++) along.push(along[j-1]+distance(route[j-1],route[j]));
         for(const step of steps||[]) {
             const i=Number(step.index), kind=String(step.maneuver||'');
             if(!Number.isInteger(i)||i<1||i>=route.length-1||i<progress||kind.startsWith('DEPART')||kind.startsWith('ARRIVE')) continue;
-            let ahead=0;
-            for(let j=progress;j<i&&j<route.length-1;j++) ahead+=distance(route[j],route[j+1]);
+            const ahead=along[i]-along[Math.max(0,Math.min(progress,route.length-1))];
             if(!overview&&ahead>1800) continue;
             let before=[], left=24;
             for(let j=i;j>0&&left>0;j--) {

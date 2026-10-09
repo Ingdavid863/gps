@@ -34,8 +34,8 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  const overview=await page.evaluate(()=>window.GPS3D.cameraState());
  assert.equal(overview.mode,2);assert.ok(Math.abs(overview.pitch)<.01);
  for(const [x,y] of overview.route) {
-  assert.ok(x>=overview.padding.left-1&&x<=390-overview.padding.right+1,'route fits horizontally');
-  assert.ok(y>=overview.padding.top-1&&y<=840-overview.padding.bottom+1,'origin and destination fit vertically');
+  assert.ok(x>=overview.padding.left-1&&x<=390-overview.padding.right+1,'route fits horizontally: '+JSON.stringify(overview));
+  assert.ok(y>=overview.padding.top-1&&y<=840-overview.padding.bottom+1,'origin and destination fit vertically: '+JSON.stringify(overview));
  }
  const canvasBefore=await page.locator('canvas.maplibregl-canvas').screenshot();
  await page.evaluate(()=>window.GPS3D.follow(-98.0,20.0,140,19,55,110));
