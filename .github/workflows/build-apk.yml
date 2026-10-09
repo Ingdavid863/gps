@@ -2,7 +2,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, codex/gps3d-0.13.0 ]
+    branches: [ main, codex/gps3d-0.13.0, codex/gps3d-0.14.0 ]
 
 jobs:
   build:
@@ -28,8 +28,15 @@ jobs:
       - name: Restore stable debug signing key
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: gps3d-debug-signing-v1
+          path: ~/.gps3d/debug.keystore
+          key: gps3d-debug-signing-v2
+      - name: Prepare explicit signing key
+        run: |
+          mkdir -p "$HOME/.gps3d"
+          if [ ! -s "$HOME/.gps3d/debug.keystore" ]; then
+            keytool -genkeypair -keystore "$HOME/.gps3d/debug.keystore" -storepass android -keypass android -alias androiddebugkey -dname "CN=GPS3D AR David, O=Android, C=MX" -keyalg RSA -keysize 2048 -validity 10000
+          fi
+          echo "GPS3D_DEBUG_KEYSTORE=$HOME/.gps3d/debug.keystore" >> "$GITHUB_ENV"
       - name: Validate live service credentials
         env:
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
@@ -52,5 +59,5 @@ jobs:
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.13.0-beta-destinations
+          name: GPS3D-AR-David-0.14.0-beta-navigation
           path: app/build/outputs/apk/debug/app-debug.apk

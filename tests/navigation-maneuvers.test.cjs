@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');
+const {features,severityAt}=require('../app/src/main/assets/navigation-maneuvers.js');
+const route=[[0,0],[0,.0005],[.0005,.0005],[.0007,.0005]];
+const data=features(route,[{index:1,maneuver:'TURN_RIGHT'}],0,false);
+assert.equal(data.features.length,2);
+assert.ok(data.features[0].geometry.coordinates.some(p=>p[0]===0&&p[1]===.0005),'shaft runs through exact turn point');
+assert.ok(data.features[1].geometry.coordinates[0][0][0]>0,'arrow points into outgoing street');
+assert.equal(features(route,[{index:1,maneuver:'TURN_RIGHT'}],2,false).features.length,0,'passed maneuvers disappear');
+assert.equal(features(route,[{index:0,maneuver:'DEPART'},{index:3,maneuver:'ARRIVE'}],0,false).features.length,0);
+const traffic=[{start:0,end:1,severity:'moderate'},{start:1,end:2,severity:'heavy'}];
+assert.equal(severityAt(traffic,0),'moderate');
+assert.equal(severityAt(traffic,1),'heavy');
+assert.equal(severityAt(traffic,2),'normal');
+console.log('Exact route-turn arrows and local traffic selection passed.');

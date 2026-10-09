@@ -31,6 +31,12 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
   const g=window.GPS3D;g.setRoutes([[-99.13,19.43],[-99.135,19.44],[-99.15,19.46]],[],[]);g.setViewMode(2);g.showOverview();
  });
  await page.waitForTimeout(600);
+ const overview=await page.evaluate(()=>window.GPS3D.cameraState());
+ assert.equal(overview.mode,2);assert.ok(Math.abs(overview.pitch)<.01);
+ for(const [x,y] of overview.route) {
+  assert.ok(x>=overview.padding.left-1&&x<=390-overview.padding.right+1,'route fits horizontally');
+  assert.ok(y>=overview.padding.top-1&&y<=840-overview.padding.bottom+1,'origin and destination fit vertically');
+ }
  const canvasBefore=await page.locator('canvas.maplibregl-canvas').screenshot();
  await page.evaluate(()=>window.GPS3D.follow(-98.0,20.0,140,19,55,110));
  await page.waitForTimeout(400);
@@ -38,6 +44,11 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  assert.equal(Buffer.compare(canvasBefore,canvasAfter),0,'GPS follow must not override overview');
  await page.evaluate(()=>{window.GPS3D.setViewMode(1);window.GPS3D.follow(-99.13,19.43,0,17.4,55,1);});
  await page.waitForTimeout(500);
+ await page.evaluate(()=>{window.GPS3D.setDarkTheme(true);window.GPS3D.setManeuvers([{index:1,maneuver:'TURN_LEFT'}]);});
+ assert.equal((await page.evaluate(()=>window.GPS3D.cameraState())).dark,true);
+ await page.evaluate(()=>{window.GPS3D.setViewMode(0);window.GPS3D.follow(-99.13,19.43,0,17.4,0,1);});
+ await page.waitForTimeout(500);
+ assert.ok(Math.abs((await page.evaluate(()=>window.GPS3D.cameraState())).pitch)<.01,'third click restores default view');
  assert.deepEqual(errors,[]);
  console.log('Browser map QA passed: green marker anchor, overview lock, isometric switch; no JS errors.');
  await browser.close();server.close();

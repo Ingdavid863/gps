@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.13.0-beta-destinations"
+        versionCode = 19
+        versionName = "0.14.0-beta-navigation"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
         manifestPlaceholders["tomTomApiKey"] = tomTomApiKey
     }
@@ -53,6 +53,15 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    System.getenv("GPS3D_DEBUG_KEYSTORE")?.takeIf { it.isNotBlank() }?.let { path ->
+        signingConfigs.getByName("debug") {
+            storeFile = File(path)
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     sourceSets {

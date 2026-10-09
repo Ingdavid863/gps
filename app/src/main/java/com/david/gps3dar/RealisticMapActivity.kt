@@ -5,7 +5,16 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.ToneGenerator
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.location.Location
@@ -15,6 +24,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.MotionEvent
@@ -27,6 +37,8 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.ImageButton
@@ -57,6 +69,8 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Calendar
+import java.util.WeakHashMap
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -64,7 +78,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
+class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, SensorEventListener {
 
     private lateinit var webMapView: WebView
     private lateinit var fusedLocation: FusedLocationProviderClient
@@ -122,7 +136,23 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var displayLocation: Location? = null
     private var lastAcceptedLocation: Location? = null
     private var lastCameraBearing = 0.0
-    private var lastSpokenInstruction = ""
+    private val announcements = NavigationAnnouncements()
+    private var ttsReady = false
+    private var voiceRouteId = 0
+    private var spokenUtterance = ""
+    private lateinit var audioManager: AudioManager
+    private lateinit var audioFocus: AudioFocusRequest
+    private lateinit var mapCache: MapResourceCache
+    private var lastPreparedAt = 0L
+    private var lastPreparedIndex = -1
+    private lateinit var sensorManager: SensorManager
+    private val darkPolicy = AutoDarkMode()
+    private var ambientLux: Double? = null
+    private var darkTheme = false
+    private var themeInitialized = false
+    private var trafficSeverity = "normal"
+    private val originalTextColors = WeakHashMap<TextView, Int>()
+    private val originalBackgroundColors = WeakHashMap<View, Int>()
 
     private var routePoints: List<GeoPoint> = emptyList()
     private var navSteps: List<NavStep> = emptyList()
@@ -170,6 +200,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val ticker = object : Runnable {
         override fun run() {
             updateTollPanel()
+            updateAutoTheme()
+            if (routeActive && ttsReady) updateNavigationStep(displayLocation)
             ui.postDelayed(this, 1000L)
         }
     }
@@ -195,6 +227,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(R.layout.activity_realistic_map)
 
         fusedLocation = LocationServices.getFusedLocationProviderClient(this)
+        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        audioFocus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setOnAudioFocusChangeListener { change ->
+                if (change == AudioManager.AUDIOFOCUS_GAIN) ui.post { updateNavigationStep(displayLocation) }
+            }.build()
+        mapCache = MapResourceCache(this).also { it.configure(tomTomApiKey()) }
         tts = TextToSpeech(this, this)
 
         bindViews()
@@ -207,6 +248,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupBackNavigation()
         refreshSettingsLabels()
         updateTollPanel()
+        updateAutoTheme()
         val viewportChanged = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncViewport() }
         findViewById<View>(R.id.bottomPanel).addOnLayoutChangeListener(viewportChanged)
         findViewById<View>(R.id.turnBanner).addOnLayoutChangeListener(viewportChanged)
@@ -264,7 +306,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         webMapView.settings.builtInZoomControls = false
         webMapView.settings.displayZoomControls = false
         webMapView.webChromeClient = WebChromeClient()
-        webMapView.webViewClient = WebViewClient()
+        webMapView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                return request?.url?.toString()?.let { mapCache.intercept(it) }
+            }
+        }
         webMapView.addJavascriptInterface(WebMapBridge(), "AndroidBridge")
         webMapView.setOnTouchListener { _, event ->
             if (event.actionMasked == MotionEvent.ACTION_DOWN ||
@@ -283,6 +329,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ui.post {
                 mapReady = true
                 syncMapAll()
+                jsCall("setDarkTheme($darkTheme)")
             }
         }
 
@@ -294,6 +341,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         @JavascriptInterface
         fun previewDestination(lat: Double, lon: Double) {
             ui.post { previewMapPoint(lat, lon) }
+        }
+
+        @JavascriptInterface
+        fun onTrafficSeverity(severity: String) {
+            if (severity !in listOf("normal", "moderate", "slow", "heavy")) return
+            ui.post { trafficSeverity = severity; updateEtaColor() }
         }
     }
 
@@ -518,7 +571,104 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("es", "MX")
+            val result = tts.setLanguage(Locale("es", "MX"))
+            ttsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+            if (!ttsReady) ttsReady = tts.setLanguage(Locale("es", "ES")) >= 0
+            tts.voices?.filter { it.locale.language == "es" && !it.isNetworkConnectionRequired }
+                ?.sortedByDescending { if (it.locale.country == "MX") 1 else 0 }?.firstOrNull()?.let { tts.voice = it }
+            tts.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    if (utteranceId == spokenUtterance) audioManager.abandonAudioFocusRequest(audioFocus)
+                }
+                @Deprecated("Legacy engine callback")
+                override fun onError(utteranceId: String?) {
+                    ui.post {
+                        val parts = utteranceId.orEmpty().split(':')
+                        if (parts.size == 3 && parts[0] == voiceRouteId.toString()) {
+                            announcements.failed(parts.take(2).joinToString(":"), parts[2].toIntOrNull() ?: 0)
+                        }
+                        audioManager.abandonAudioFocusRequest(audioFocus)
+                    }
+                }
+            })
+            ui.post { if (::instruction.isInitialized) updateNavigationStep(displayLocation) }
+        }
+    }
+
+    private fun updateEtaColor() {
+        etaText.setTextColor(Color.parseColor(when (trafficSeverity) {
+            "moderate" -> "#F9AB00"
+            "slow" -> "#F57C00"
+            "heavy" -> "#D93025"
+            else -> if (darkTheme) "#53D68E" else "#16834B"
+        }))
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type == Sensor.TYPE_LIGHT) ambientLux = event.values.firstOrNull()?.toDouble()
+    }
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+    private fun updateAutoTheme() {
+        val now = System.currentTimeMillis()
+        val p = rawLocation
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val night = if (p == null) hour < 6 || hour >= 19
+            else AutoDarkMode.solarElevation(now, p.latitude, p.longitude) < -3.0
+        val next = darkPolicy.update(SystemClock.elapsedRealtime(), night, ambientLux)
+        if (!themeInitialized || next != darkTheme) {
+            themeInitialized = true; darkTheme = next
+            applyPalette()
+            jsCall("setDarkTheme($darkTheme)")
+        }
+    }
+
+    private fun applyPalette() {
+        val surface = Color.parseColor(if (darkTheme) "#232B36" else "#FFFFFF")
+        val text = Color.parseColor(if (darkTheme) "#EDF2F7" else "#27313A")
+        val secondary = Color.parseColor(if (darkTheme) "#B8C3CF" else "#6A6D70")
+        fun visit(view: View) {
+            if (view is TextView) {
+                val original = originalTextColors.getOrPut(view) { view.currentTextColor }
+                val gray = abs(Color.red(original) - Color.blue(original)) < 55 && Color.red(original) < 220
+                view.setTextColor(if (darkTheme && gray) { if (Color.red(original) > 90) secondary else text } else original)
+                if (view is EditText) view.setHintTextColor(secondary)
+            }
+            val bg = view.background
+            if (bg is GradientDrawable) {
+                val banner = view.id in listOf(R.id.turnBanner, R.id.gpsStatus, R.id.placePreviewGo)
+                val toll = view.id == R.id.avoidTollsButton
+                (bg.mutate() as GradientDrawable).setColor(if (banner) Color.parseColor(if (darkTheme) "#111A25" else "#14344A")
+                    else if (toll) Color.parseColor(if (darkTheme) "#193C2C" else "#ECF8F0") else surface)
+            } else if (bg is ColorDrawable && Color.alpha(bg.color) < 100) {
+                val original = originalBackgroundColors.getOrPut(view) { bg.color }
+                view.setBackgroundColor(if (darkTheme) Color.parseColor("#445E6B79") else original)
+            }
+            if (view is ImageButton) view.imageTintList = ColorStateList.valueOf(text)
+            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        visit(findViewById(android.R.id.content))
+        window.statusBarColor = Color.parseColor(if (darkTheme) "#111A25" else "#111111")
+        window.navigationBarColor = window.statusBarColor
+        updateEtaColor()
+    }
+
+    private fun prepareMapAhead(force: Boolean = false) {
+        if (!routeActive || routePoints.size < 2) return
+        val now = SystemClock.elapsedRealtime()
+        val advanced = lastPreparedIndex < 0 || distanceAlongRouteToIndex(lastPreparedIndex) <= 0.0 && routeProgressIndex - lastPreparedIndex > 10
+        if (!force && (!advanced || now - lastPreparedAt < 60000)) return
+        lastPreparedAt = now; lastPreparedIndex = routeProgressIndex
+        mapCache.prepare(routePoints.map { RouteGeometry.Point(it.lat, it.lon) }, routeProgressIndex) { prepared, total ->
+            ui.post {
+                if (!isDestroyed) findViewById<TextView>(R.id.mapCacheStatus).apply {
+                    visibility = if (routeActive) View.VISIBLE else View.GONE
+                    text = if (prepared == total) "Mapa próximo preparado" else "Mapa próximo guardado: ${prepared * 100 / total.coerceAtLeast(1)}%"
+                }
+            }
         }
     }
 
@@ -677,7 +827,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val target = GeoPoint(location.latitude, location.longitude)
         val zoom = desiredZoom(moving)
-        val pitch = if (viewMode == 1) 55.0 else 0.0
+        val pitch = if (viewMode == 1) 45.0 else 0.0
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},110)"
         )
@@ -709,7 +859,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val moving = rawLocation?.speed ?: 0f
         if (viewMode == 2) { jsCall("showOverview()"); return }
         val target = GeoPoint(here.latitude, here.longitude)
-        val pitch = if (viewMode == 1) 55 else 0
+        val pitch = if (viewMode == 1) 45 else 0
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},$pitch,${if (animated) 180 else 1})"
         )
@@ -1312,7 +1462,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     lon = lon,
                     instruction = message,
                     icon = iconForTomTomManeuver(maneuver),
-                    routeIndex = routeIndex
+                    routeIndex = routeIndex,
+                    maneuver = maneuver
                 )
             )
         }
@@ -1348,11 +1499,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         activeRouteIndex = index
         routePoints = option.points
         navSteps = option.steps
-        currentStepIndex = if (navSteps.size > 1) 1 else 0
+        currentStepIndex = navSteps.indexOfFirst { !it.maneuver.startsWith("DEPART") }.coerceAtLeast(0)
         routeDurationSeconds = option.durationSeconds
         routeDistanceMeters = option.distanceMeters
         routeActive = routePoints.isNotEmpty()
-        lastSpokenInstruction = ""
+        announcements.reset(); voiceRouteId++
         routeProgressIndex = 0
         lastRenderedProgressIndex = -1
         lastProgressRenderAtMs = 0L
@@ -1361,6 +1512,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         rebuildRouteDistanceCache()
 
         syncRoutes()
+        prepareMapAhead(true)
         syncRouteProgress(force = true)
         stopButton.visibility = if (routeActive) View.VISIBLE else View.GONE
         etaText.text = formatDuration(routeDurationSeconds)
@@ -1369,6 +1521,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         updateNavigationStep(displayLocation)
         showRouteChoices()
         refreshTolls()
+        applyPalette()
         if (viewMode == 2) jsCall("showOverview()") else if (recenterMap) recenter(true)
     }
 
@@ -1377,6 +1530,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val alt1 = others.getOrNull(0)?.let { routeAlternatives[it].points } ?: emptyList()
         val alt2 = others.getOrNull(1)?.let { routeAlternatives[it].points } ?: emptyList()
         jsCall("setRoutes(${pointsJson(routePoints)},${pointsJson(alt1)},${pointsJson(alt2)})")
+        jsCall("setManeuvers(" + JSONArray(navSteps.map { JSONObject().put("index", it.routeIndex).put("maneuver", it.maneuver) }) + ")")
     }
 
     private fun syncRouteProgress(force: Boolean = false) {
@@ -1405,6 +1559,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         routeProgressIndex = max(routeProgressIndex, match.segmentIndex)
         syncRouteProgress()
         syncTolls()
+        prepareMapAhead()
     }
 
     private fun rebuildRouteDistanceCache() {
@@ -1516,12 +1671,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         var step = navSteps[currentStepIndex.coerceIn(0, navSteps.lastIndex)]
         var distance = distanceAlongRouteToStep(step, location)
 
-        if (distance < 24.0 && currentStepIndex < navSteps.lastIndex) {
-            currentStepIndex++
-            step = navSteps[currentStepIndex]
-            distance = distanceAlongRouteToStep(step, location)
-        }
-
         val arriving = step.icon == "🏁" || step.icon == "●"
         val message = if (arriving && distance > 25.0) {
             "Continúa hasta tu destino"
@@ -1530,14 +1679,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         turnIcon.text = step.icon
         turnDistance.text = "En ${formatDistance(distance)}"
 
-        if (voiceEnabled && distance < 180 && message != lastSpokenInstruction) {
-            lastSpokenInstruction = message
-            tts.speak(
-                "En ${formatDistance(distance)}, ${message}",
-                TextToSpeech.QUEUE_FLUSH,
-                null,
-                "nav"
-            )
+        if (voiceEnabled && ttsReady) {
+            val id = "$voiceRouteId:$currentStepIndex"
+            val phase = announcements.pending(id, distance, (rawLocation?.speed ?: location.speed).toDouble())
+            if (phase > 0 && audioManager.requestAudioFocus(audioFocus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                val phrase = if (phase == 3 && !arriving) "Ahora, $message" else "En ${formatDistance(distance)}, $message"
+                spokenUtterance = "$id:$phase"
+                if (tts.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, spokenUtterance) == TextToSpeech.SUCCESS) announcements.accepted(id, phase)
+            }
         }
     }
 
@@ -1606,7 +1755,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         routeRemainingFromIndex = DoubleArray(0)
         lastRouteMatch = null
         offRouteSinceMs = 0L
-        lastSpokenInstruction = ""
+        announcements.reset(); voiceRouteId++
+        mapCache.cancel()
+        findViewById<View>(R.id.mapCacheStatus).visibility = View.GONE
+        tts.stop()
+        audioManager.abandonAudioFocusRequest(audioFocus)
 
         syncRoutes()
         routeChoices.visibility = View.GONE
@@ -1944,12 +2097,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         is3D = viewMode == 1
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
+        sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+        updateAutoTheme()
         syncVisualSettings()
         recenter(false)
     }
 
     override fun onPause() {
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        sensorManager.unregisterListener(this)
         webMapView.onPause()
         super.onPause()
     }
@@ -1967,6 +2123,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         fusedLocation.removeLocationUpdates(locationCallback)
         tts.stop()
         tts.shutdown()
+        audioManager.abandonAudioFocusRequest(audioFocus)
+        mapCache.close()
         rerouteTone.release()
         webMapView.removeJavascriptInterface("AndroidBridge")
         webMapView.loadUrl("about:blank")
@@ -1980,7 +2138,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val lon: Double,
         val instruction: String,
         val icon: String,
-        val routeIndex: Int = 0
+        val routeIndex: Int = 0,
+        val maneuver: String = "STRAIGHT"
     )
     data class SearchResult(
         val label: String,
