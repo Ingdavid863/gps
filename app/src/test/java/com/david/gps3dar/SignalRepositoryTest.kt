@@ -94,30 +94,43 @@ class SignalRepositoryTest {
         } }
     }
     @Test fun liveMexicoSignalLocationsHaveDocumentedOsmNodesWhenLiveQaIsEnabled() {
-        if (System.getenv("GPS3D_SIGNAL_LIVE_QA") != "1") return
+        org.junit.Assume.assumeTrue(System.getenv("GPS3D_SIGNAL_LIVE_QA") == "1")
         val regions = linkedMapOf("real-mexico-signals" to center,
             "route-area-north-mexico-valley" to RouteGeometry.Point(19.7356, -99.2060),
             "cuautitlan-izcalli-area" to RouteGeometry.Point(19.65, -99.21))
         val directory = java.io.File("build/signal-qa").apply { mkdirs() }
         var previousAttempt = 0L
+        val failures = ArrayList<String>()
         for ((name, point) in regions) {
-            if (previousAttempt > 0) Thread.sleep((61_000 - (System.currentTimeMillis() - previousAttempt)).coerceAtLeast(0))
-            previousAttempt = System.currentTimeMillis()
-            val service = SignalRepository(OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build())
-            try {
-                val finished = CountDownLatch(1)
-                var snapshot: SignalRepository.Snapshot? = null
-                var failure: String? = null
-                val start = System.currentTimeMillis()
-                service.load(point) { s, e -> snapshot = s; failure = e; finished.countDown() }
-                assertTrue("Live lookup finishes for $name", finished.await(65, TimeUnit.SECONDS))
-                println("Live signal lookup $name: nodes=${snapshot?.signals?.size}, error=$failure, reason=${service.failureReason}")
-                assertNull("Live OSM endpoint must be reachable for $name: ${service.failureReason}", failure)
-                assertNotNull(snapshot); assertTrue(snapshot!!.loadedAt >= start)
-                if (name == "real-mexico-signals") assertTrue(snapshot!!.signals.isNotEmpty())
-                // An empty local response documents missing map coverage; it does not invent traffic lights.
-                java.io.File(directory, "$name.json").writeText(SignalRepository.encode(snapshot!!))
-            } finally { service.close() }
+            var verified = false
+            for (attempt in 1..2) {
+                // Public Overpass services share capacity. Retry at the same pace as
+                // the app instead of hammering endpoints or claiming fabricated data.
+                if (previousAttempt > 0) Thread.sleep((61_000 - (System.currentTimeMillis() - previousAttempt)).coerceAtLeast(0))
+                previousAttempt = System.currentTimeMillis()
+                val service = SignalRepository(OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build())
+                try {
+                    val finished = CountDownLatch(1)
+                    var snapshot: SignalRepository.Snapshot? = null
+                    var failure: String? = null
+                    val start = System.currentTimeMillis()
+                    service.load(point) { s, e -> snapshot = s; failure = e; finished.countDown() }
+                    assertTrue("Live lookup finishes for $name", finished.await(65, TimeUnit.SECONDS))
+                    println("Live signal lookup $name attempt $attempt: nodes=${snapshot?.signals?.size}, error=$failure, reason=${service.failureReason}")
+                    if (failure != null) {
+                        if (attempt == 2) failures.add("$name: ${service.failureReason}")
+                        continue
+                    }
+                    assertNotNull(snapshot); assertTrue(snapshot!!.loadedAt >= start)
+                    if (name == "real-mexico-signals") assertTrue(snapshot!!.signals.isNotEmpty())
+                    // Empty mapped coverage never means there are no physical lights.
+                    java.io.File(directory, "$name.json").writeText(SignalRepository.encode(snapshot!!))
+                    verified = true
+                    break
+                } finally { service.close() }
+            }
+            if (!verified && failures.none { it.startsWith("$name:") }) failures.add("$name: no verified response")
         }
+        assertTrue("Live OSM endpoints must be reachable: ${failures.joinToString("; ")}", failures.isEmpty())
     }
 }

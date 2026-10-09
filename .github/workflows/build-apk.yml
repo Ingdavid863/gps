@@ -58,20 +58,6 @@ jobs:
           node --test tests/*.test.cjs
           python -m unittest discover -s scripts -p 'test_*.py'
           gradle testDebugUnitTest assembleDebug --stacktrace
-      - name: Verify live signal data in Mexico
-        env:
-          GPS3D_SIGNAL_LIVE_QA: '1'
-          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
-          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
-        run: |
-          gradle testDebugUnitTest --tests '*SignalRepositoryTest' --stacktrace
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: GPS3D-0.18-signal-validation
-          path: |
-            app/build/signal-qa/
-            app/build/test-results/testDebugUnitTest/
       - name: Verify map rendering and camera modes
         env:
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
@@ -144,3 +130,39 @@ jobs:
           name: GPS3D-AR-David-0.18.0-beta-auto-routes
           path: build/delivery/GPS3D-AR-David-0.18.0-beta-auto-routes.apk
 
+
+  signal-health:
+    name: Live OSM signal availability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK 36
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -x "$SDKMANAGER" || { echo "sdkmanager not found"; exit 1; }
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Verify live signal data in Mexico
+        env:
+          GPS3D_SIGNAL_LIVE_QA: '1'
+          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          gradle testDebugUnitTest --tests '*SignalRepositoryTest' --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GPS3D-0.18-signal-validation
+          path: |
+            app/build/signal-qa/
+            app/build/test-results/testDebugUnitTest/
