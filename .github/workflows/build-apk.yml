@@ -94,7 +94,29 @@ jobs:
         with:
           name: GPS3D-0.15-android-validation
           path: build/native-map-qa/
+      - name: Verify APK identity and update signature
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib, re, shutil, subprocess
+          apk = pathlib.Path('app/build/outputs/apk/debug/app-debug.apk')
+          sdk = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools' / '36.0.0'
+          report = subprocess.check_output([str(sdk / 'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
+          certificate = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', report).group(1)
+          expected = 'afefdcd54dc7194464ef8dd4860ca09566100a12bbbc29acc05a3a4d4c81f620'
+          assert certificate == expected, 'APK must preserve the installed 0.14 signing certificate'
+          badging = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'badging', str(apk)], text=True)
+          package = badging.splitlines()[0]
+          assert "name='com.david.gps3dar'" in package and "versionCode='20'" in package and "versionName='0.15.0-beta-search-map'" in package, package
+          assert re.search(r"sdkVersion:'26'", badging), 'Android minimum version must remain compatible'
+          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.15.0-beta-search-map.apk')
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(apk, destination)
+          print(package)
+          print('APK signing certificate SHA256:', certificate)
+          print('APK SHA256:', hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest())
+          print('APK size:', apk.stat().st_size)
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: GPS3D-AR-David-0.15.0-beta-search-map
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: build/delivery/GPS3D-AR-David-0.15.0-beta-search-map.apk
