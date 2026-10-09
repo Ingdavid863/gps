@@ -19,6 +19,23 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class MapTrafficTest {
+    private fun awaitVisualFrame(scenario: ActivityScenario<RealisticMapActivity>) {
+        val drawn = CountDownLatch(1)
+        scenario.onActivity { activity ->
+            val webView = activity.findViewById<WebView>(R.id.webMapView)
+            assertTrue(webView.isAttachedToWindow && webView.isShown)
+            webView.postVisualStateCallback(SystemClock.uptimeMillis(), object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    // The callback promises that the *next* draw contains the DOM/WebGL state.
+                    // Wait through that draw before capturing the compositor's screen buffer.
+                    webView.postOnAnimation { webView.postOnAnimation { drawn.countDown() } }
+                    webView.invalidate()
+                }
+            })
+        }
+        assertTrue("WebView must commit the requested visual state", drawn.await(12, TimeUnit.SECONDS))
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+    }
     private fun evaluate(scenario: ActivityScenario<RealisticMapActivity>, script: String): String {
         val latch = CountDownLatch(1); var result = "null"
         scenario.onActivity { it.findViewById<WebView>(R.id.webMapView).evaluateJavascript(script) { value -> result=value; latch.countDown() } }
@@ -66,7 +83,7 @@ class MapTrafficTest {
             evaluate(scenario,"window.GPS3D.setDarkTheme(true);true")
             val night=waitTraffic(scenario)
             assertTrue("Real traffic records determine the colors: $night",night.optInt("rendered")>3)
-            Thread.sleep(500)
+            awaitVisualFrame(scenario)
             val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
             save("android-street-traffic.png", bitmap)
             val colors=IntArray(bitmap.width*bitmap.height);bitmap.getPixels(colors,0,bitmap.width,0,0,bitmap.width,bitmap.height)
@@ -77,7 +94,10 @@ class MapTrafficTest {
             }
             val colored=trafficColors(colors)
             evaluate(scenario,"window.GPS3D.setTrafficEnabled(false);true")
-            Thread.sleep(500)
+            val disabled=JSONObject(evaluate(scenario,"window.GPS3D.trafficState()"))
+            assertEquals("disabled", disabled.getString("status"))
+            assertEquals(0,disabled.getInt("rendered"))
+            awaitVisualFrame(scenario)
             assertTrue("The display must stay awake until the baseline is captured",
                 instrumentation.targetContext.getSystemService(PowerManager::class.java).isInteractive)
             val baseline=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
@@ -85,6 +105,19 @@ class MapTrafficTest {
             val baseColors=IntArray(baseline.width*baseline.height)
             baseline.getPixels(baseColors,0,baseline.width,0,0,baseline.width,baseline.height)
             val additional=colored-trafficColors(baseColors)
+            val diagnostic=JSONObject().put("day",day).put("night",night).put("disabled",disabled)
+                .put("additionalTrafficPixels",additional).put("coloredPixels",colored)
+                .put("baselineColoredPixels",trafficColors(baseColors))
+                .put("camera",JSONObject(evaluate(scenario,"window.GPS3D.cameraState()")))
+            val reportValues=ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME,"android-traffic-result.json")
+                put(MediaStore.Downloads.MIME_TYPE,"application/json")
+                put(MediaStore.Downloads.RELATIVE_PATH,"Download/GPS3DQA")
+            }
+            val reportUri=requireNotNull(instrumentation.targetContext.contentResolver
+                .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,reportValues))
+            requireNotNull(instrumentation.targetContext.contentResolver.openOutputStream(reportUri))
+                .bufferedWriter().use { it.write(diagnostic.toString()) }
             baseline.recycle()
             assertTrue("Android traffic pixels must exceed the marker/background alone: $additional",additional>300)
             evaluate(scenario,"window.GPS3D.setTrafficEnabled(true);true")
