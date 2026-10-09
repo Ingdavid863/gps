@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- CI-only accessible screen fixture. Never delivered or installed on a user's phone. -->
+    <application android:label="Maps workflow QA fixture" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name="com.david.gps3dar.mapsfixture.MapsFixtureActivity" android:exported="true" />
+    </application>
+</manifest>

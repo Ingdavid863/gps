@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.17.0-beta-ar-walk"
+        versionCode = 23
+        versionName = "0.18.0-beta-auto-routes"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
         manifestPlaceholders["tomTomApiKey"] = tomTomApiKey

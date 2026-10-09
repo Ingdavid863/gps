@@ -86,6 +86,8 @@ import kotlin.math.sin
 class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, SensorEventListener {
 
     private lateinit var webMapView: WebView
+    private lateinit var signalRepository: SignalRepository
+    private var lastSignalUiMs = 0L
     private lateinit var fusedLocation: FusedLocationProviderClient
 
     private lateinit var searchInput: EditText
@@ -389,6 +391,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             ui.post {
                 mapReady = true
                 syncMapAll()
+                syncSignals()
                 jsCall("setDarkTheme($darkTheme)")
                 jsCall("setNetworkAvailable($networkAvailable)")
             }
@@ -523,6 +526,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun setupButtons() {
+        signalRepository = SignalRepository(http, java.io.File(filesDir, "osm-signals.json"))
+        findViewById<View>(R.id.settingsAutomaticRoutes).setOnClickListener {
+            startActivity(Intent(this, AutoRouteSetupActivity::class.java))
+        }
         findViewById<View>(R.id.changeDestinationButton).setOnClickListener {
             hidePlacePreview()
             searchEditing = true
@@ -863,6 +870,33 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         updateNavigationStep(shown)
         updateTollPanel()
         maybeStartPendingExternalNavigation()
+        val signalNow = SystemClock.elapsedRealtime()
+        if (signalNow - lastSignalUiMs > 1000 && ::signalRepository.isInitialized) {
+            lastSignalUiMs = signalNow
+            val center = RouteGeometry.Point(location.latitude, location.longitude)
+            signalRepository.load(center) { _, _ -> ui.post { if (!isDestroyed) syncSignals() } }
+            syncSignals()
+        }
+    }
+
+    private fun syncSignals() {
+        if (!mapReady || !::signalRepository.isInitialized) return
+        val here = displayLocation ?: rawLocation
+        val data = signalRepository.snapshot?.takeIf { s -> here == null ||
+            RouteGeometry.distance(s.center, RouteGeometry.Point(here.latitude, here.longitude)) < 3000 }
+        val points = data?.signals.orEmpty()
+        val route = if (routeActive) routePoints.drop((routeProgressIndex - 2).coerceAtLeast(0)).take(350)
+            .map { RouteGeometry.Point(it.lat, it.lon) } else emptyList()
+        val nearest = here?.let { SignalRepository.next(points, RouteGeometry.Point(it.latitude, it.longitude), route, pedestrianRoute) }
+        val outdated = data != null && (data.cached || System.currentTimeMillis() - data.loadedAt > 3_600_000)
+        val label = when {
+            data == null -> signalRepository.lastError ?: "Semáforos: consultando ubicaciones OSM"
+            nearest != null -> "Semáforo ${if (routeActive) "cerca de la ruta" else "cercano"}: ${nearest.second.toInt()} m · ${if (outdated) "OSM guardado" else "OSM"}\nColor: sin datos en vivo"
+            points.isEmpty() -> "OSM: sin semáforos registrados cerca · color sin datos en vivo"
+            else -> "${points.size} semáforos registrados cerca · ${if (outdated) "OSM guardado" else "OSM"}\nColor: sin datos en vivo"
+        }
+        val coordinates = JSONArray(points.map { JSONArray(listOf(it.point.lon, it.point.lat)) }).toString()
+        jsCall("setSignals($coordinates,${JSONObject.quote(label)})")
     }
 
     private fun smoothLocation(raw: Location): Location {
@@ -996,6 +1030,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             Toast.makeText(this, "Esta ubicación no incluye un destino válido", Toast.LENGTH_LONG).show()
             return
         }
+        // A shared driving destination must not inherit a previous VR walking route.
+        pedestrianRoute = received.walking
+        AutoRouteShareService.destinationReceived()
         externalLinkCall?.cancel()
         destinationSearch.cancel()
         searchDebounce?.let { ui.removeCallbacks(it) }
@@ -1926,6 +1963,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun stopNavigation() {
+        AutoRouteShareService.routeStopped(this)
         routeActive = false
         pedestrianRoute = false
         updateSearchChrome()
@@ -2337,6 +2375,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     override fun onDestroy() {
+        if (::signalRepository.isInitialized) signalRepository.close()
         ui.removeCallbacks(ticker)
         searchDebounce?.let { ui.removeCallbacks(it) }
         searchCall?.cancel()

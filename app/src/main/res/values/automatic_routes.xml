@@ -1,0 +1,4 @@
+<resources>
+    <string name="automatic_route_label">GPS3D: envío automático de rutas</string>
+    <string name="automatic_route_description">Envía cada destino nuevo de Google Maps a GPS3D pulsando Compartir indicaciones y seleccionando GPS3D. Procesa únicamente Maps y su menú de compartir. Se activa y pausa en los ajustes de GPS3D.</string>
+</resources>

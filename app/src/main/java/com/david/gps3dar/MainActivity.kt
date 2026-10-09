@@ -969,19 +969,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val here = displayLocation ?: return
         val nearest = trafficSignals.minByOrNull { distanceMeters(here.latitude, here.longitude, it.lat, it.lon) } ?: return
         val meters = distanceMeters(here.latitude, here.longitude, nearest.lat, nearest.lon).toInt()
-        val cycle = 70
-        val offset = (nearest.id % cycle).toInt()
-        val t = (((System.currentTimeMillis() / 1000L).toInt() + offset) % cycle + cycle) % cycle
-        val phase: String
-        val remaining: Int
-        when {
-            t < 34 -> { phase = "🟢 DEMO"; remaining = 34 - t }
-            t < 38 -> { phase = "🟡 DEMO"; remaining = 38 - t }
-            else -> { phase = "🔴 DEMO"; remaining = 70 - t }
-        }
         signalDistance.text = "🚦 Próximo: ${formatDistance(meters.toDouble())}"
-        signalPhase.text = phase
-        signalTime.text = "$remaining s"
+        signalPhase.text = "Color: sin datos en vivo"
+        signalTime.text = "Ubicación OpenStreetMap"
     }
 
     private fun smoothBearing(old: Double, target: Double, alpha: Double): Double {
@@ -1057,3 +1047,4 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         const val DEFAULT_FOLLOW_RESUME_MS = 8000L
     }
 }
+

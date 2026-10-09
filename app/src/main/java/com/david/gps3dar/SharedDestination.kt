@@ -7,7 +7,7 @@ import java.util.Locale
 /** Android geo/navigation URIs are opaque: never call Uri.getQueryParameter on them. */
 object SharedDestination {
     data class Point(val lat: Double, val lon: Double)
-    data class Destination(val point: Point? = null, val query: String? = null, val shortUrl: String? = null)
+    data class Destination(val point: Point? = null, val query: String? = null, val shortUrl: String? = null, val walking: Boolean = false)
 
     fun coordinates(value: String?): Point? {
         val match = Regex("^\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*,\\s*([+-]?\\d+(?:\\.\\d+)?)(?:\\s*\\([^)]*\\))?\\s*$")
@@ -36,6 +36,8 @@ object SharedDestination {
         val params = rawQuery.split('&').mapNotNull { part ->
             if (part.isBlank()) null else decode(part.substringBefore('=')) to decode(part.substringAfter('=', ""))
         }.toMap()
+        val walking = params["mode"] == "w" || params["travelmode"] == "walking" ||
+            uri.rawPath.orEmpty().contains("!3e2")
         if (scheme == "geo") {
             val q = params["q"]?.trim().orEmpty()
             coordinates(q)?.let { return Destination(point = it) }
@@ -45,21 +47,21 @@ object SharedDestination {
         }
         if (scheme == "google.navigation") {
             val q = params["q"]?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-            return Destination(point = coordinates(q), query = if (coordinates(q) == null) q else null)
+            return Destination(point = coordinates(q), query = if (coordinates(q) == null) q else null, walking = walking)
         }
         if (scheme != "waze" && (scheme !in setOf("http", "https") || !isMapHost(uri.host))) return null
         for (name in listOf("destination", "daddr", "ll", "q", "query")) {
             val q = params[name]?.trim()?.takeIf { it.isNotEmpty() } ?: continue
-            return Destination(point = coordinates(q), query = if (coordinates(q) == null) q else null)
+            return Destination(point = coordinates(q), query = if (coordinates(q) == null) q else null, walking = walking)
         }
         val path = decode(uri.rawPath.orEmpty())
         // Destination data has priority over the @latitude,longitude camera center.
         Regex("!3d([+-]?[0-9.]+)!4d([+-]?[0-9.]+)").find(path)?.let {
-            coordinates(it.groupValues[1] + "," + it.groupValues[2])?.let { p -> return Destination(point = p) }
+            coordinates(it.groupValues[1] + "," + it.groupValues[2])?.let { p -> return Destination(point = p, walking = walking) }
         }
         if (path.contains("/dir/")) {
             val dest = path.substringAfter("/dir/").split('/').filter { it.isNotBlank() && !it.startsWith("@") && !it.startsWith("data=") }.lastOrNull()
-            if (dest != null) return Destination(point = coordinates(dest), query = if (coordinates(dest) == null) dest else null)
+            if (dest != null) return Destination(point = coordinates(dest), query = if (coordinates(dest) == null) dest else null, walking = walking)
         }
         if (path.contains("/place/")) {
             val q = path.substringAfter("/place/").substringBefore('/').replace('+', ' ')
@@ -75,3 +77,4 @@ object SharedDestination {
 
     private fun decode(value: String): String = URLDecoder.decode(value, "UTF-8")
 }
+

@@ -58,12 +58,17 @@
             box-shadow:0 2px 7px #0003; pointer-events:none; }
         #traffic-status[data-state="live"]::before { content:'●'; color:#28b56e; margin-right:6px; }
         #traffic-status[data-state="disabled"] { display:none; }
+        #signal-status { position:absolute; z-index:5; left:12px; bottom:calc(16% + 78px);
+            max-width:calc(100% - 116px); padding:7px 10px; border-radius:12px; white-space:pre-line;
+            background:rgba(19,30,43,.93); color:#edf3f8; font-size:12px; line-height:1.35; pointer-events:none; }
+        #signal-status:empty { display:none; }
     </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="loading">Iniciando motor GPS3D…</div>
 <div id="traffic-status" role="status" aria-live="polite">Cargando tráfico…</div>
+<div id="signal-status" role="status" aria-live="polite"></div>
 <script src="traffic-config.js"></script>
 <script src="vendor/maplibre-gl.js"></script>
 <script src="navigation-motion.js"></script>
@@ -572,6 +577,18 @@
         safeAddSource('gps-route-active', { type: 'geojson', data: EMPTY });
         safeAddSource(ROUTE_TRAFFIC_SOURCE_ID, { type: 'geojson', data: EMPTY });
         safeAddSource('gps-tolls', { type: 'geojson', data: EMPTY });
+        safeAddSource('gps-signals', { type: 'geojson', data: EMPTY, attribution: 'Semáforos: © OpenStreetMap contributors' });
+        if (!map.hasImage('gps-signal-neutral')) {
+            const canvas = document.createElement('canvas'); canvas.width = 32; canvas.height = 58;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(3, 1, 26, 55);
+            ctx.fillStyle = '#253341'; ctx.fillRect(5, 3, 22, 51);
+            ctx.fillStyle = '#b0bac4';
+            for (const y of [13, 28, 43]) { ctx.beginPath(); ctx.arc(16, y, 5.5, 0, Math.PI*2); ctx.fill(); }
+            map.addImage('gps-signal-neutral', ctx.getImageData(0, 0, 32, 58), { pixelRatio: 2 });
+        }
+        safeAddLayer({ id:'gps-signals-layer', type:'symbol', source:'gps-signals', minzoom:13,
+            layout:{'icon-image':'gps-signal-neutral','icon-size':0.9,'icon-allow-overlap':false} });
         safeAddSource('gps-maneuvers', { type: 'geojson', data: EMPTY });
 
         safeAddLayer({
@@ -809,6 +826,12 @@
             const s = map.getSource('gps-tolls');
             if (s) s.setData(pointData(points));
         },
+        setSignals(points, status) {
+            if (!ready) return;
+            const s = map.getSource('gps-signals');
+            if (s) s.setData(pointData(points));
+            document.getElementById('signal-status').textContent = String(status || '');
+        },
         setSelectionPin(lon, lat) {
             if (!ready) return;
             selectedPoint = [Number(lon), Number(lat)];
@@ -824,6 +847,7 @@
             viewportTop = nextTop;
             viewportBottom = nextBottom;
             document.getElementById('traffic-status').style.bottom = (viewportBottom * map.getContainer().clientHeight + 38) + 'px';
+            document.getElementById('signal-status').style.bottom = (viewportBottom * map.getContainer().clientHeight + 78) + 'px';
             const attribution = document.querySelectorAll('.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right');
             attribution.forEach(el => { el.style.bottom = (viewportBottom * map.getContainer().clientHeight + 6) + 'px'; });
             if (viewMode === 2 && changed) showOverview();

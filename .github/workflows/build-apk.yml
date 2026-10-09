@@ -52,6 +52,7 @@ jobs:
           echo "ARCore and TomTom credentials are configured."
       - name: Test navigation and build debug APK
         env:
+          GPS3D_SIGNAL_LIVE_QA: '1'
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
         run: |
@@ -70,11 +71,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.17-map-validation
+          name: GPS3D-0.18-map-validation
           path: |
             build/map-qa/
             build/traffic-qa/
             app/build/ar-qa/
+            app/build/signal-qa/
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -91,12 +93,14 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            gradle connectedDebugAndroidTest --stacktrace
+            GPS3D_AUTO_SHARE_QA=1 gradle :mapsFixture:assembleDebug --stacktrace
+            adb install mapsFixture/build/outputs/apk/debug/mapsFixture-debug.apk
+            GPS3D_AUTO_SHARE_QA=1 gradle :app:connectedDebugAndroidTest --stacktrace
             adb pull /sdcard/Download/GPS3DQA build/native-map-qa
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.17-android-validation
+          name: GPS3D-0.18-android-validation
           path: build/native-map-qa/
       - name: Verify APK identity and update signature
         run: |
@@ -110,9 +114,9 @@ jobs:
           assert certificate == expected, 'APK must preserve the installed 0.14 signing certificate'
           badging = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'badging', str(apk)], text=True)
           package = badging.splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='22'" in package and "versionName='0.17.0-beta-ar-walk'" in package, package
+          assert "name='com.david.gps3dar'" in package and "versionCode='23'" in package and "versionName='0.18.0-beta-auto-routes'" in package, package
           assert re.search(r"sdkVersion:'26'", badging), 'Android minimum version must remain compatible'
-          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.17.0-beta-ar-walk.apk')
+          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.18.0-beta-auto-routes.apk')
           destination.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, destination)
           print(package)
@@ -122,6 +126,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.17.0-beta-ar-walk
-          path: build/delivery/GPS3D-AR-David-0.17.0-beta-ar-walk.apk
+          name: GPS3D-AR-David-0.18.0-beta-auto-routes
+          path: build/delivery/GPS3D-AR-David-0.18.0-beta-auto-routes.apk
 

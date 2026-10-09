@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SharedDestinationTest {
+    @Test fun sharedDrivingDoesNotInheritWalkingAndExplicitWalkingLinksKeepTheirMode() {
+        assertFalse(SharedDestination.parse("https://www.google.com/maps/dir/?api=1&destination=19.5,-99.4&travelmode=driving")!!.walking)
+        assertTrue(SharedDestination.parse("google.navigation:q=19.5,-99.4&mode=w")!!.walking)
+        assertTrue(SharedDestination.parse("https://www.google.com/maps/dir/?api=1&destination=19.5,-99.4&travelmode=walking")!!.walking)
+        assertTrue(SharedDestination.parse("https://www.google.com/maps/dir/Origen/19.5,-99.4/data=!3e2")!!.walking)
+    }
     @Test fun opaqueWhatsAppCoordinate() {
         val d = SharedDestination.parse("geo:0,0?q=19.432608,-99.133209(Casa)")!!
         assertEquals(19.432608, d.point!!.lat, 1e-9)
@@ -38,3 +44,4 @@ class SharedDestinationTest {
         }
     }
 }
+
