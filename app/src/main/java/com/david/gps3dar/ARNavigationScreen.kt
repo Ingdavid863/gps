@@ -2,6 +2,7 @@ package com.david.gps3dar
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -156,8 +158,12 @@ fun ARNavigationScreen(
                 color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(start = 20.dp, end = 20.dp, bottom = 156.dp)
                     .background(Color(0xCC102231), RoundedCornerShape(8.dp)).padding(8.dp))
-            Text("+", color = Color.White, fontSize = 30.sp,
-                modifier = Modifier.align(Alignment.Center).padding(top = 150.dp))
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val center = Offset(size.width * .5f, size.height * .72f)
+                val arm = 9.dp.toPx()
+                drawLine(Color.White, center - Offset(arm, 0f), center + Offset(arm, 0f), 2.dp.toPx())
+                drawLine(Color.White, center - Offset(0f, arm), center + Offset(0f, arm), 2.dp.toPx())
+            }
             Row(modifier = Modifier.align(Alignment.BottomCenter)
                 .padding(start = 16.dp, end = 16.dp, bottom = 100.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
