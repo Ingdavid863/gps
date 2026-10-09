@@ -890,7 +890,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val nearest = here?.let { SignalRepository.next(points, RouteGeometry.Point(it.latitude, it.longitude), route, pedestrianRoute) }
         val outdated = data != null && (data.cached || System.currentTimeMillis() - data.loadedAt > 3_600_000)
         val label = when {
-            data == null -> signalRepository.lastError ?: "Semáforos: consultando ubicaciones OSM"
+            data == null -> signalRepository.lastError ?: if (here != null) "Consultando semáforos OSM" else ""
             nearest != null -> "Semáforo ${if (routeActive) "cerca de la ruta" else "cercano"}: ${nearest.second.toInt()} m · ${if (outdated) "OSM guardado" else "OSM"}\nColor: sin datos en vivo"
             points.isEmpty() -> "OSM: sin semáforos registrados cerca · color sin datos en vivo"
             else -> "${points.size} semáforos registrados cerca · ${if (outdated) "OSM guardado" else "OSM"}\nColor: sin datos en vivo"
