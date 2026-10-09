@@ -1,4 +1,15 @@
-# GPS3D AR David — Android 0.18
+# GPS3D AR David — Android 0.19
+
+## Actualización 0.19: continuidad de la ruta AR
+- La cámara muestra hasta 160 m del recorrido por delante y renueva ese tramo conforme avanza el peatón; el recorrido completo se conserva en el mapa.
+- Una actualización de ruta conserva la alineación manual. El anclaje cercano se renueva cada 6 m manteniendo posición geográfica y orientación.
+- Los nodos visuales usan poses; su eliminación ya no destruye los anclajes que todavía necesita el controlador de la ruta.
+- Se resuelve un anclaje de terreno por bloque de 8 m. Si faltan alturas lejanas se usa la altura medida del suelo y se identifica como aproximada, sin ocultar tramos por esperar el siguiente anclaje.
+- El mapa y la cámara reutilizan el mismo archivo de ruta peatonal, sin recalcularlo al reabrir la cámara mientras sigue siendo válido.
+- La banderita es un indicador del rumbo geográfico del destino en la cámara; muestra la distancia restante y una flecha si queda fuera del campo de visión.
+- La flecha de maniobra coincide con izquierda/derecha/llegada; la distancia de giro es más grande.
+- Google ARCore Geospatial aporta ubicación y orientación visual cuando está autorizado y tiene cobertura. La ruta peatonal actual se calcula con TomTom: no se afirma acceso a la ruta interna ni al Live View de la app Google Maps.
+- Las pruebas automáticas cubren geometría de calles largas, densidad de puntos, giros, proyección del destino y cambios mapa/cámara en Android. La alineación física, altura del pavimento y disponibilidad de VPS requieren prueba con la cámara del teléfono en la calle.
 
 ## Actualización 0.18
 - Rutas a pie en AR, mapa de conducción y tráfico TomTom.

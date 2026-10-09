@@ -28,9 +28,11 @@ class WalkingHandoffTest {
         cache.writeText(walking.encode())
         val intercepted = CountDownLatch(1)
         var received: Intent? = null
+        var launches = 0
         val monitor = object : Instrumentation.ActivityMonitor() {
             override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
                 if (intent.component?.className != ArNavigationActivity::class.java.name) return null
+                launches++
                 received = intent; intercepted.countDown()
                 return Instrumentation.ActivityResult(Activity.RESULT_OK, Intent()
                     .putExtra(ArNavigationActivity.EXTRA_WALKING_ROUTE, true)
@@ -64,7 +66,11 @@ class WalkingHandoffTest {
                     assertTrue(activity.findViewById<TextView>(R.id.etaText).text.toString().startsWith("A pie"))
                     assertEquals(3, (RealisticMapActivity::class.java.getDeclaredField("routePoints")
                         .apply { isAccessible = true }.get(activity) as List<*>).size)
+                    activity.findViewById<TextView>(R.id.modeButton).performClick()
+                    assertEquals("Reopening AR must preserve the exact shared walking route",
+                        walking, WalkingRoute.decode(cache.readText()))
                 }
+                assertEquals("Map/camera switching must work twice", 2, launches)
             }
         } finally { instrumentation.removeMonitor(monitor); cache.delete() }
     }

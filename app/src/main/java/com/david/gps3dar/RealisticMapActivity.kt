@@ -667,6 +667,21 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             searchInput.requestFocus(); showRecentDestinations()
             return
         }
+        // Store the exact pedestrian polyline currently displayed. The camera must reuse it.
+        if (pedestrianRoute && routePoints.size >= 2 && routeDestination == destination) {
+            val points = routePoints.map { RouteGeometry.Point(it.lat, it.lon) }
+            val cached = runCatching { WalkingRoute.decode(java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE).readText()) }.getOrNull()
+            if (cached?.points != points) {
+                val walking = WalkingRoute(RouteGeometry.Point(destination.lat, destination.lon), points,
+                    navSteps.map { WalkingRoute.Step(RouteGeometry.Point(it.lat, it.lon), it.instruction, it.maneuver) },
+                    routeDurationSeconds)
+                runCatching {
+                    val pending = java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE + ".pending")
+                    pending.writeText(walking.encode())
+                    check(pending.renameTo(java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE)))
+                }
+            }
+        }
         arLauncher.launch(Intent(this, ArNavigationActivity::class.java)
             .putExtra(WalkingRoute.EXTRA_LAT, destination.lat)
             .putExtra(WalkingRoute.EXTRA_LON, destination.lon)

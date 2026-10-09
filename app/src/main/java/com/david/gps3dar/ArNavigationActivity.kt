@@ -75,6 +75,9 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var directionDistance by mutableStateOf("Ruta para caminar")
     private var directionInstruction by mutableStateOf("Esperando ubicación precisa…")
     private var directionRoad by mutableStateOf("")
+    private var directionManeuver by mutableStateOf("")
+    private var destinationIndicator by mutableStateOf<ArDestinationIndicator?>(null)
+    private var destinationDistance by mutableStateOf("")
     private var voiceEnabled by mutableStateOf(true)
     private var routeActive by mutableStateOf(false)
     private var width = 0
@@ -86,7 +89,7 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val location = result.lastLocation ?: return
             if (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 15_000_000_000L) return
             val now = SystemClock.elapsedRealtime()
-            if (now - visualFixAt > 1500L) {
+            if (!groundState.manual && now - visualFixAt > 1500L) {
                 here = RouteGeometry.Point(location.latitude, location.longitude)
                 hereAt = now
             }
@@ -173,7 +176,8 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 speedKmh = speedKmh, speedLimitKmh = null, distanceText = directionDistance,
                 instructionText = directionInstruction, roadText = directionRoad, arStatus = arStatus,
                 voiceEnabled = voiceEnabled, trafficEnabled = false,
-                walkingMode = true, routeActive = routeActive,
+                walkingMode = true, routeActive = routeActive, maneuver = directionManeuver,
+                destinationIndicator = destinationIndicator, destinationDistance = destinationDistance,
                 onAnchorFloor = { ground.requestManualPlacement = true },
                 onAutomaticGround = {
                     if (!visualLocationAllowed) {
@@ -204,12 +208,16 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         onSessionFailed = {
                             arStatus = "La cámara AR no pudo iniciar. Revisa Google Play Services para RA y los permisos."
                         },
-                        onSessionPaused = { ground.clear(); groundState = GroundRouteController.State() },
+                        onSessionPaused = {
+                            // ARCore owns pause/resume tracking; a temporary pause must not detach the alignment.
+                            groundState = groundState.copy(visible = false)
+                            destinationIndicator = null
+                        },
                         onSessionUpdated = { session, frame ->
                             val now = SystemClock.elapsedRealtime()
                             if (now - lastFrameAt >= 100L) {
                                 lastFrameAt = now
-                                if (ground.geospatialConfigured) {
+                                if (ground.geospatialConfigured && !groundState.manual) {
                                     val earth = session.earth
                                     if (earth?.earthState == com.google.ar.core.Earth.EarthState.ENABLED &&
                                         earth.trackingState == TrackingState.TRACKING) {
@@ -224,12 +232,18 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 val location = here?.takeIf { now - hereAt < 15000L }
                                 val placing = ground.requestManualPlacement
                                 groundState = ground.update(session, frame, location, now, width, height)
+                                if (groundState.visible && groundState.location != null) {
+                                    here = groundState.location
+                                    hereAt = now
+                                    visualFixAt = now
+                                }
+                                updateDestinationIndicator(frame)
                                 if (placing && !groundState.manual) Toast.makeText(this@ArNavigationActivity,
                                     groundState.status, Toast.LENGTH_LONG).show()
                                 arStatus = groundState.status
                                 if (route != null && frame.camera.trackingState == TrackingState.TRACKING) {
-                                    updateDirections(groundState.along, location)
-                                    if (!groundState.manual && groundState.distanceFromRoute > 15.0) {
+                                    updateDirections(groundState.along, groundState.location ?: location)
+                                    if (groundState.distanceFromRoute > 15.0) {
                                         if (offRouteSince == 0L) offRouteSince = now
                                         if (now - offRouteSince > 8000 && now - lastRequestAt > 20000 && routeCall == null) requestWalkingRoute()
                                     } else offRouteSince = 0L
@@ -238,14 +252,15 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }
                     ) {
                         groundState.ribbons.forEach { ribbon ->
-                            key(ribbon.anchor) {
-                                AnchorNode(anchor = ribbon.anchor,
-                                    visibleTrackingStates = if (groundState.visible && ribbon.visible) setOf(TrackingState.TRACKING) else emptySet()) {
+                            key(ribbon.id) {
+                                // Controller owns anchors. AnchorNode disposal used to detach cached anchors.
+                                PoseNode(pose = ribbon.pose,
+                                    visibleCameraTrackingStates = if (groundState.visible) setOf(TrackingState.TRACKING) else emptySet()) {
                                     // White border and colored core are real meshes, 2.5 cm above the floor.
-                                    CubeNode(size = Size(.26f, .014f, ribbon.length + .015f),
+                                    CubeNode(size = Size(.46f, .018f, ribbon.length + .06f),
                                         position = Position(ribbon.x, ribbon.y, ribbon.z),
                                         rotation = Rotation(ribbon.pitch, ribbon.yaw, 0f), materialInstance = white)
-                                    CubeNode(size = Size(.17f, .018f, ribbon.length + .02f),
+                                    CubeNode(size = Size(.32f, .022f, ribbon.length + .065f),
                                         position = Position(ribbon.x, ribbon.y + .007f, ribbon.z),
                                         rotation = Rotation(ribbon.pitch, ribbon.yaw, 0f),
                                         materialInstance = if (groundState.manual) orange else blue)
@@ -269,7 +284,11 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         directionInstruction = if (route == null) "Calculando ruta para caminar…" else "Recalculando ruta para caminar…"
         if (route == null) {
             val cached = runCatching { WalkingRoute.decode(File(filesDir, ROUTE_FILE).readText()) }.getOrNull()
-            if (cached?.reusableFor(destination, from, System.currentTimeMillis()) == true) installRoute(cached)
+            if (cached?.reusableFor(destination, from, System.currentTimeMillis()) == true) {
+                installRoute(cached)
+                // Reopening the camera uses precisely the map's walking polyline.
+                return
+            }
         }
         val key = apiKey("com.david.gps3dar.TOMTOM_API_KEY")
         if (key.isBlank()) { directionInstruction = "Servicio de rutas no configurado"; return }
@@ -292,7 +311,11 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (epoch != requestEpoch || isDestroyed) return@post
                     routeCall = null
                     parsed.onSuccess { walking ->
-                        runCatching { File(filesDir, ROUTE_FILE).writeText(walking.encode()) }
+                        runCatching {
+                            val pending = File(filesDir, ROUTE_FILE + ".pending")
+                            pending.writeText(walking.encode())
+                            check(pending.renameTo(File(filesDir, ROUTE_FILE)))
+                        }
                         installRoute(walking)
                     }.onFailure { error ->
                         if (route == null) directionInstruction = error.message ?: "No hay ruta para caminar disponible"
@@ -306,7 +329,7 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         route = walking; routeGeometry = ArRouteGeometry(walking.points)
         stepAlong = walking.steps.map { RouteGeometry.project(walking.points, it.point)?.along ?: 0.0 }.toDoubleArray()
         routeActive = true; lastSpokenStep = -1; offRouteSince = 0L
-        ground.setRoute(walking); groundState = GroundRouteController.State()
+        ground.setRoute(walking)
         updateResult(walking)
         here?.let { updateDirections(RouteGeometry.project(walking.points, it)?.along ?: 0.0, it) }
     }
@@ -329,6 +352,8 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 stepAlong[index] > along + 3.0
         }
         directionInstruction = if (arrived) "Llegaste a tu destino" else next?.value?.message ?: "Sigue la línea hacia el destino"
+        directionManeuver = if (arrived) "ARRIVE" else next?.value?.maneuver.orEmpty()
+        destinationDistance = distanceText(remaining)
         val stepDistance = next?.index?.let { stepAlong[it] - along } ?: remaining
         directionDistance = if (arrived) "Destino a pie" else "A pie · ${distanceText(stepDistance)} · quedan ${distanceText(remaining)}"
         val estimatedMinutes = ceil(walking.durationSeconds * remaining / geometry.length.coerceAtLeast(1.0) / 60).toInt()
@@ -340,6 +365,25 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastSpokenStep = index
         }
         if (arrived && groundState.visible) groundState = groundState.copy(visible = false)
+    }
+
+    private fun updateDestinationIndicator(frame: com.google.ar.core.Frame) {
+        val origin = groundState.location
+        val reference = groundState.geographicFrame
+        val destination = target
+        if (!groundState.visible || origin == null || reference == null || destination == null) {
+            destinationIndicator = null
+            return
+        }
+        val offset = ArRouteGeometry.offset(origin, destination)
+        val distance = hypot(offset.east, offset.south).coerceAtLeast(1.0)
+        val worldDirection = reference.rotateVector(floatArrayOf(
+            (offset.east / distance * 35).toFloat(), 10.5f,
+            (offset.south / distance * 35).toFloat()))
+        val cameraDirection = frame.camera.pose.inverse().rotateVector(worldDirection)
+        val projection = FloatArray(16)
+        frame.camera.getProjectionMatrix(projection, 0, .05f, 500f)
+        destinationIndicator = ArSkyGeometry.project(cameraDirection, projection)
     }
 
     private fun distanceText(meters: Double): String = if (meters < 1000) "${meters.toInt()} m"
