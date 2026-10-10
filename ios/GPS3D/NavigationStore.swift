@@ -47,12 +47,15 @@ import AVFoundation
         if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
         manager.startUpdatingLocation()
     }
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor [weak self] in self?.authorizationChanged() }
+    }
+    private func authorizationChanged() {
         if manager.authorizationStatus == .authorizedAlways || manager.authorizationStatus == .authorizedWhenInUse { manager.startUpdatingLocation() }
         else if manager.authorizationStatus == .denied { error="Activa la ubicación para comenzar la ruta" }
     }
-    func locationManager(_ manager: CLLocationManager,didUpdateLocations locations: [CLLocation]) {
-        locations.forEach { fix($0) }
+    nonisolated func locationManager(_ manager: CLLocationManager,didUpdateLocations locations: [CLLocation]) {
+        Task { @MainActor [weak self] in locations.forEach { self?.fix($0) } }
     }
     func fix(_ location: CLLocation, force: Bool=false) {
         guard location.horizontalAccuracy>=0, force || raw == nil || location.timestamp>raw!.timestamp else { return }
@@ -84,8 +87,8 @@ import AVFoundation
             lastReroute=Date();routeTo(destination,avoid:route.avoidsTolls)
         }
     }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,didFinish utterance: AVSpeechUtterance) {
-        try? AVAudioSession.sharedInstance().setActive(false,options:.notifyOthersOnDeactivation)
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in try? AVAudioSession.sharedInstance().setActive(false,options:.notifyOthersOnDeactivation) }
     }
     func dismissError() { error=nil }
     func clearSearch() {

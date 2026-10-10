@@ -52,7 +52,7 @@ import Combine
             maneuver.initialTravelEstimates=CPTravelEstimates(distanceRemaining:Measurement(value:store.turnMeters,unit:UnitLength.meters),timeRemaining:store.seconds*store.turnMeters/max(1,store.remaining))
             navigation?.upcomingManeuvers=[maneuver]
             navigation?.updateEstimates(maneuver.initialTravelEstimates!,for:maneuver)
-            if let trip=currentTrip { map.update(CPTravelEstimates(distanceRemaining:Measurement(value:store.remaining,unit:UnitLength.meters),timeRemaining:store.seconds),for:trip) }
+            if let trip=currentTrip { map.update(CPTravelEstimates(distanceRemaining:Measurement(value:store.remaining,unit:UnitLength.meters),timeRemaining:store.seconds),for:trip,with:.default) }
         } else if navigation != nil { navigation?.cancelTrip();navigation=nil;currentTrip=nil;revision=nil }
         if let error=store.error,error != lastError {
             lastError=error

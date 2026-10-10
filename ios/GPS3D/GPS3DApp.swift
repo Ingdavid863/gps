@@ -7,9 +7,9 @@ import CarPlay
 }
 @MainActor final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,configurationForConnecting session: UISceneSession,options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-        if session.role != CPTemplateApplicationSceneSessionRoleApplication { return session.configuration }
-        let configuration=UISceneConfiguration(name:session.role == CPTemplateApplicationSceneSessionRoleApplication ? "CarPlay":nil,sessionRole:session.role)
-        if session.role == CPTemplateApplicationSceneSessionRoleApplication { configuration.delegateClass=CarPlaySceneDelegate.self }
+        if session.role != .carTemplateApplication { return session.configuration }
+        let configuration=UISceneConfiguration(name:session.role == .carTemplateApplication ? "CarPlay":nil,sessionRole:session.role)
+        if session.role == .carTemplateApplication { configuration.delegateClass=CarPlaySceneDelegate.self }
         return configuration
     }
 }
