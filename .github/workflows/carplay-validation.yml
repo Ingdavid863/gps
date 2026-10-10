@@ -56,6 +56,15 @@ jobs:
           test -n "$TOMTOM_API_KEY"
           xcodebuild -project ios/GPS3D.xcodeproj -scheme GPS3D -destination "platform=iOS Simulator,id=$GPS3D_SIMULATOR_ID" -derivedDataPath ios/build -resultBundlePath ios/build/NavigationTests.xcresult CODE_SIGNING_ALLOWED=NO TOMTOM_API_KEY="$TOMTOM_API_KEY" test > ios/build-log.txt 2>&1 || { tail -n 110 ios/build-log.txt; exit 1; }
           tail -n 30 ios/build-log.txt
+      - name: Collect the real WebKit navigation screenshot
+        run: |
+          python3 - <<'PYCODE'
+          import os, pathlib, shutil, subprocess
+          container=pathlib.Path(subprocess.check_output(['xcrun','simctl','get_app_container',os.environ['GPS3D_SIMULATOR_ID'],'com.david.gps3dar.ios','data'],text=True).strip())
+          screenshots=container/'Documents/GPS3DQA'
+          assert (screenshots/'carplay-shared-map.png').exists()
+          shutil.copytree(screenshots,'ios/build/GPS3DQA',dirs_exist_ok=True)
+          PYCODE
       - name: Verify device compilation without creating an installable IPA
         env:
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
@@ -82,6 +91,7 @@ jobs:
           name: GPS3D-iPhone-CarPlay-validation
           path: |
             ios/build/NavigationTests.xcresult
+            ios/build/GPS3DQA
             ios/build-log.txt
             ios/device-build-log.txt
       - uses: actions/upload-artifact@v4

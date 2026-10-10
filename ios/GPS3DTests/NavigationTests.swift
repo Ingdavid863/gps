@@ -1,5 +1,7 @@
 import XCTest
 import CoreLocation
+import UIKit
+import WebKit
 @testable import GPS3D
 
 private final class StubProtocol: URLProtocol {
@@ -67,7 +69,8 @@ private final class StubProtocol: URLProtocol {
         XCTAssertEqual(store.route!.points,paid);XCTAssertFalse(store.route!.avoidsTolls);XCTAssertTrue(store.pending)
         await task.value
         XCTAssertEqual(store.route!.points,free);XCTAssertTrue(store.route!.avoidsTolls);XCTAssertEqual(count,2)
-        store.fix(fix(point(0,200),1));XCTAssertLessThan(store.remaining,1)
+        for (i,p) in [point(50,0),point(100,0),point(100,50),point(100,100),point(100,150),point(100,200),point(50,200),point(0,200)].enumerated() { store.fix(fix(p,Double(i+1))) }
+        XCTAssertLessThan(store.remaining,1)
     }
     func testMissingTollMetadataTriggersAvoidAreasAndFailureKeepsTheOldRoute() async throws {
         let paid=[point(0,0),point(0,200)]
@@ -94,4 +97,41 @@ private final class StubProtocol: URLProtocol {
         store.selected=Place(name:"Otro destino",address:"",point:point(100,100))
         XCTAssertEqual(store.selected?.name,"Otro destino")
     }
+    func testTheCarPlayMapUsesTheSameLiveRendererAndRemovesPassedGeometry() async throws {
+        let session=client().session
+        let store=NavigationStore(client:TomTomClient(key:TomTomClient().key,session:session),booths:[])
+        store.voiceEnabled=false;store.fix(fix(point(0,0)))
+        let points=[point(0,0),point(0,100),point(100,100)]
+        StubProtocol.handler={ _ in try JSONSerialization.data(withJSONObject:["routes":[self.routeJSON(points)]]) }
+        await store.routeTo(Place(name:"Destino",address:"",point:points.last!))!.value
+        guard let scene=UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { XCTFail("Phone scene missing");return }
+        let window=UIWindow(windowScene:scene)
+        let controller=MapController(store:store,car:true)
+        window.rootViewController=controller;window.makeKeyAndVisible();controller.loadViewIfNeeded()
+        defer { window.isHidden=true }
+        func wait(_ condition: String) async throws {
+            let deadline=Date().addingTimeInterval(40)
+            while true {
+                if (try? await controller.web.evaluateJavaScript(condition)) as? Bool == true { return }
+                if Date()>deadline { XCTFail("Map condition did not finish: \(condition)");return }
+                try await Task.sleep(nanoseconds:100_000_000)
+            }
+        }
+        try await wait("!!window.GPS3D && GPS3D.cameraState().ready")
+        store.fix(fix(point(0,55),1))
+        try await wait("GPS3D.navigationState().progress>50")
+        let raw=try await controller.web.evaluateJavaScript("JSON.stringify(GPS3D.navigationState())") as! String
+        let state=try JSONSerialization.jsonObject(with:Data(raw.utf8)) as! [String:Any]
+        let remaining=state["remaining"] as! [String:Any], geometry=remaining["geometry"] as! [String:Any]
+        let coords=geometry["coordinates"] as! [[Double]]
+        XCTAssertGreaterThan(coords[0][1],19.72+50/110540)
+        let image=try await controller.web.takeSnapshot(configuration:nil)
+        let folder=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("GPS3DQA")
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        let png=image.pngData()!;XCTAssertGreaterThan(png.count,1024)
+        try png.write(to:folder.appendingPathComponent("carplay-shared-map.png"))
+        store.stop()
+        try await wait("GPS3D.navigationState().remaining.features.length===0")
+    }
+
 }
