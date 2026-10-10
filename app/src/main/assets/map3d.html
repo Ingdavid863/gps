@@ -536,7 +536,7 @@
         safeAddSource('gps-route-active', { type: 'geojson', data: EMPTY });
         safeAddSource(ROUTE_TRAFFIC_SOURCE_ID, { type: 'geojson', data: EMPTY });
         safeAddSource('gps-tolls', { type: 'geojson', data: EMPTY });
-        safeAddSource('gps-signals', { type: 'geojson', data: EMPTY, attribution: 'Semáforos: © OpenStreetMap contributors' });
+        safeAddSource('gps-signals', { type: 'geojson', data: EMPTY, attribution: '© OpenStreetMap contributors' });
         if (!map.hasImage('gps-signal-neutral')) {
             const canvas = document.createElement('canvas'); canvas.width = 32; canvas.height = 58;
             const ctx = canvas.getContext('2d');
