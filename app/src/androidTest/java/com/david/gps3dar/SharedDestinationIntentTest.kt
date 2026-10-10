@@ -7,6 +7,8 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import okhttp3.Call
 import org.junit.Assert.*
 import org.junit.Test
@@ -30,12 +32,20 @@ class SharedDestinationIntentTest {
         val first = Intent(context, RealisticMapActivity::class.java)
             .setAction(Intent.ACTION_SEND).setType("text/plain")
             .putExtra(Intent.EXTRA_TEXT, "https://www.google.com/maps/dir/?api=1&destination=19.7356,-99.2060&travelmode=walking")
-        ActivityScenario.launch<RealisticMapActivity>(first).use { scenario ->
+        try {
+        ActivityScenario.launch<RealisticMapActivity>(first).use {
             fun assertDestination(lat: Double, lon: Double, walking: Boolean) {
                 val deadline = SystemClock.elapsedRealtime() + 5000
                 var matched = false
                 do {
-                    scenario.onActivity { activity ->
+                    instrumentation.runOnMainSync {
+                        // VIEW and SEND may open different Activity instances/tasks.
+                        // Inspect the instance that actually received the new intent.
+                        val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+                        val activities = listOf(Stage.RESUMED, Stage.STARTED, Stage.PAUSED, Stage.STOPPED)
+                            .flatMap { monitor.getActivitiesInStage(it) }.distinct()
+                            .filterIsInstance<RealisticMapActivity>()
+                        for (activity in activities) {
                         val selected = RealisticMapActivity::class.java.getDeclaredField("selectedMapPoint")
                             .apply { isAccessible = true }.get(activity) as? RealisticMapActivity.SearchResult
                         val pending = RealisticMapActivity::class.java.getDeclaredField("pendingExternalDestination")
@@ -57,6 +67,8 @@ class SharedDestinationIntentTest {
                         if (matched) {
                             assertEquals(walking, RealisticMapActivity::class.java.getDeclaredField("pedestrianRoute")
                                 .apply { isAccessible = true }.getBoolean(activity))
+                            break
+                        }
                         }
                     }
                     if (!matched) Thread.sleep(100)
@@ -72,6 +84,14 @@ class SharedDestinationIntentTest {
                 .setAction(Intent.ACTION_VIEW).setData(Uri.parse("geo:0,0?q=19.7402,-99.2151"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
             assertDestination(19.7402, -99.2151, false)
+        }
+        } finally {
+            instrumentation.runOnMainSync {
+                val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+                listOf(Stage.CREATED, Stage.STARTED, Stage.RESUMED, Stage.PAUSED, Stage.STOPPED)
+                    .flatMap { monitor.getActivitiesInStage(it) }.distinct()
+                    .filterIsInstance<RealisticMapActivity>().forEach { it.finish() }
+            }
         }
     }
 }
