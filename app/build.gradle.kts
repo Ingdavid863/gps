@@ -90,7 +90,9 @@ dependencies {
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
-    androidTestImplementation("androidx.car.app:app-testing:1.7.0")
+    androidTestImplementation("androidx.car.app:app-testing:1.7.0") {
+        exclude(group = "org.robolectric")
+    }
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
