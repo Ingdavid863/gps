@@ -52,7 +52,8 @@ object CarNavigation {
         val normalized=route.copy(steps=route.steps.map { step -> if(step.alongMeters.isFinite())step else step.copy(
             alongMeters=geometry!!.instructionAlong(RouteGeometry.Point(step.lat,step.lon),step.routeIndex)) })
         publish(state.copy(revision=state.revision+1,source=source,route=normalized,destination=destination,
-            label=label,along=0.0,segment=0,remaining=geometry!!.length,seconds=route.durationSeconds,pending=false,error=null,arrived=false))
+            label=label,location=rawLocation?.let { Location(it) } ?: state.location,onRoute=false,
+            along=0.0,segment=0,remaining=geometry!!.length,seconds=route.durationSeconds,pending=false,error=null,arrived=false))
         if(source=="car")appContext?.getSharedPreferences("RealisticMapActivity",Context.MODE_PRIVATE)
             ?.edit()?.putBoolean("avoidTolls",route.avoidsTolls)?.apply()
         (rawLocation ?: state.location)?.let { fix(it, force=true) }
