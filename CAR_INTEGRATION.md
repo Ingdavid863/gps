@@ -6,7 +6,7 @@ La app conserva el paquete y la firma de GPS3D AR David. `GpsCarAppService` usa 
 
 Buscar, terminar, volver al seguimiento y recalcular sin casetas son acciones de la pantalla del coche. El modo AR sigue siendo para el teléfono y no cambia el modo de conducción del auto. No se piden permisos de accesibilidad ni de lectura de notificaciones.
 
-La compilación y las pruebas de Surface/plantillas no garantizan que un host Android Auto físico admita un APK descargado fuera de Google Play. La distribución debe realizarse mediante una pista interna/cerrada de Google Play y superar la revisión de calidad de aplicaciones para coches. El Desktop Head Unit permite probar el flujo con el teléfono y no sustituye la prueba en el vehículo.
+La compilación y las pruebas de Surface/plantillas no garantizan que un host Android Auto físico admita un APK descargado fuera de Google Play. Para probarlo en el coche, hay que distribuirlo por una pista de pruebas de Google Play y habilitar Android Auto en Play Console. La pista interna no requiere la revisión específica para coches; las pruebas abiertas y la publicación en producción sí requieren su aprobación. El Desktop Head Unit permite probar el flujo con el teléfono y no sustituye la prueba en el vehículo.
 
 ## iPhone y CarPlay
 
