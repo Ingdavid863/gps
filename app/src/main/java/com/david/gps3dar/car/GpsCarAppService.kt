@@ -40,7 +40,7 @@ private class GpsCarSession(private val cluster: Boolean) : Session() {
                 .addDestination(Destination.Builder().setName(state.label).build(),GpsCarScreen.estimate(state.remaining,state.seconds))
                 .addStep(step,GpsCarScreen.estimate(state.turnMeters,
                     state.seconds*state.turnMeters/state.remaining.coerceAtLeast(1.0))).build())
-        } else if(navigating) { manager.navigationStopped();navigating=false }
+        } else if(navigating) { manager.navigationEnded();navigating=false }
     }
     override fun onCreateScreen(intent: Intent): Screen {
         connections++
@@ -61,7 +61,7 @@ private class GpsCarSession(private val cluster: Boolean) : Session() {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) {
                 CarNavigation.remove(navigationObserver)
-                if(navigating)carContext.getCarService(NavigationManager::class.java).navigationStopped()
+                if(navigating)carContext.getCarService(NavigationManager::class.java).navigationEnded()
                 surface?.close();surface=null;connections--
                 if(connections==0)carContext.stopService(Intent(carContext,CarLocationService::class.java))
             }

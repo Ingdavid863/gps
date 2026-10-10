@@ -57,6 +57,8 @@ class CarMapSurface(private val context: Context) : SurfaceCallback {
             renderedRevision=snapshot.revision
             val points=JSONArray(snapshot.route?.points.orEmpty().map { listOf(it.lon,it.lat) })
             js("setRoutes($points,[],[],false)")
+            val steps=JSONArray(snapshot.route?.steps.orEmpty().map { org.json.JSONObject().put("index",it.routeIndex).put("maneuver",it.maneuver) })
+            js("setManeuvers($steps)")
         }
         snapshot.location?.let { fix ->
             val onRoute=snapshot.onRoute
