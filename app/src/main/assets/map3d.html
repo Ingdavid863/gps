@@ -77,6 +77,7 @@
 <script src="navigation-basemap.js"></script>
 <script src="navigation-maneuvers.js"></script>
 <script src="navigation-traffic.js"></script>
+<script src="navigation-route-traffic.js"></script>
 <script>
 (() => {
     const loading = document.getElementById('loading');
@@ -100,8 +101,8 @@
     let lastBearing = 0;
     let activeRoutePoints = [];
     let routeProgressStartIndex = 0;
-    let routeTrafficIntervals = [];
-    let routeTrafficGeneration = 0;
+    let routeTrafficFeatures = EMPTY, routeTrafficMatcher = NavigationRouteTraffic.create([]);
+    let routeTrafficTimer = null, pedestrianRoute = false;
     let viewMode = 0;
     let viewportTop = 0.25, viewportBottom = 0.16;
     let remainingRoutePoints = [];
@@ -117,8 +118,11 @@
         const indicator = document.getElementById('traffic-status');
         const labels = {live:'Tráfico en vivo', loading:'Cargando tráfico…', offline:'Tráfico sin conexión',
             unavailable:'Tráfico no disponible', 'no-coverage':'Sin datos de tráfico en esta zona', zoom:'Acércate para ver tráfico', disabled:''};
-        indicator.dataset.state = state.status;
-        indicator.textContent = labels[state.status] || labels.loading;
+        indicator.dataset.state = state.status==='route' && routeTrafficFeatures.features.length>0 ? 'live' : state.status;
+        indicator.textContent = state.status==='route' ? (pedestrianRoute ? 'Ruta a pie' :
+            routeTrafficFeatures.features.length>0 ? 'Tráfico en tu ruta' : 'Sin datos de tráfico en este tramo') :
+            labels[state.status] || labels.loading;
+        if(activeRoutePoints.length>1) scheduleRouteTraffic();
     }
 
     function currentPadding(overview = false) {
@@ -224,7 +228,7 @@
     let displayedVehicle = lastLocation.slice();
     let targetVehicle = lastLocation.slice();
     let vehicleFrom = lastLocation.slice();
-    let motionStarted = null, motionDuration = 250, vehicleSpeed = 0;
+    let motionStarted = null, motionDuration = 100, vehicleSpeed = 0, vehicleOnRoute = false;
     let displayedBearing = 0, bearingFrom = 0;
     let cameraMotion = null, displayedCamera = null;
     let lastFixAt = null;
@@ -234,7 +238,7 @@
             const t = Math.min(1, elapsed / motionDuration);
             const predicted = NavigationMotion.advance(targetVehicle,
                 Math.min(18, vehicleSpeed * Math.min(600, Math.max(0, elapsed)) / 1000),
-                lastBearing, activeRoutePoints, routeProgressStartIndex);
+                lastBearing, vehicleOnRoute ? activeRoutePoints : [], routeProgressStartIndex);
             displayedVehicle = NavigationMotion.mix(vehicleFrom, predicted, t);
             displayedBearing = NavigationMotion.bearingMix(bearingFrom, lastBearing, t);
             vehicleMarker.setLngLat(displayedVehicle);
@@ -349,7 +353,7 @@
         setLayerVisible(SATELLITE_LAYER, visuals.satellite);
         setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
         setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
-        if (areaTraffic) areaTraffic.setEnabled(trafficEnabled);
+        if (areaTraffic) { areaTraffic.setEnabled(trafficEnabled); areaTraffic.setRouteActive(activeRoutePoints.length>1); }
         applySky(visuals.is3D && !darkTheme);
         if (viewMode !== 2) map.easeTo({ pitch: viewMode === 1 ? 45 : 0, duration: 180, essential: true });
     }
@@ -391,7 +395,9 @@
         if(viewMode===2 && activeRoutePoints.length>1) originMarker.setLngLat(activeRoutePoints[0]).addTo(map); else originMarker.remove();
     }
     function notifyTraffic() {
-        const severity = trafficEnabled ? NavigationManeuvers.severityAt(routeTrafficIntervals,routeProgressStartIndex) : 'normal';
+        const along=routeTrafficMatcher.progress(routeProgressStartIndex,remainingRoutePoints[0]);
+        const feature=routeTrafficFeatures.features.find(f=>f.properties.startAlong<=along+.5&&f.properties.endAlong>along);
+        const severity = trafficEnabled && networkAvailable && !pedestrianRoute ? feature?.properties.severity || 'unknown' : 'unknown';
         if (severity === currentSeverity) return;
         currentSeverity = severity;
         try { if(window.AndroidBridge && AndroidBridge.onTrafficSeverity) AndroidBridge.onTrafficSeverity(severity); } catch (_) {}
@@ -408,105 +414,45 @@
         return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
     }
 
-    function sampledRouteIndices(points) {
-        if (!Array.isArray(points) || points.length < 2) return [];
-        let total = 0;
-        for (let i = 1; i < points.length; i++) total += distanceMeters(points[i - 1], points[i]);
-        const spacing = Math.max(550, total / 11);
-        const out = [0];
-        let since = 0;
-        for (let i = 1; i < points.length - 1; i++) {
-            since += distanceMeters(points[i - 1], points[i]);
-            if (since >= spacing) {
-                out.push(i);
-                since = 0;
-            }
-        }
-        if (out[out.length - 1] !== points.length - 1) out.push(points.length - 1);
-        return out.slice(0, 13);
-    }
-
-    function trafficSeverity(data) {
-        if (!data) return 'normal';
-        if (data.roadClosure === true) return 'heavy';
-        const current = Number(data.currentSpeed);
-        const free = Number(data.freeFlowSpeed);
-        const confidence = Number(data.confidence);
-        if (!Number.isFinite(current) || !Number.isFinite(free) || free <= 1) return 'normal';
-        if (Number.isFinite(confidence) && confidence < 0.25) return 'normal';
-        const ratio = current / free;
-        if (ratio < 0.35) return 'heavy';
-        if (ratio < 0.58) return 'slow';
-        if (ratio < 0.80) return 'moderate';
-        return 'normal';
-    }
-
     function renderRouteTraffic() {
-        const source = map.getSource(ROUTE_TRAFFIC_SOURCE_ID);
-        if (!source) return;
-        if (!trafficEnabled || !TRAFFIC_API_KEY || activeRoutePoints.length < 2) {
-            source.setData(EMPTY);
-            return;
+        const source=map.getSource(ROUTE_TRAFFIC_SOURCE_ID);
+        if(!source)return;
+        if(!trafficEnabled || !networkAvailable || !TRAFFIC_API_KEY || pedestrianRoute || activeRoutePoints.length<2) {
+            source.setData(EMPTY);notifyTraffic();return;
         }
-
-        const features = [];
-        for (const interval of routeTrafficIntervals) {
-            if (interval.severity === 'normal') continue;
-            const start = Math.max(viewMode===2?0:routeProgressStartIndex, interval.start);
-            const end = Math.min(activeRoutePoints.length - 1, interval.end);
-            if (end - start < 1) continue;
-            features.push({
-                type: 'Feature',
-                properties: { severity: interval.severity },
-                geometry: {
-                    type: 'LineString',
-                    coordinates: activeRoutePoints.slice(start, end + 1)
+        const minimum=viewMode===2 ? 0 : routeTrafficMatcher.progress(routeProgressStartIndex,remainingRoutePoints[0]);
+        const features=[];
+        for(const feature of routeTrafficFeatures.features) {
+            if(feature.properties.endAlong<=minimum)continue;
+            if(feature.properties.startAlong<minimum) {
+                const points=feature.geometry.coordinates;
+                let traversed=feature.properties.startAlong,clipped=[];
+                for(let i=1;i<points.length;i++) {
+                    const length=NavigationMotion.distance(points[i-1],points[i]);
+                    if(traversed+length>minimum) {
+                        const t=Math.max(0,(minimum-traversed)/length);
+                        clipped=[NavigationMotion.mix(points[i-1],points[i],t),...points.slice(i)];break;
+                    }
+                    traversed+=length;
                 }
-            });
+                if(clipped.length>1)features.push({...feature,geometry:{type:'LineString',coordinates:clipped}});
+            } else features.push(feature);
         }
-        source.setData({ type: 'FeatureCollection', features });
-        notifyTraffic();
+        source.setData({type:'FeatureCollection',features});notifyTraffic();
     }
-
-    async function refreshRouteTraffic() {
-        const generation = ++routeTrafficGeneration;
-        if (!trafficEnabled || !TRAFFIC_API_KEY || activeRoutePoints.length < 2) {
-            routeTrafficIntervals = [];
-            renderRouteTraffic();
-            return;
-        }
-
-        const indices = sampledRouteIndices(activeRoutePoints);
-        try {
-            const samples = await Promise.all(indices.map(async index => {
-                const p = activeRoutePoints[index];
-                const url =
-                    'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/18/json' +
-                    '?key=' + encodeURIComponent(TRAFFIC_API_KEY) +
-                    '&point=' + encodeURIComponent(p[1] + ',' + p[0]) +
-                    '&unit=kmph';
-                const response = await fetch(url, { cache: 'no-store' });
-                if (!response.ok) throw new Error('Traffic unavailable');
-                const root = await response.json();
-                return {
-                    index,
-                    severity: trafficSeverity(root && root.flowSegmentData)
-                };
-            }));
-
-            if (generation !== routeTrafficGeneration) return;
-            routeTrafficIntervals = samples.map((sample, i) => {
-                const prev = samples[i - 1];
-                const next = samples[i + 1];
-                return {
-                    start: prev ? Math.floor((prev.index + sample.index) / 2) : 0,
-                    end: next ? Math.ceil((sample.index + next.index) / 2) : activeRoutePoints.length - 1,
-                    severity: sample.severity
-                };
-            });
-            renderRouteTraffic();
-        } catch (e) {
-            console.warn('route traffic', e);
+    function scheduleRouteTraffic() {
+        if(routeTrafficTimer!==null)return;
+        routeTrafficTimer=setTimeout(()=>{routeTrafficTimer=null;refreshRouteTraffic();},180);
+    }
+    function refreshRouteTraffic() {
+        routeTrafficFeatures=trafficEnabled && networkAvailable && !pedestrianRoute && areaTraffic && activeRoutePoints.length>1
+            ? routeTrafficMatcher.match(areaTraffic.sourceFeatures()) : EMPTY;
+        renderRouteTraffic();
+        const indicator=document.getElementById('traffic-status');
+        if(activeRoutePoints.length>1 && areaTraffic?.state().status==='route') {
+            indicator.dataset.state=routeTrafficFeatures.features.length>0?'live':'route';
+            indicator.textContent=pedestrianRoute?'Ruta a pie':routeTrafficFeatures.features.length>0?
+                'Tráfico en tu ruta':'Sin datos de tráfico en este tramo';
         }
     }
 
@@ -659,13 +605,7 @@
             id: ROUTE_TRAFFIC_LAYER_ID, type: 'line', source: ROUTE_TRAFFIC_SOURCE_ID,
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint: {
-                'line-color': [
-                    'match', ['get', 'severity'],
-                    'heavy', '#d93025',
-                    'slow', '#f57c00',
-                    'moderate', '#f9ab00',
-                    '#087cf0'
-                ],
+                'line-color': ['get','color'],
                 'line-opacity': 0.98,
                 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5.5, 18, 8.5, 20, 10.5]
             }
@@ -748,6 +688,7 @@
         setNetworkAvailable(available) {
             networkAvailable = !!available;
             if (areaTraffic) areaTraffic.setOnline(networkAvailable);
+            refreshRouteTraffic();
             if (!available || !ready) return;
             if (TRAFFIC_API_KEY && provider !== 'tomtom') {
                 provider = 'tomtom'; baseFailures = 0;
@@ -772,7 +713,14 @@
                 areas:features.filter(f=>f.layer.type==='fill').length};
         },
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
-        setTrafficIntervals(intervals) { routeTrafficGeneration++; routeTrafficIntervals=Array.isArray(intervals)?intervals:[]; renderRouteTraffic(); },
+        setTrafficIntervals(intervals) {
+            // Deterministic screenshots only; production uses the loaded vector source.
+            routeTrafficFeatures={type:'FeatureCollection',features:(intervals||[]).filter(x=>x.end>x.start).map(x=>({
+                type:'Feature',properties:{severity:x.severity,color:NavigationTraffic.COLORS[x.severity]||'#087cf0',
+                    startAlong:routeTrafficMatcher.progress(x.start),endAlong:routeTrafficMatcher.progress(x.end)},
+                geometry:{type:'LineString',coordinates:activeRoutePoints.slice(x.start,x.end+1)}}))};
+            renderRouteTraffic();
+        },
         cameraState() { const c=map.getCenter(); return {ready:setupFinished,moving:map.isMoving(),width:map.getContainer().clientWidth,height:map.getContainer().clientHeight,mode:viewMode,pitch:map.getPitch(),center:[c.lng,c.lat],route:activeRoutePoints.map(p=>{const s=map.project(p);return [s.x,s.y]}),padding:currentPadding(true),dark:darkTheme}; },
         setVisuals(is3D, terrain, buildings, satellite) {
             visuals = { is3D: !!is3D, terrain: !!terrain, buildings: !!buildings, satellite: !!satellite };
@@ -780,19 +728,24 @@
         },
         setTrafficEnabled(enabled) {
             trafficEnabled = !!enabled;
-            if (areaTraffic) areaTraffic.setEnabled(trafficEnabled);
+            if (areaTraffic) { areaTraffic.setEnabled(trafficEnabled); areaTraffic.setRouteActive(activeRoutePoints.length>1); }
             setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
-            if (trafficEnabled) refreshRouteTraffic(); else renderRouteTraffic();
+            refreshRouteTraffic();
         },
-        trafficState() { return areaTraffic ? {...areaTraffic.state(), routeActive:activeRoutePoints.length>1} : {status:'loading'}; },
+        trafficState() { return areaTraffic ? {...areaTraffic.state(), routeActive:activeRoutePoints.length>1,
+            routeRendered:trafficEnabled&&networkAvailable?routeTrafficFeatures.features.length:0,
+            routeBands:routeTrafficFeatures.features.reduce((counts,f)=>{const b=f.properties.severity;counts[b]=(counts[b]||0)+1;return counts;},{}),
+            routeFeatures:routeTrafficFeatures.features} : {status:'loading'}; },
         refreshTraffic() { if (areaTraffic) areaTraffic.refresh(); },
+        trafficSourceFeatures() { return areaTraffic ? areaTraffic.sourceFeatures() : []; },
         setTrafficPaused(paused) { trafficPaused = !!paused; if (!trafficPaused && areaTraffic) areaTraffic.refresh(); },
-        setLocation(lon, lat, bearing, speedMps) {
+        setLocation(lon, lat, bearing, speedMps, matched=false) {
             const now = performance.now();
             lastLocation = [Number(lon), Number(lat)];
+            vehicleOnRoute=!!matched;
             vehicleFrom = displayedVehicle.slice();
             bearingFrom = displayedBearing;
-            motionDuration = lastFixAt === null ? 250 : Math.max(100, Math.min(400, now - lastFixAt));
+            motionDuration = lastFixAt === null ? 100 : Math.max(80, Math.min(160, (now-lastFixAt)*.5));
             if (lastFixAt === null || NavigationMotion.distance(vehicleFrom, lastLocation) > 150) {
                 vehicleFrom = lastLocation.slice();
                 displayedVehicle = lastLocation.slice();
@@ -803,12 +756,15 @@
             motionStarted = now;
             lastFixAt = now;
         },
-        setRoutes(active, alt1, alt2) {
+        setRoutes(active, alt1, alt2, walking=false) {
             if (!ready) return;
             activeRoutePoints = Array.isArray(active) ? active : [];
+            pedestrianRoute=!!walking;
+            routeTrafficMatcher=NavigationRouteTraffic.create(activeRoutePoints);
+            routeTrafficFeatures=EMPTY;
+            if(areaTraffic)areaTraffic.setRouteActive(activeRoutePoints.length>1);
             remainingRoutePoints = activeRoutePoints;
             routeProgressStartIndex = 0;
-            routeTrafficIntervals = [];
             currentSeverity = '';
             const a = map.getSource('gps-route-active');
             const b = map.getSource('gps-route-alt-1');

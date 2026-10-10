@@ -23,6 +23,7 @@ class GroundRouteController {
     private val main = Handler(Looper.getMainLooper())
     private val entries = linkedMapOf<String, Entry>()
     private var geometry: ArRouteGeometry? = null
+    private var navigationGeometry: NavigationRoutePosition? = null
     private var manual: ManualReference? = null
     private var generation = 0
     private var stableSince = 0L
@@ -38,6 +39,7 @@ class GroundRouteController {
         // A network refresh or actual reroute changes the polyline, not the user's world alignment.
         clearTerrain()
         geometry = ArRouteGeometry(route.points)
+        navigationGeometry = NavigationRoutePosition(route.points)
         lastState = State(manual = manual != null)
     }
 
@@ -70,27 +72,36 @@ class GroundRouteController {
             it.trackingState == TrackingState.TRACKING }?.cameraGeospatialPose
         var location = manualLocation(frame) ?: geo?.let { RouteGeometry.Point(it.latitude, it.longitude) } ?: here
             ?: return lastState.copy(visible = false, status = "Esperando ubicación · activa ubicación precisa")
-        var match = RouteGeometry.project(route.points, location)
+        val previousAlong = lastState.along.takeIf { lastState.location != null && lastState.distanceFromRoute < 15.0 }
+        fun project(point: RouteGeometry.Point) = navigationGeometry?.match(point,
+            previousAlong = previousAlong, accuracy = geo?.horizontalAccuracy ?: 10.0)?.let {
+            RouteGeometry.Projection(it.segment, 0.0, it.distance, it.along)
+        }
+        var match = project(location)
             ?: return lastState.copy(visible = false, status = "Esperando el recorrido")
 
         if (requestManualPlacement) {
             requestManualPlacement = false
             val hit = floorHit(frame, width, height)
                 ?: return lastState.copy(status = "No se detectó el piso · apunta al suelo y mueve el teléfono despacio")
-            val direction = frame.camera.pose.rotateVector(floatArrayOf(0f, 0f, -1f))
-            if (hypot(direction[0].toDouble(), direction[2].toDouble()) < .35)
+            val direction = floatArrayOf(hit.hitPose.tx()-frame.camera.pose.tx(), 0f,
+                hit.hitPose.tz()-frame.camera.pose.tz())
+            val groundDistance = hypot(direction[0].toDouble(), direction[2].toDouble())
+            if (groundDistance < .5)
                 return lastState.copy(status = "Levanta un poco el teléfono y apunta en el sentido del camino")
-            val origin = route.at(match.along)
-            val next = route.at((match.along + 4.0).coerceAtMost(route.length))
+            // The selected visible pavement point is the alignment reference. GPS accuracy
+            // cannot tell which side of the street the camera sees; calibrate against the floor.
+            val origin = route.at((match.along + groundDistance).coerceAtMost(route.length))
+            val next = route.at((match.along + groundDistance + 4.0).coerceAtMost(route.length))
             val yaw = ArRouteGeometry.alignmentYaw(ArRouteGeometry.heading(origin, next),
                 direction[0].toDouble(), direction[2].toDouble())
-            val pose = Pose(floatArrayOf(frame.camera.pose.tx(), hit.hitPose.ty() + .055f, frame.camera.pose.tz()),
+            val pose = Pose(floatArrayOf(hit.hitPose.tx(), hit.hitPose.ty() + .055f, hit.hitPose.tz()),
                 floatArrayOf(0f, sin(yaw / 2).toFloat(), 0f, cos(yaw / 2).toFloat()))
             clearTerrain()
             runCatching { manual?.anchor?.detach() }
             manual = ManualReference(session.createAnchor(pose), origin)
             location = manualLocation(frame) ?: origin
-            match = RouteGeometry.project(route.points, location) ?: match
+            match = project(location) ?: match
         }
 
         val isManual = manual != null
@@ -144,7 +155,7 @@ class GroundRouteController {
                 }
             }
             location = manualLocation(frame) ?: location
-            match = RouteGeometry.project(route.points, location) ?: match
+            match = project(location) ?: match
         }
         val along = match.along
         val samples = route.window(along, 160.0)
@@ -227,6 +238,9 @@ class GroundRouteController {
             ribbons.isEmpty() && terrainError.isNotEmpty() -> "$terrainError · detecta el piso o usa anclaje manual"
             ribbons.isEmpty() -> "Ubicación lista · detectando la altura del piso…"
             estimatedHeight -> "Ruta continua · ubicación visual; altura lejana aproximada"
+            geo != null && (geo.horizontalAccuracy > 2.0 || geo.orientationYawAccuracy > 4.0) ->
+                String.format(Locale("es", "MX"), "Alineación aproximada ±%.1f m · usa Alinear con la calle si se desvía",
+                    geo.horizontalAccuracy)
             else -> String.format(Locale("es", "MX"), "Ruta continua · ubicación ±%.1f m / giro ±%.0f°",
                 geo!!.horizontalAccuracy, geo.orientationYawAccuracy)
         }

@@ -164,7 +164,7 @@ fun ARNavigationScreen(
             BottomSearchPanel(onClick = onSearch, walkingRoute = walkingMode)
         }
         if (walkingMode && routeActive) {
-            Text("Manual: apunta al piso en el sentido del primer tramo del mapa.",
+            Text("Para alinear: apunta al centro del camino, unos metros delante de ti.",
                 color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(start = 20.dp, end = 20.dp, bottom = 156.dp)
                     .background(Color(0xCC102231), RoundedCornerShape(8.dp)).padding(8.dp))
@@ -179,7 +179,7 @@ fun ARNavigationScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = onAnchorFloor,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9A5700))) {
-                    Text("Anclar al piso")
+                    Text("Alinear con la calle")
                 }
                 Button(onClick = onAutomaticGround) { Text("Automático") }
             }

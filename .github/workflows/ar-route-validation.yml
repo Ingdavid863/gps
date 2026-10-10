@@ -1,4 +1,4 @@
-name: Validate walking AR and shared destinations
+name: Validate route traffic and navigation
 on:
   pull_request:
     branches: [codex/gps3d-0.14.0]
@@ -35,6 +35,11 @@ jobs:
         run: |
           test -s "$HOME/.gps3d/debug.keystore"
           echo "GPS3D_DEBUG_KEYSTORE=$HOME/.gps3d/debug.keystore" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check directional route traffic and map rendering helpers
+        run: node --test tests/navigation-*.test.cjs
       - name: Compile app and exercise route geometry and continuity
         env:
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
@@ -53,7 +58,7 @@ jobs:
           digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', certificate).group(1)
           assert digest == 'afefdcd54dc7194464ef8dd4860ca09566100a12bbbc29acc05a3a4d4c81f620'
           package = subprocess.check_output([str(tools/'aapt'), 'dump', 'badging', str(apk)], text=True).splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='25'" in package and "versionName='0.19.1-beta-maps-share'" in package
+          assert "name='com.david.gps3dar'" in package and "versionCode='26'" in package and "versionName='0.20.0-beta-navigation'" in package
           manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
           forbidden = ['BIND_ACCESSIBILITY_SERVICE', 'accessibilityservice.AccessibilityService',
                        'BIND_NOTIFICATION_LISTENER_SERVICE', 'READ_SMS', 'RECEIVE_SMS',
@@ -64,7 +69,7 @@ jobs:
           permissions = subprocess.check_output([str(tools/'aapt'), 'dump', 'permissions', str(apk)], text=True)
           pathlib.Path('build').mkdir(exist_ok=True)
           pathlib.Path('build/release-permissions.txt').write_text(permissions)
-          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.19.1-beta-maps-share.apk')
+          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.20.0-beta-navigation.apk')
           out.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, out)
           print(package)
@@ -92,9 +97,10 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell svc power stayon true
-            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest --stacktrace
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest --stacktrace
             mkdir -p build/ar-native-qa
             adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
+            adb pull /sdcard/Download/GPS3DQA build/ar-native-qa
             adb install -r app/build/outputs/apk/release/app-release.apk
             # Gradle removes its test package after connectedDebugAndroidTest.
             adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
@@ -104,7 +110,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.19.1-validation
+          name: GPS3D-0.20.0-validation
           path: |
             app/build/test-results/testDebugUnitTest/
             app/build/outputs/androidTest-results/connected/
@@ -114,5 +120,5 @@ jobs:
             build/release-permissions.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.19.1-beta-maps-share
-          path: build/delivery/GPS3D-AR-David-0.19.1-beta-maps-share.apk
+          name: GPS3D-AR-David-0.20.0-beta-navigation
+          path: build/delivery/GPS3D-AR-David-0.20.0-beta-navigation.apk

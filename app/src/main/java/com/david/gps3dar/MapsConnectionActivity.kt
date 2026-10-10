@@ -33,7 +33,7 @@ class MapsConnectionActivity : AppCompatActivity() {
         paragraph("2. Toca Compartir o Compartir indicaciones.")
         paragraph("3. Selecciona GPS3D AR David en el menú de compartir.")
         paragraph("Elige enviar cada destino desde Maps o búscalo directamente en GPS3D. El envío desde Maps no es automático.", 17f)
-        paragraph("Maps comparte el destino; GPS3D calcula el recorrido. La vista del mapa y la cámara AR usan la misma ruta a pie.", 17f)
+        paragraph("Maps comparte el destino; GPS3D calcula el recorrido. VR usa una ruta a pie; al volver se conserva tu ruta de conducción. Si elegiste caminar, el mapa y la cámara usan la misma ruta a pie.", 17f)
         body.addView(Button(this).apply {
             text = "Abrir Google Maps"
             setOnClickListener {
