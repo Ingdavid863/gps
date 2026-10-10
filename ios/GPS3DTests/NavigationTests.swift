@@ -125,6 +125,8 @@ private final class StubProtocol: URLProtocol {
         let remaining=state["remaining"] as! [String:Any], geometry=remaining["geometry"] as! [String:Any]
         let coords=geometry["coordinates"] as! [[Double]]
         XCTAssertGreaterThan(coords[0][1],19.72+50/110540)
+        try await wait("NavigationMotion.distance(GPS3D.cameraState().center,GPS3D.navigationState().vehicle)<40 && GPS3D.mapState().roads>2 && GPS3D.mapState().tilesLoaded")
+        try await wait("document.body.classList.contains('credits-dismissed')")
         let image=try await controller.web.takeSnapshot(configuration:nil)
         let folder=FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("GPS3DQA")
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
