@@ -175,13 +175,14 @@ fun ARNavigationScreen(
                 drawLine(Color.White, center - Offset(0f, arm), center + Offset(0f, arm), 2.dp.toPx())
             }
             Row(modifier = Modifier.align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .padding(start = 16.dp, end = 16.dp, bottom = 100.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = onAnchorFloor,
+                Button(onClick = onAnchorFloor, modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9A5700))) {
-                    Text("Alinear con la calle")
+                    Text("Alinear ruta")
                 }
-                Button(onClick = onAutomaticGround) { Text("Automático") }
+                Button(onClick = onAutomaticGround, modifier = Modifier.weight(1f)) { Text("Automático") }
             }
         }
     }

@@ -239,7 +239,7 @@ class GroundRouteController {
             ribbons.isEmpty() -> "Ubicación lista · detectando la altura del piso…"
             estimatedHeight -> "Ruta continua · ubicación visual; altura lejana aproximada"
             geo != null && (geo.horizontalAccuracy > 2.0 || geo.orientationYawAccuracy > 4.0) ->
-                String.format(Locale("es", "MX"), "Alineación aproximada ±%.1f m · usa Alinear con la calle si se desvía",
+                String.format(Locale("es", "MX"), "Alineación aproximada ±%.1f m · usa Alinear ruta si se desvía",
                     geo.horizontalAccuracy)
             else -> String.format(Locale("es", "MX"), "Ruta continua · ubicación ±%.1f m / giro ±%.0f°",
                 geo!!.horizontalAccuracy, geo.orientationYawAccuracy)
