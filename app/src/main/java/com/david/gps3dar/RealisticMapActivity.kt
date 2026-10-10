@@ -804,8 +804,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         selectedMapPoint?.let { jsCall("setSelectionPin(${num(it.lon)},${num(it.lat)})") }
         if (viewMode == 2) jsCall("showOverview()") else recenter(false)
         maybeStartPendingExternalNavigation()
-        com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
-        com.david.gps3dar.car.CarNavigation.fix(location)
     }
 
     private fun syncVisualSettings() {
@@ -961,6 +959,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         if (accepted != null && location.elapsedRealtimeNanos <= accepted.elapsedRealtimeNanos) return
         if (accepted != null && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 3_000_000_000L) return
         rawLocation = location
+        com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
+        com.david.gps3dar.car.CarNavigation.fix(location)
 
         if (location.hasAccuracy() && location.accuracy > 65f) {
             gpsStatus.text = "GPS débil · ±${location.accuracy.toInt()} m"
