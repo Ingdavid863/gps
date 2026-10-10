@@ -21,15 +21,15 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  const credits=page.locator('.maplibregl-ctrl-attrib');
  await page.waitForFunction(()=>{
   const e=document.querySelector('.maplibregl-ctrl-attrib');
-  return e?.classList.contains('maplibregl-compact')&&!e.classList.contains('maplibregl-attrib-empty');
+  return e&&!e.classList.contains('maplibregl-attrib-empty');
  });
- const compact=await credits.boundingBox();
- assert.ok(compact.width<=32&&compact.height<=32,'initial credits must not cover the road');
- await credits.locator('summary').click();
- assert.equal(await credits.locator('.maplibregl-ctrl-attrib-inner').isVisible(),true,'full credits remain available on tap');
+ assert.equal(await credits.locator('summary').isVisible(),false,'information icon removed');
  assert.match(await credits.innerText(),/OpenStreetMap/);
- await credits.locator('summary').click();
- assert.equal(await credits.locator('.maplibregl-ctrl-attrib-inner').isVisible(),false,'credits collapse after closing');
+ await page.waitForFunction(()=>document.body.classList.contains('credits-dismissed'));
+ assert.equal(await credits.isVisible(),false,'provider label no longer overlays navigation');
+ assert.match(await page.evaluate(()=>GPS3D.mapCredits()),/OpenStreetMap/);
+ assert.equal(await page.locator('#traffic-status').isVisible(),false);
+ assert.equal(await page.locator('#signal-status').isVisible(),false);
  await page.evaluate(()=>{
   const g=window.GPS3D;g.setViewport(.25,.16);g.setLocation(-99.13,19.43,0,0);g.follow(-99.13,19.43,0,17.4,0,1);
  });
@@ -70,7 +70,7 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  await page.waitForTimeout(500);
  assert.ok(Math.abs((await page.evaluate(()=>window.GPS3D.cameraState())).pitch)<.01,'third click restores default view');
  assert.deepEqual(errors,[]);
- console.log('Browser map QA passed: green marker anchor, overview lock, isometric switch; no JS errors.');
+ console.log('Browser map QA passed: clean navigation UI, green marker anchor, overview lock, isometric switch; no JS errors.');
  await browser.close();server.close();
 })().catch(e=>{console.error(e);process.exit(1)});
 

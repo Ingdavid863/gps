@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -44,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,6 +70,9 @@ fun ARNavigationScreen(
     trafficEnabled: Boolean,
     walkingMode: Boolean = false,
     routeActive: Boolean = false,
+    maneuver: String = "",
+    destinationIndicator: ArDestinationIndicator? = null,
+    destinationDistance: String = "",
     onAnchorFloor: () -> Unit = {},
     onAutomaticGround: () -> Unit = {},
     interactionSpeedThresholdKmh: Int = 20,
@@ -84,11 +90,15 @@ fun ARNavigationScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         arContent()
 
+        if (walkingMode && destinationIndicator != null) {
+            DestinationSkyFlag(destinationIndicator, destinationDistance)
+        }
         TopDirectionHud(
             distanceText = distanceText,
             instructionText = instructionText,
             roadText = roadText,
             arStatus = arStatus,
+            maneuver = maneuver,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 22.dp, start = 14.dp, end = 14.dp)
@@ -154,7 +164,7 @@ fun ARNavigationScreen(
             BottomSearchPanel(onClick = onSearch, walkingRoute = walkingMode)
         }
         if (walkingMode && routeActive) {
-            Text("Manual: apunta al piso en el sentido del primer tramo del mapa.",
+            Text("Para alinear: apunta al centro del camino, unos metros delante de ti.",
                 color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.BottomCenter)
                     .padding(start = 20.dp, end = 20.dp, bottom = 156.dp)
                     .background(Color(0xCC102231), RoundedCornerShape(8.dp)).padding(8.dp))
@@ -165,13 +175,14 @@ fun ARNavigationScreen(
                 drawLine(Color.White, center - Offset(0f, arm), center + Offset(0f, arm), 2.dp.toPx())
             }
             Row(modifier = Modifier.align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .padding(start = 16.dp, end = 16.dp, bottom = 100.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = onAnchorFloor,
+                Button(onClick = onAnchorFloor, modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9A5700))) {
-                    Text("Anclar al piso")
+                    Text("Alinear ruta")
                 }
-                Button(onClick = onAutomaticGround) { Text("Automático") }
+                Button(onClick = onAutomaticGround, modifier = Modifier.weight(1f)) { Text("Automático") }
             }
         }
     }
@@ -183,6 +194,7 @@ private fun TopDirectionHud(
     instructionText: String,
     roadText: String,
     arStatus: String,
+    maneuver: String,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -199,7 +211,8 @@ private fun TopDirectionHud(
                         .background(Color(0xFF0B78F6), RoundedCornerShape(16.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("↱", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text(ArSkyGeometry.maneuverSymbol(maneuver), color = Color.White,
+                        fontSize = 36.sp, fontWeight = FontWeight.Bold)
                 }
 
                 Spacer(Modifier.width(14.dp))
@@ -208,8 +221,8 @@ private fun TopDirectionHud(
                     Text(
                         text = distanceText,
                         color = Color(0xFFB8CAD8),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = instructionText,
@@ -239,6 +252,43 @@ private fun TopDirectionHud(
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+    }
+}
+
+@Composable
+private fun DestinationSkyFlag(indicator: ArDestinationIndicator, distance: String) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val cardWidth = 148.dp
+        val left = (maxWidth * indicator.x - cardWidth / 2).coerceIn(8.dp, (maxWidth - cardWidth - 8.dp).coerceAtLeast(8.dp))
+        val top = maxHeight * indicator.y
+        Column(Modifier.offset(x = left, y = top).width(cardWidth),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Canvas(Modifier.size(50.dp, 54.dp)) {
+                val poleX = size.width * .18f
+                drawLine(Color.White, Offset(poleX, 0f), Offset(poleX, size.height), 4.dp.toPx())
+                val flag = Path().apply {
+                    moveTo(poleX, 0f)
+                    lineTo(size.width, size.height * .12f)
+                    lineTo(size.width * .85f, size.height * .52f)
+                    lineTo(poleX, size.height * .40f)
+                    close()
+                }
+                drawPath(flag, Color(0xFFFFCB35))
+                drawLine(Color(0xFF173E63), Offset(poleX + 10.dp.toPx(), 8.dp.toPx()),
+                    Offset(size.width * .77f, 14.dp.toPx()), 7.dp.toPx())
+                drawLine(Color(0xFF173E63), Offset(poleX + 10.dp.toPx(), 21.dp.toPx()),
+                    Offset(size.width * .71f, 27.dp.toPx()), 7.dp.toPx())
+            }
+            Surface(shape = RoundedCornerShape(12.dp), color = Color(0xEF102231)) {
+                Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Destino · " + distance, color = Color.White, fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold, maxLines = 1)
+                    if (indicator.arrow.isNotBlank()) Text(indicator.arrow, color = Color(0xFFFFCB35),
+                        fontSize = 11.sp, maxLines = 1)
+                }
+            }
         }
     }
 }

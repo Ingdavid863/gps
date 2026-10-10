@@ -34,6 +34,7 @@ class TollRepository(private val client: OkHttpClient, catalogJson: String) {
     fun cancel() { generation.incrementAndGet(); call?.cancel(); call = null }
     fun close() { cancel(); worker.shutdownNow() }
     fun replaceCatalog(json: String) { national = TollCatalog(JSONObject(json)) }
+    fun crossedPlazas(route: List<RouteGeometry.Point>): List<TollCatalog.Plaza> = national?.crossedPlazas(route).orEmpty()
 
     fun load(route: List<RouteGeometry.Point>, hasTollSections: Boolean, sections: List<IntRange> = emptyList(), entered: List<Long> = emptyList(), completed: (Quote) -> Unit) {
         cancel()
@@ -89,3 +90,4 @@ class TollRepository(private val client: OkHttpClient, catalogJson: String) {
             .replace(Regex("[^A-Z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
     }
 }
+

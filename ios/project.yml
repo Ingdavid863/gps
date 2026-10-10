@@ -1,0 +1,66 @@
+name: GPS3D
+options:
+  bundleIdPrefix: com.david.gps3dar
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    MARKETING_VERSION: '0.23.0'
+    CURRENT_PROJECT_VERSION: '29'
+    TARGETED_DEVICE_FAMILY: '1,2'
+    CODE_SIGN_STYLE: Automatic
+targets:
+  GPS3D:
+    type: application
+    platform: iOS
+    sources:
+      - path: GPS3D
+      - path: MapAssets
+        type: folder
+        buildPhase: resources
+    info:
+      path: GPS3D/Info.plist
+      properties:
+        CFBundleDisplayName: GPS3D AR David
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: Tu ubicación permite guiarte por la ruta que eliges.
+        NSLocationAlwaysAndWhenInUseUsageDescription: La ruta sigue actualizándose cuando usas CarPlay o apagas la pantalla.
+        UIBackgroundModes: [location]
+        TOMTOM_API_KEY: $(TOMTOM_API_KEY)
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Phone
+                UISceneClassName: UIWindowScene
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).PhoneSceneDelegate
+            CPTemplateApplicationSceneSessionRoleApplication:
+              - UISceneConfigurationName: CarPlay
+                UISceneClassName: CPTemplateApplicationScene
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).CarPlaySceneDelegate
+    entitlements:
+      path: GPS3D/GPS3D.entitlements
+      properties:
+        com.apple.developer.carplay-maps: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.david.gps3dar.ios
+  GPS3DTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [GPS3DTests]
+    dependencies:
+      - target: GPS3D
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  GPS3D:
+    build:
+      targets:
+        GPS3D: all
+    test:
+      targets: [GPS3DTests]

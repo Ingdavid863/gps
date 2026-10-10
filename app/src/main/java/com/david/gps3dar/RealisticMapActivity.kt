@@ -67,6 +67,8 @@ import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
@@ -125,8 +127,30 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private lateinit var placePreviewGo: TextView
     private lateinit var placePreviewClose: TextView
 
-    private val http = OkHttpClient()
+    private var http = OkHttpClient()
     private val ui = Handler(Looper.getMainLooper())
+    private var applyingCarRoute = false
+    private var carRevision = -1L
+    private val carObserver: (com.david.gps3dar.car.CarSnapshot) -> Unit = { snapshot ->
+        ui.post {
+            if (!isDestroyed && snapshot.revision == com.david.gps3dar.car.CarNavigation.state.revision && snapshot.revision != carRevision) {
+                carRevision = snapshot.revision
+                if (snapshot.source == "car" || (com.david.gps3dar.car.CarNavigation.connected && !routeActive && snapshot.route != null)) {
+                    applyingCarRoute = true
+                    routeCall?.cancel();routeGeneration++;rerouting=false;pendingAvoidTolls=null
+                    val option=snapshot.route;val destination=snapshot.destination
+                    if(option==null) stopNavigation()
+                    else if(destination!=null) {
+                        routeDestination=destination;routeAlternatives=listOf(option)
+                        suppressSearchWatcher=true;searchInput.setText(snapshot.label);suppressSearchWatcher=false
+                        snapshot.location?.let { rawLocation=it;displayLocation=it }
+                        activateRoute(0,false)
+                    }
+                    applyingCarRoute = false
+                }
+            }
+        }
+    }
     private val destinationSearch = DestinationSearch(http)
     private lateinit var recentDestinations: RecentDestinations
     private var searchEditing = false
@@ -177,14 +201,30 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private var routePoints: List<GeoPoint> = emptyList()
     private var pedestrianRoute = false
+    private data class RouteBeforeAr(val options: List<RouteOption>, val index: Int,
+                                     val destination: GeoPoint, val view: Int)
+    private var routeBeforeAr: RouteBeforeAr? = null
+    private var arDestination: GeoPoint? = null
+    private var navigationGeometry: NavigationRoutePosition? = null
+    private var lastMatchAtNanos = 0L
     private val arLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == RESULT_OK && result.data?.getBooleanExtra(ArNavigationActivity.EXTRA_WALKING_ROUTE, false) == true) {
+        val previous = routeBeforeAr
+        val launchedDestination = arDestination
+        routeBeforeAr = null; arDestination = null
+        voiceEnabled = result.data?.getBooleanExtra("walking_voice", voiceEnabled) ?: voiceEnabled
+        if (previous != null && routeDestination == launchedDestination) {
+            // AR calculates its walking route separately. It must never overwrite car navigation.
+            routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+            routeDestination = previous.destination; routeAlternatives = previous.options
+            activateRoute(previous.index, recenterMap = false)
+            setViewMode(previous.view)
+        } else if (result.resultCode == RESULT_OK && result.data?.getBooleanExtra(ArNavigationActivity.EXTRA_WALKING_ROUTE, false) == true) {
             val walking = runCatching { WalkingRoute.decode(java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE).readText()) }.getOrNull()
             val lat = result.data?.getDoubleExtra(WalkingRoute.EXTRA_LAT, Double.NaN) ?: Double.NaN
             val lon = result.data?.getDoubleExtra(WalkingRoute.EXTRA_LON, Double.NaN) ?: Double.NaN
             if (walking != null && RouteGeometry.distance(walking.destination, RouteGeometry.Point(lat, lon)) < 3.0) {
                 voiceEnabled = result.data?.getBooleanExtra("walking_voice", voiceEnabled) ?: voiceEnabled
-                routeCall?.cancel(); routeGeneration++; rerouting = false
+                routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
                 val points = walking.points.map { GeoPoint(it.lat, it.lon) }
                 routeDestination = GeoPoint(walking.destination.lat, walking.destination.lon)
                 routeAlternatives = listOf(RouteOption(points, walking.steps.map { step ->
@@ -212,6 +252,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private var offRouteSinceMs = 0L
     private var lastRerouteAtMs = 0L
     private var rerouting = false
+    private var pendingAvoidTolls: Boolean? = null
     private var pendingExternalDestination: GeoPoint? = null
     private var pendingExternalQuery: String? = null
 
@@ -265,6 +306,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_realistic_map)
+        // Retire the old automation state when upgrading from 0.18/0.19.
+        deleteSharedPreferences("automatic_route_share")
 
         fusedLocation = LocationServices.getFusedLocationProviderClient(this)
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
@@ -306,6 +349,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
+        com.david.gps3dar.car.CarNavigation.observe(carObserver)
         setupBackNavigation()
         refreshSettingsLabels()
         updateTollPanel()
@@ -440,7 +484,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             }
         }
         searchInput.setOnClickListener { if (searchInput.text.isBlank()) showRecentDestinations() }
-        findViewById<TextView>(R.id.searchButton).setOnClickListener { searchDestination() }
+        findViewById<TextView>(R.id.searchButton).setOnClickListener { clearDestinationSearch() }
         searchInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                 searchDestination()
@@ -523,12 +567,64 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         findViewById<TextView>(R.id.settingsClose).setOnClickListener {
             settingsPanel.visibility = View.GONE
         }
+        findViewById<TextView>(R.id.settingsMapCredits).setOnClickListener { showMapCredits() }
+    }
+
+    private fun clearDestinationSearch() {
+        searchDebounce?.let { ui.removeCallbacks(it) }
+        searchDebounce = null
+        searchCall?.cancel()
+        destinationSearch.cancel()
+        externalLinkCall?.cancel()
+        externalLinkCall = null
+        searchEpoch++
+        searchResults = emptyList()
+        pendingExternalDestination = null
+        pendingExternalQuery = null
+        if (rerouting) {
+            routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+            updateTollPanel()
+        }
+        if (!routeActive) {
+            instruction.text = "Busca un destino o mantén pulsado el mapa"
+            turnIcon.text = "↑"
+        }
+        hidePlacePreview()
+        suppressSearchWatcher = true
+        searchInput.setText("")
+        suppressSearchWatcher = false
+        searchEditing = true
+        searchInput.requestFocus()
+        showRecentDestinations()
+        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun showMapCredits() {
+        webMapView.evaluateJavascript("window.GPS3D ? GPS3D.mapCredits() : ''") { value ->
+            if (isDestroyed) return@evaluateJavascript
+            val current = runCatching { org.json.JSONTokener(value).nextValue() as? String }.getOrNull().orEmpty()
+            val message = TextView(this).apply {
+                setPadding(dp(24), dp(12), dp(24), dp(12))
+                textSize = 16f
+                text = listOf(current, "© TomTom. Todos los derechos reservados.",
+                    "© OpenStreetMap contributors. Datos bajo ODbL:\nhttps://www.openstreetmap.org/copyright",
+                    "Condiciones de TomTom:\nhttps://developer.tomtom.com/terms-and-conditions",
+                    "Edificios: OpenFreeMap / OpenMapTiles / OpenStreetMap.\nhttps://openfreemap.org",
+                    "Imágenes satelitales: EOX Sentinel-2 cloudless.\nhttps://s2maps.eu").filter { it.isNotBlank() }.joinToString("\n\n")
+                android.text.util.Linkify.addLinks(this, android.text.util.Linkify.WEB_URLS)
+                movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            }
+            AlertDialog.Builder(this).setTitle("Acerca del mapa y licencias")
+                .setView(android.widget.ScrollView(this).apply { addView(message) })
+                .setPositiveButton("Cerrar", null).show()
+        }
     }
 
     private fun setupButtons() {
         signalRepository = SignalRepository(http, java.io.File(filesDir, "osm-signals.json"))
-        findViewById<View>(R.id.settingsAutomaticRoutes).setOnClickListener {
-            startActivity(Intent(this, AutoRouteSetupActivity::class.java))
+        findViewById<View>(R.id.settingsMapsConnection).setOnClickListener {
+            startActivity(Intent(this, MapsConnectionActivity::class.java))
         }
         findViewById<View>(R.id.changeDestinationButton).setOnClickListener {
             hidePlacePreview()
@@ -544,14 +640,21 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(0); recenter(true) }
         viewModeButton.setOnClickListener { setViewMode((viewMode + 1) % 3) }
         avoidTollsButton.setOnClickListener {
-            if (pedestrianRoute) return@setOnClickListener
-            avoidTolls = !avoidTolls
-            getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
-            updateTollPanel()
-            val current = displayLocation ?: rawLocation
+            if (pedestrianRoute || rerouting) return@setOnClickListener
+            val requestedAvoid = !avoidTolls
+            val current = rawLocation ?: displayLocation
             val destination = routeDestination
-            if (current != null && destination != null) {
-                requestRoute(current.latitude, current.longitude, destination.lat, destination.lon)
+            if (routeActive && destination != null) {
+                if (current == null) {
+                    Toast.makeText(this, "Esperando ubicación GPS para cambiar la ruta…", Toast.LENGTH_SHORT).show()
+                } else {
+                    requestRoute(current.latitude, current.longitude, destination.lat, destination.lon,
+                        isReroute = true, avoidOverride = requestedAvoid)
+                }
+            } else {
+                avoidTolls = requestedAvoid
+                getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
+                updateTollPanel()
             }
         }
         tollCount.setOnClickListener { showTollDetails() }
@@ -667,6 +770,24 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             searchInput.requestFocus(); showRecentDestinations()
             return
         }
+        arDestination = destination
+        routeBeforeAr = if (routeActive && !pedestrianRoute && routeDestination == destination)
+            RouteBeforeAr(routeAlternatives, activeRouteIndex, destination, viewMode) else null
+        // Store the exact pedestrian polyline currently displayed. The camera must reuse it.
+        if (pedestrianRoute && routePoints.size >= 2 && routeDestination == destination) {
+            val points = routePoints.map { RouteGeometry.Point(it.lat, it.lon) }
+            val cached = runCatching { WalkingRoute.decode(java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE).readText()) }.getOrNull()
+            if (cached?.points != points) {
+                val walking = WalkingRoute(RouteGeometry.Point(destination.lat, destination.lon), points,
+                    navSteps.map { WalkingRoute.Step(RouteGeometry.Point(it.lat, it.lon), it.instruction, it.maneuver) },
+                    routeDurationSeconds)
+                runCatching {
+                    val pending = java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE + ".pending")
+                    pending.writeText(walking.encode())
+                    check(pending.renameTo(java.io.File(filesDir, ArNavigationActivity.ROUTE_FILE)))
+                }
+            }
+        }
         arLauncher.launch(Intent(this, ArNavigationActivity::class.java)
             .putExtra(WalkingRoute.EXTRA_LAT, destination.lat)
             .putExtra(WalkingRoute.EXTRA_LON, destination.lon)
@@ -677,6 +798,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun syncMapAll() {
         syncVisualSettings()
         syncRoutes()
+        syncRouteProgress(force = true)
         syncTolls()
         displayLocation?.let { updateLocationMarker(it) }
         syncViewport()
@@ -728,8 +850,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         etaText.setTextColor(Color.parseColor(when (trafficSeverity) {
             "moderate" -> "#F9AB00"
             "slow" -> "#F57C00"
-            "heavy" -> "#D93025"
-            else -> if (darkTheme) "#53D68E" else "#16834B"
+            "heavy", "stopped", "closed" -> "#D93025"
+            "normal" -> if (darkTheme) "#53D68E" else "#16834B"
+            else -> if (darkTheme) "#E3EBF4" else "#243746"
         }))
     }
 
@@ -791,7 +914,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         mapCache.prepare(routePoints.map { RouteGeometry.Point(it.lat, it.lon) }, routeProgressIndex) { prepared, total ->
             ui.post {
                 if (!isDestroyed) findViewById<TextView>(R.id.mapCacheStatus).apply {
-                    visibility = if (routeActive && !searchEditing) View.VISIBLE else View.GONE
+                    visibility = View.GONE
                     text = if (prepared == total) "Mapa próximo preparado" else "Mapa próximo guardado: ${prepared * 100 / total.coerceAtLeast(1)}%"
                 }
             }
@@ -845,15 +968,19 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
         val previous = lastAcceptedLocation
         if (previous != null) {
-            val dt = max(0.25, (location.time - previous.time) / 1000.0)
+            val dt = max(0.25, (location.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000_000.0)
             val jumpSpeed = previous.distanceTo(location) / dt
             if (jumpSpeed > 85.0 && location.accuracy > 12f) return
         }
         lastAcceptedLocation = Location(location)
+        com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
+        com.david.gps3dar.car.CarNavigation.fix(location)
 
-        val smooth = smoothLocation(location)
-        filteredLocation = smooth
-        val predicted = predictLocation(smooth, location)
+        // Use the fresh fix for progress and turn distances. Filtering is for stationary jitter;
+        // filtering a moving position twice introduces avoidable delay at the intersection.
+        val filtered = if (location.hasSpeed() && location.speed > 1.0f) Location(location) else smoothLocation(location)
+        filteredLocation = filtered
+        val predicted = predictLocation(filtered, location)
 
         val match = if (routeActive) findRouteMatch(predicted) else null
         lastRouteMatch = match
@@ -962,7 +1089,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         } else {
             lastCameraBearing
         }
-        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())})")
+        val match = lastRouteMatch
+        val onRoute = routeActive && match != null && distanceMeters(location.latitude,location.longitude,match.lat,match.lon) < .5
+        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())},$onRoute)")
     }
 
     private fun pauseCameraFollow() {
@@ -973,7 +1102,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val moving = rawLocation?.speed ?: 0f
         val raw = rawLocation
         if (raw?.hasBearing() == true && moving > 1.0f) {
-            lastCameraBearing = smoothBearing(lastCameraBearing, raw.bearing.toDouble(), if (moving > 8f) 0.38 else 0.24)
+            // WebView animates the fresh heading continuously; filtering it once per fix creates steps.
+            lastCameraBearing = raw.bearing.toDouble()
         }
 
         if (viewMode == 2 || SystemClock.elapsedRealtime() < manualCameraUntilMs) return
@@ -1032,7 +1162,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
         // A shared driving destination must not inherit a previous VR walking route.
         pedestrianRoute = received.walking
-        AutoRouteShareService.destinationReceived()
         externalLinkCall?.cancel()
         destinationSearch.cancel()
         searchDebounce?.let { ui.removeCallbacks(it) }
@@ -1150,8 +1279,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         navigateFirst: Boolean,
         results: List<SearchResult>
     ) {
+        val epoch = searchEpoch
         ui.post {
-            if (isDestroyed || searchInput.text.toString().trim() != query) return@post
+            if (isDestroyed || searchEpoch != epoch || searchInput.text.toString().trim() != query) return@post
             searchResults = results
             if (navigateFirst && results.size == 1) {
                 hideSearchSuggestions()
@@ -1174,10 +1304,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun updateSearchChrome() {
         if (!::searchInput.isInitialized) return
         findViewById<View>(R.id.searchPanel).visibility = if (routeActive && !searchEditing) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.changeDestinationButton).visibility = if (routeActive && !searchEditing) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.changeDestinationButton).visibility = View.GONE
         findViewById<View>(R.id.mapControls).visibility = if (searchEditing) View.GONE else View.VISIBLE
         findViewById<View>(R.id.turnBanner).visibility = if (searchEditing) View.GONE else View.VISIBLE
-        gpsStatus.visibility = if (searchEditing) View.GONE else View.VISIBLE
+        gpsStatus.visibility = View.GONE
         findViewById<View>(R.id.bottomPanel).visibility = if (searchEditing) View.GONE else View.VISIBLE
         if (searchEditing) {
             routeChoices.visibility = View.GONE
@@ -1534,28 +1664,28 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun requestRoute(
-        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, isReroute: Boolean = false
+        fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, isReroute: Boolean = false,
+        avoidOverride: Boolean? = null
     ) {
         if (!isReroute && routeDestination?.let { distanceMeters(it.lat,it.lon,toLat,toLon)>50 } != false) {
             enteredTollPlazas.clear(); passedTollPlazas.clear()
         }
         val generation = ++routeGeneration
         val requestedPedestrian = pedestrianRoute
-        val requestedAvoid = avoidTolls && !requestedPedestrian
+        val requestedAvoid = (avoidOverride ?: avoidTolls) && !requestedPedestrian
+        pendingAvoidTolls = avoidOverride
         rerouting = true
         instruction.text = if (requestedPedestrian) "Calculando ruta para caminar…" else if (requestedAvoid) "Calculando ruta sin casetas…" else if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
         turnIcon.text = "…"
         hideSearchSuggestions(); hidePlacePreview(); hideKeyboard()
         routeCall?.cancel()
+        updateTollPanel()
 
         fun fail(message: String) {
             ui.post {
                 if (isDestroyed || generation != routeGeneration) return@post
                 rerouting = false
-                if (routeActive) {
-                    avoidTolls = routeAlternatives.getOrNull(activeRouteIndex)?.avoidsTolls ?: false
-                    getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
-                }
+                pendingAvoidTolls = null
                 updateTollPanel()
                 instruction.text = message
                 turnIcon.text = "!"
@@ -1575,68 +1705,96 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             .addQueryParameter("language", "es-ES").addQueryParameter("computeTravelTimeFor", "all")
             .addQueryParameter("sectionType", "traffic").addQueryParameter("sectionType", "toll")
             .addQueryParameter("sectionType", "tollVignette")
-            .addQueryParameter("maxAlternatives", if (isReroute) "0" else "2")
+            .addQueryParameter("maxAlternatives", if (isReroute && avoidOverride == null) "0" else "2")
         if (requestedAvoid) builder.addQueryParameter("avoid", "tollRoads")
         if (requestedPedestrian) builder.addQueryParameter("sectionType", "travelMode")
         rawLocation?.takeIf { !requestedPedestrian && it.hasBearing() && it.speed > 1.0f }?.let {
             builder.addQueryParameter("vehicleHeading", (((it.bearing % 360f) + 360f) % 360f).toInt().toString())
         }
-        val request = Request.Builder().url(builder.build()).header("User-Agent", "GPS3D-AR-David/0.13").build()
-        routeCall = http.newCall(request)
-        routeCall?.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                if (!call.isCanceled()) fail("No se pudo consultar la ruta. Revisa la conexión.")
+        val url = builder.build()
+        fun fetch(excluded: List<TollCatalog.Plaza> = emptyList()) {
+            val request = Request.Builder().url(url).header("User-Agent", "GPS3D-AR-David/0.22")
+            if (excluded.isNotEmpty()) {
+                val rectangles = JSONArray(excluded.distinctBy { it.id }.take(100).map { plaza ->
+                    // A small exclusion surrounds the booth rather than the whole avenue.
+                    val latRadius = 20.0 / 111320.0
+                    val lonRadius = latRadius / cos(Math.toRadians(plaza.point.lat))
+                    JSONObject().put("southWestCorner", JSONObject()
+                        .put("latitude", plaza.point.lat - latRadius).put("longitude", plaza.point.lon - lonRadius))
+                        .put("northEastCorner", JSONObject()
+                            .put("latitude", plaza.point.lat + latRadius).put("longitude", plaza.point.lon + lonRadius))
+                })
+                request.post(JSONObject().put("avoidAreas", JSONObject().put("rectangles", rectangles))
+                    .toString().toRequestBody("application/json".toMediaType()))
             }
-            override fun onResponse(call: Call, response: Response) {
-                val parsed = response.use { r ->
-                    if (!r.isSuccessful) null else runCatching {
-                        val routes = JSONObject(r.body?.string().orEmpty()).getJSONArray("routes")
-                        (0 until min(3, routes.length())).mapNotNull { index ->
-                            val route = routes.optJSONObject(index) ?: return@mapNotNull null
-                            val points = parseTomTomRoutePoints(route)
-                            if (points.size < 2) return@mapNotNull null
-                            val summary = route.optJSONObject("summary") ?: return@mapNotNull null
-                            val duration = summary.optDouble("travelTimeInSeconds", 0.0)
-                            val live = summary.optDouble("liveTrafficIncidentsTravelTimeInSeconds", duration)
-                            val sections = route.optJSONArray("sections") ?: JSONArray()
-                            if (requestedPedestrian && (0 until sections.length()).any {
-                                val section = sections.optJSONObject(it)
-                                section?.optString("sectionType") == "TRAVEL_MODE" &&
-                                    section.optString("travelMode", "pedestrian") != "pedestrian"
-                            }) return@mapNotNull null
-                            val hasTolls = (0 until sections.length()).any {
-                                sections.optJSONObject(it)?.optString("sectionType") in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")
+            routeCall = http.newCall(request.build())
+            routeCall?.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (!call.isCanceled()) fail("No se pudo consultar la ruta. Revisa la conexión.")
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    val crossed = mutableListOf<TollCatalog.Plaza>()
+                    val parsed = response.use { r ->
+                        if (!r.isSuccessful) null else runCatching {
+                            val routes = JSONObject(r.body?.string().orEmpty()).getJSONArray("routes")
+                            (0 until min(3, routes.length())).mapNotNull { index ->
+                                val route = routes.optJSONObject(index) ?: return@mapNotNull null
+                                val points = parseTomTomRoutePoints(route)
+                                if (points.size < 2) return@mapNotNull null
+                                val summary = route.optJSONObject("summary") ?: return@mapNotNull null
+                                val duration = summary.optDouble("travelTimeInSeconds", 0.0)
+                                val live = summary.optDouble("liveTrafficIncidentsTravelTimeInSeconds", duration)
+                                val sections = route.optJSONArray("sections") ?: JSONArray()
+                                if (requestedPedestrian && (0 until sections.length()).any {
+                                    val section = sections.optJSONObject(it)
+                                    section?.optString("sectionType") == "TRAVEL_MODE" &&
+                                        section.optString("travelMode", "pedestrian") != "pedestrian"
+                                }) return@mapNotNull null
+                                val known = if (requestedPedestrian) emptyList() else tollRepository.crossedPlazas(
+                                    points.map { RouteGeometry.Point(it.lat, it.lon) })
+                                crossed.addAll(known)
+                                val hasTolls = known.isNotEmpty() || (0 until sections.length()).any {
+                                    sections.optJSONObject(it)?.optString("sectionType") in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")
+                                }
+                                RouteOption(points, parseTomTomSteps(route, points),
+                                    if (live > 0.0) live else duration, summary.optDouble("lengthInMeters", 0.0),
+                                    summary.optDouble("trafficDelayInSeconds", 0.0),
+                                    summary.optDouble("noTrafficTravelTimeInSeconds", duration), hasTolls, requestedAvoid,
+                                    (0 until sections.length()).mapNotNull { j ->
+                                        val section=sections.optJSONObject(j) ?: return@mapNotNull null
+                                        if (section.optString("sectionType") !in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")) return@mapNotNull null
+                                        section.optInt("startPointIndex",0)..section.optInt("endPointIndex",points.lastIndex)
+                                    }, pedestrian = requestedPedestrian)
                             }
-                            RouteOption(points, parseTomTomSteps(route, points),
-                                if (live > 0.0) live else duration, summary.optDouble("lengthInMeters", 0.0),
-                                summary.optDouble("trafficDelayInSeconds", 0.0),
-                                summary.optDouble("noTrafficTravelTimeInSeconds", duration), hasTolls, requestedAvoid,
-                                (0 until sections.length()).mapNotNull { j ->
-                                    val section=sections.optJSONObject(j) ?: return@mapNotNull null
-                                    if (section.optString("sectionType") !in listOf("TOLL", "TOLL_ROAD", "TOLL_VIGNETTE")) return@mapNotNull null
-                                    section.optInt("startPointIndex",0)..section.optInt("endPointIndex",points.lastIndex)
-                                }, pedestrian = requestedPedestrian)
+                        }.getOrNull()
+                    }
+                    if (call.isCanceled() || generation != routeGeneration) return
+                    val acceptable = parsed.orEmpty().filter { !requestedAvoid || !it.hasTolls }
+                    if (acceptable.isEmpty()) {
+                        if (requestedAvoid && excluded.isEmpty() && crossed.isNotEmpty()) {
+                            // Some provider routes omit toll metadata. Ask for a new path around
+                            // the actual plazas instead of hiding their markers on the old path.
+                            ui.post {
+                                if (!isDestroyed && generation == routeGeneration) fetch(crossed)
+                            }
+                            return
                         }
-                    }.getOrNull()
+                        fail(if (requestedAvoid) "No se encontró una ruta disponible sin casetas" else "No se encontró una ruta disponible")
+                        return
+                    }
+                    ui.post {
+                        if (isDestroyed || generation != routeGeneration) return@post
+                        routeDestination = GeoPoint(toLat, toLon)
+                        routeAlternatives = acceptable
+                        activeRouteIndex = 0
+                        rerouting = false; pendingAvoidTolls = null; offRouteSinceMs = 0L
+                        activateRoute(0, recenterMap = !isReroute)
+                        if (isReroute) runCatching { rerouteTone.startTone(ToneGenerator.TONE_PROP_BEEP, 180) }
+                    }
                 }
-                if (call.isCanceled() || generation != routeGeneration) return
-                val acceptable = parsed.orEmpty().filter { !requestedAvoid || !it.hasTolls }
-                if (acceptable.isEmpty()) {
-                    fail(if (requestedAvoid) "No se encontró una ruta disponible sin casetas" else "No se encontró una ruta disponible")
-                    return
-                }
-                ui.post {
-                    if (isDestroyed || generation != routeGeneration) return@post
-                    routeDestination = GeoPoint(toLat, toLon)
-                    routeAlternatives = acceptable
-                    activeRouteIndex = 0
-                    avoidTolls = requestedAvoid
-                    activateRoute(0, recenterMap = !isReroute)
-                    rerouting = false; offRouteSinceMs = 0L
-                    if (isReroute) runCatching { rerouteTone.startTone(ToneGenerator.TONE_PROP_BEEP, 180) }
-                }
-            }
-        })
+            })
+        }
+        fetch()
     }
 
     private fun parseTomTomRoutePoints(route: JSONObject): List<GeoPoint> {
@@ -1650,10 +1808,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 val lat = p.optDouble("latitude", Double.NaN)
                 val lon = p.optDouble("longitude", Double.NaN)
                 if (!lat.isFinite() || !lon.isFinite()) continue
-                val last = out.lastOrNull()
-                if (last == null || distanceMeters(last.lat, last.lon, lat, lon) > 0.25) {
-                    out.add(GeoPoint(lat, lon))
-                }
+                // Preserve provider indices, including duplicated leg endpoints.
+                out.add(GeoPoint(lat, lon))
             }
         }
         return out
@@ -1665,6 +1821,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             ?.optJSONArray("instructions")
             ?: return out
 
+        val geometry = NavigationRoutePosition(points.map { RouteGeometry.Point(it.lat,it.lon) })
         for (i in 0 until instructions.length()) {
             val item = instructions.optJSONObject(i) ?: continue
             val point = item.optJSONObject("point") ?: continue
@@ -1689,7 +1846,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                     instruction = message,
                     icon = iconForTomTomManeuver(maneuver),
                     routeIndex = routeIndex,
-                    maneuver = maneuver
+                    maneuver = maneuver,
+                    alongMeters = geometry.instructionAlong(RouteGeometry.Point(lat,lon), reportedIndex,
+                        item.optDouble("routeOffsetInMeters",Double.NaN))
                 )
             )
         }
@@ -1724,8 +1883,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val option = routeAlternatives.getOrNull(index) ?: return
         activeRouteIndex = index
         pedestrianRoute = option.pedestrian
+        if (!pedestrianRoute) {
+            avoidTolls = option.avoidsTolls
+            getPreferences(MODE_PRIVATE).edit().putBoolean("avoidTolls", avoidTolls).apply()
+        }
         routePoints = option.points
-        navSteps = option.steps
+        navigationGeometry = NavigationRoutePosition(routePoints.map { RouteGeometry.Point(it.lat,it.lon) })
+        navSteps = option.steps.map { step -> if (step.alongMeters.isFinite()) step else step.copy(
+            alongMeters = navigationGeometry!!.instructionAlong(RouteGeometry.Point(step.lat,step.lon),step.routeIndex)) }
         currentStepIndex = navSteps.indexOfFirst { !it.maneuver.startsWith("DEPART") }.coerceAtLeast(0)
         routeDurationSeconds = option.durationSeconds
         routeDistanceMeters = option.distanceMeters
@@ -1740,6 +1905,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         lastRouteMatch = null
         offRouteSinceMs = 0L
         rebuildRouteDistanceCache()
+        lastMatchAtNanos = 0L
+        (rawLocation ?: displayLocation)?.let { location ->
+            val match = findRouteMatch(predictLocation(location,location))
+            if (match != null && match.distanceMeters < 25.0) {
+                lastRouteMatch = match; routeProgressIndex = match.segmentIndex
+                displayLocation = snapToRoute(location,match)
+            }
+        }
 
         syncRoutes()
         prepareMapAhead(true)
@@ -1753,13 +1926,16 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         refreshTolls()
         applyPalette()
         if (viewMode == 2) jsCall("showOverview()") else if (recenterMap) recenter(true)
+        if (!pedestrianRoute && !applyingCarRoute) routeDestination?.let { destination ->
+            com.david.gps3dar.car.CarNavigation.setRoute(option,destination,searchInput.text.toString().ifBlank { "Destino" },"phone")
+        }
     }
 
     private fun syncRoutes() {
         val others = routeAlternatives.indices.filter { it != activeRouteIndex }.take(2)
         val alt1 = others.getOrNull(0)?.let { routeAlternatives[it].points } ?: emptyList()
         val alt2 = others.getOrNull(1)?.let { routeAlternatives[it].points } ?: emptyList()
-        jsCall("setRoutes(${pointsJson(routePoints)},${pointsJson(alt1)},${pointsJson(alt2)})")
+        jsCall("setRoutes(${pointsJson(routePoints)},${pointsJson(alt1)},${pointsJson(alt2)},$pedestrianRoute)")
         jsCall("setManeuvers(" + JSONArray(navSteps.map { JSONObject().put("index", it.routeIndex).put("maneuver", it.maneuver) }) + ")")
     }
 
@@ -1775,7 +1951,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val now = SystemClock.elapsedRealtime()
         if (!force &&
             index == lastRenderedProgressIndex &&
-            now - lastProgressRenderAtMs < 700L
+            now - lastProgressRenderAtMs < 250L
         ) return
 
         lastRenderedProgressIndex = index
@@ -1784,9 +1960,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun updateRouteProgress(match: RouteMatch) {
-        if (match.distanceMeters > 65.0) return
-        if (match.segmentIndex + 1 < routeProgressIndex) return
-        routeProgressIndex = max(routeProgressIndex, match.segmentIndex)
+        if (match.distanceMeters > 25.0) return
+        routeProgressIndex = match.segmentIndex
         syncRouteProgress()
         syncTolls()
         prepareMapAhead()
@@ -1880,6 +2055,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun updateNavigationStep(location: Location?) {
+        if (rerouting) return
         if (!routeActive || navSteps.isEmpty() || location == null) {
             if (!routeActive) {
                 instruction.text = "Busca un destino o mantén pulsado el mapa"
@@ -1895,7 +2071,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         // on screen. This is especially important after rerouting or joining a route midway.
         while (
             currentStepIndex < navSteps.lastIndex &&
-            navSteps[currentStepIndex].routeIndex < routeProgressIndex
+            lastRouteMatch?.let { it.distanceMeters <= 25.0 && navSteps[currentStepIndex].alongMeters < it.alongMeters - 3.0 } == true
         ) {
             currentStepIndex++
         }
@@ -1945,27 +2121,17 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             return distanceMeters(location.latitude, location.longitude, step.lat, step.lon)
         }
 
-        val stepIndex = step.routeIndex.coerceIn(0, routePoints.lastIndex)
         val match = lastRouteMatch
-        if (match == null || stepIndex <= routeProgressIndex) {
-            return distanceMeters(location.latitude, location.longitude, step.lat, step.lon)
-        }
-
-        val segment = max(routeProgressIndex, match.segmentIndex)
-            .coerceIn(0, routePoints.lastIndex - 1)
-        val nextIndex = segment + 1
-        val next = routePoints[nextIndex]
-        val currentRemaining =
-            distanceMeters(match.lat, match.lon, next.lat, next.lon) +
-                routeRemainingFromIndex.getOrElse(nextIndex) { 0.0 }
-        val afterStep = routeRemainingFromIndex.getOrElse(stepIndex) { 0.0 }
-        return (currentRemaining - afterStep).coerceAtLeast(0.0)
+        return if (match != null && match.distanceMeters <= 25.0 && step.alongMeters.isFinite()) {
+            navigationGeometry!!.distanceToTurn(step.alongMeters,match.alongMeters)
+        } else distanceMeters(location.latitude,location.longitude,step.lat,step.lon)
     }
 
     private fun stopNavigation() {
-        AutoRouteShareService.routeStopped(this)
+        if (!applyingCarRoute) com.david.gps3dar.car.CarNavigation.stop("phone")
         routeActive = false
         pedestrianRoute = false
+        routeBeforeAr = null; arDestination = null; navigationGeometry = null; lastMatchAtNanos = 0L
         updateSearchChrome()
         enteredTollPlazas.clear(); passedTollPlazas.clear()
         routeGeneration++
@@ -1982,6 +2148,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         routeDestination = null
         routeCall?.cancel()
         rerouting = false
+        pendingAvoidTolls = null
         routePoints = emptyList()
         navSteps = emptyList()
         routeAlternatives = emptyList()
@@ -2018,8 +2185,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun snapToRoute(location: Location, match: RouteMatch?): Location {
         if (match == null) return location
         val maxSnap = max(
-            16.0,
-            min(38.0, (if (location.hasAccuracy()) location.accuracy else 12f) * 1.6)
+            8.0,
+            min(24.0, (if (location.hasAccuracy()) location.accuracy else 10f) * 1.2)
         )
         return if (match.distanceMeters <= maxSnap) {
             Location(location).apply {
@@ -2032,43 +2199,16 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun findRouteMatch(location: Location): RouteMatch? {
-        if (routePoints.size < 2) return null
-
-        // Search around the current progress instead of scanning the whole route on every
-        // GNSS update. Besides saving CPU, this prevents a crossing/parallel road from
-        // matching to a distant future section of the same route.
-        val startIndex = max(0, routeProgressIndex - 28)
-        val endIndex = min(routePoints.lastIndex - 1, routeProgressIndex + 460)
-
-        var best: RouteMatch? = null
-        for (i in startIndex..endIndex) {
-            val a = routePoints[i]
-            val b = routePoints[i + 1]
-            val projected = projectToSegment(
-                location.latitude,
-                location.longitude,
-                a.lat,
-                a.lon,
-                b.lat,
-                b.lon
-            )
-            val d = distanceMeters(
-                location.latitude,
-                location.longitude,
-                projected.first,
-                projected.second
-            )
-            if (best == null || d < best!!.distanceMeters) {
-                best = RouteMatch(
-                    segmentIndex = i,
-                    lat = projected.first,
-                    lon = projected.second,
-                    distanceMeters = d,
-                    segmentBearing = bearingDegrees(a.lat, a.lon, b.lat, b.lon)
-                )
-            }
-        }
-        return best
+        val geometry = navigationGeometry ?: return null
+        val now = SystemClock.elapsedRealtimeNanos()
+        val elapsed = if (lastMatchAtNanos == 0L) 0.0 else (now-lastMatchAtNanos)/1_000_000_000.0
+        val previous = lastRouteMatch?.takeIf { it.distanceMeters <= 25.0 && elapsed < 8.0 }
+        val heading = location.bearing.toDouble().takeIf { location.hasBearing() && location.speed > 1.0f &&
+            (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees < 45f) }
+        val match = geometry.match(RouteGeometry.Point(location.latitude,location.longitude), heading,
+            previous?.alongMeters, location.speed.toDouble(), elapsed, location.accuracy.toDouble()) ?: return null
+        lastMatchAtNanos = now
+        return RouteMatch(match.segment,match.point.lat,match.point.lon,match.distance,match.bearing,match.along)
     }
 
     private fun maybeReroute(location: Location, match: RouteMatch?) {
@@ -2158,21 +2298,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         if (routePoints.size < 2) return routeDistanceMeters
 
         val match = lastRouteMatch
-        if (match != null) {
-            val segment = max(routeProgressIndex, match.segmentIndex)
-                .coerceIn(0, routePoints.lastIndex - 1)
-            val nextIndex = segment + 1
-            val next = routePoints[nextIndex]
-            val fromCurrent = distanceMeters(match.lat, match.lon, next.lat, next.lon)
-            val tail = routeRemainingFromIndex.getOrElse(nextIndex) { 0.0 }
-            return (fromCurrent + tail).coerceAtMost(routeDistanceMeters * 1.05)
-        }
-
-        return routeRemainingFromIndex
-            .getOrElse(routeProgressIndex.coerceIn(0, routeRemainingFromIndex.lastIndex.coerceAtLeast(0))) {
-                routeDistanceMeters
-            }
-            .coerceAtMost(routeDistanceMeters * 1.05)
+        return if (match != null && match.distanceMeters <= 25.0) {
+            ((navigationGeometry?.length ?: routeDistanceMeters)-match.alongMeters).coerceAtLeast(0.0)
+        } else routeRemainingFromIndex.getOrElse(routeProgressIndex) { routeDistanceMeters }
     }
 
     private fun refreshTolls() {
@@ -2231,12 +2359,16 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun updateTollPanel() {
-        avoidTollsButton.isEnabled = !pedestrianRoute
+        avoidTollsButton.isEnabled = !pedestrianRoute && !rerouting
         if (pedestrianRoute) {
             tollCount.text = "Ruta\npeatonal"; tollTotal.text = "A pie"; avoidTollsButton.text = "Caminar"
             return
         }
-        avoidTollsButton.text = if (avoidTolls) "Evitar caseta ✓" else "Evitar caseta"
+        avoidTollsButton.text = when (pendingAvoidTolls) {
+            true -> "Buscando sin casetas…"
+            false -> "Recalculando…"
+            null -> if (avoidTolls) "Evitar caseta ✓" else "Evitar caseta"
+        }
         avoidTollsButton.isSelected = avoidTolls
         avoidTollsButton.contentDescription = if (avoidTolls) "Evitar casetas activado. Tocar para permitir casetas" else "Evitar casetas y recalcular ruta"
         val quote = tollQuote
@@ -2321,12 +2453,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         "[${num(it.lon)},${num(it.lat)}]"
     }
 
-    private fun smoothBearing(old: Double, target: Double, alpha: Double): Double {
-        if (old == 0.0) return target
-        val delta = (target - old + 540.0) % 360.0 - 180.0
-        return (old + delta * alpha + 360.0) % 360.0
-    }
-
     private fun formatDistance(meters: Double): String = when {
         meters < 950 -> "${meters.toInt().coerceAtLeast(0)} m"
         else -> String.format(Locale("es", "MX"), "%.1f km", meters / 1000.0)
@@ -2354,6 +2480,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     override fun onResume() {
         super.onResume()
+        com.david.gps3dar.car.CarNavigation.phoneVisible=true
         is3D = viewMode == 1
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
@@ -2365,6 +2492,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     override fun onPause() {
+        com.david.gps3dar.car.CarNavigation.phoneVisible=false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sensorManager.unregisterListener(this)
         webMapView.onPause()
@@ -2375,6 +2503,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     override fun onDestroy() {
+        com.david.gps3dar.car.CarNavigation.remove(carObserver)
+        if (!com.david.gps3dar.car.CarNavigation.connected) com.david.gps3dar.car.CarNavigation.stop("phone")
         if (::signalRepository.isInitialized) signalRepository.close()
         ui.removeCallbacks(ticker)
         searchDebounce?.let { ui.removeCallbacks(it) }
@@ -2405,7 +2535,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val instruction: String,
         val icon: String,
         val routeIndex: Int = 0,
-        val maneuver: String = "STRAIGHT"
+        val maneuver: String = "STRAIGHT",
+        val alongMeters: Double = Double.NaN
     )
     data class SearchResult(
         val label: String,
@@ -2419,7 +2550,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val lat: Double,
         val lon: Double,
         val distanceMeters: Double,
-        val segmentBearing: Double
+        val segmentBearing: Double,
+        val alongMeters: Double = 0.0
     )
     data class RouteOption(
         val points: List<GeoPoint>,

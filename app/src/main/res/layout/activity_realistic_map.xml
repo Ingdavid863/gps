@@ -59,9 +59,10 @@
                 android:layout_width="50dp"
                 android:layout_height="42dp"
                 android:gravity="center"
-                android:text="Ir"
+                android:contentDescription="Limpiar destino"
+                android:text="×"
                 android:textColor="#1469D8"
-                android:textSize="16sp"
+                android:textSize="28sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -168,14 +169,23 @@
                 android:textSize="14sp" />
 
             <TextView
-                android:id="@+id/settingsAutomaticRoutes"
+                android:id="@+id/settingsMapsConnection"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:gravity="center_vertical"
-                android:text="Destinos automáticos desde Maps →"
+                android:text="Recibir destinos desde Maps →"
                 android:textColor="#1469D8"
                 android:textSize="16sp"
                 android:textStyle="bold" />
+            <TextView
+                android:id="@+id/settingsMapCredits"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:gravity="center_vertical"
+                android:text="Acerca del mapa y licencias"
+                android:textColor="#27313A"
+                android:textSize="14sp" />
+
             <TextView
                 android:id="@+id/settingsClose"
                 android:layout_width="match_parent"
@@ -202,7 +212,8 @@
             android:text="GPS · esperando señal"
             android:textColor="#FFFFFF"
             android:textSize="12sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/mapCacheStatus"

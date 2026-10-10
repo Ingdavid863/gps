@@ -32,7 +32,12 @@ class ArRouteGeometry(val points: List<RouteGeometry.Point>) {
         cumulative.filter { it > start && it < end }.forEach { distances += it }
         return distances.map { Sample(at(it), it) }.filterIndexed { i, s ->
             i == 0 || s.along - distances.elementAt(i - 1) > .05
-        }.take(22)
+        }
+    }
+    /** One terrain lookup per 8 m block; unresolved neighbours cannot remove a segment. */
+    fun block(sample: Sample): Sample {
+        val along = (floor(sample.along / 8.0) * 8.0 + 4.0).coerceAtMost(length)
+        return Sample(at(along), along)
     }
     companion object {
         fun offset(origin: RouteGeometry.Point, target: RouteGeometry.Point): Offset = Offset(

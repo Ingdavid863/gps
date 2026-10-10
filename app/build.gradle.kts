@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.18.0-beta-auto-routes"
+        versionCode = 29
+        versionName = "0.23.0-beta-car"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
         manifestPlaceholders["tomTomApiKey"] = tomTomApiKey
@@ -65,6 +65,13 @@ android {
         }
     }
 
+    buildTypes.getByName("release") {
+        isDebuggable = false
+        // Preserve the certificate used by existing installs; changing it would
+        // force David to uninstall and lose app data. CI requires the saved key.
+        signingConfig = signingConfigs.getByName("debug")
+    }
+
     sourceSets {
         getByName("main").assets.srcDir(generatedTrafficAssetsDir)
     }
@@ -77,13 +84,21 @@ kotlin {
 }
 
 dependencies {
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-projected:1.7.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    androidTestImplementation("androidx.car.app:app-testing:1.7.0") {
+        exclude(group = "org.robolectric")
+    }
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.webkit:webkit:1.12.1")

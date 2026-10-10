@@ -29,6 +29,22 @@ class TollCatalog(root: JSONObject) {
             it.bearings.all { b -> b.isFinite() && b >= 0 && b < 360 } &&
             it.rates.all { r -> r.cost.isFinite() && r.cost in 0.0..10000.0 && r.maxCost.isFinite() && r.maxCost in r.cost..10000.0 } })
     }
+    /** Detect a route actually crossing a plaza even if a provider omits toll sections. */
+    fun crossedPlazas(route: List<RouteGeometry.Point>): List<Plaza> {
+        if (route.size < 2) return emptyList()
+        val minLat = route.minOf { it.lat } - .0002
+        val maxLat = route.maxOf { it.lat } + .0002
+        val minLon = route.minOf { it.lon } - .0002
+        val maxLon = route.maxOf { it.lon } + .0002
+        return plazas.filter { plaza ->
+            if (plaza.point.lat !in minLat..maxLat || plaza.point.lon !in minLon..maxLon) return@filter false
+            val projection = RouteGeometry.project(route, plaza.point) ?: return@filter false
+            if (projection.distance > 12.0) return@filter false
+            val a = route[projection.segment]; val b = route[projection.segment + 1]
+            val bearing = (Math.toDegrees(atan2((b.lon - a.lon) * cos(Math.toRadians(a.lat)), b.lat - a.lat)) + 360) % 360
+            plaza.bearings.isEmpty() || plaza.bearings.any { abs((it - bearing + 540) % 360 - 180) < 70 }
+        }
+    }
     fun quote(route: List<RouteGeometry.Point>, hasTolls: Boolean, sections: List<IntRange> = emptyList(), entered: List<Long> = emptyList()): TollRepository.Quote {
         if (route.size < 2) return TollRepository.Quote(emptyList(), hasTolls, false)
         if (!hasTolls) return TollRepository.Quote(emptyList(), false, true)
@@ -70,3 +86,4 @@ class TollCatalog(root: JSONObject) {
         return TollRepository.Quote(booths,true,true)
     }
 }
+

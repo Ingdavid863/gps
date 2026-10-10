@@ -1,0 +1,6 @@
+MapAssets/
+GPS3D.xcodeproj/
+build/
+DerivedData/
+GPS3D/Info.plist
+GPS3D/GPS3D.entitlements

@@ -61,4 +61,15 @@ class TollCatalogTest {
         assertTrue(rate(704).source.contains("Circuito Exterior Mexiquense"))
         assertNotEquals(rate(704).cost,rate(700).cost,.001)
     }
+    @Test fun tollAvoidanceDetectsCrossedPlazasWithoutProviderSections() {
+        val crossed=catalog().crossedPlazas(route).map { it.id }
+        assertEquals(listOf(1L,2L),crossed)
+    }
+    @Test fun tollAvoidanceDoesNotRejectAParallelFreeStreetOrTheWrongTravelDirection() {
+        val parallel=route.map { it.copy(lon=it.lon+.0003) }
+        assertTrue(catalog().crossedPlazas(parallel).isEmpty())
+        assertEquals(listOf(4L),catalog().crossedPlazas(route.reversed()).map { it.id })
+    }
+
 }
+
