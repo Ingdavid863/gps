@@ -98,6 +98,9 @@ class CarNavigationTest {
             val free=JSONObject(route.toString()).put("legs",JSONArray().put(JSONObject().put("points",JSONArray(
                 listOf(points.first(),RealisticMapActivity.GeoPoint(points[1].lat,points[1].lon+.0015),points.last()).map {
                     JSONObject().put("latitude",it.lat).put("longitude",it.lon) }))))
+            free.put("guidance",JSONObject().put("instructions",JSONArray().put(JSONObject()
+                .put("point",JSONObject().put("latitude",points.last().lat).put("longitude",points.last().lon))
+                .put("pointIndex",2).put("maneuver","TURN_LEFT").put("message","Gira a la izquierda"))))
             route.put("sections",JSONArray().put(JSONObject().put("sectionType","TOLL")))
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
                 .body(JSONObject().put("routes",JSONArray().put(route).put(free)).toString().toResponseBody("application/json".toMediaType())).build()
@@ -122,6 +125,7 @@ class CarNavigationTest {
                 assertEquals("Nueva ruta libre",CarNavigation.state.label);assertTrue(CarNavigation.state.route!!.avoidsTolls)
                 assertFalse(CarNavigation.state.route!!.hasTolls);assertNotEquals(points,CarNavigation.state.route!!.points)
                 assertEquals("car",CarNavigation.state.source)
+                assertEquals("↰",CarNavigation.state.route!!.steps.first().icon)
             }
         } finally { release.countDown();main { CarNavigation.stop("phone") };CarNavigation.routeClient=old }
     }

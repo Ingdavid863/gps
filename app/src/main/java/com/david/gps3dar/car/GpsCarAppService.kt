@@ -77,9 +77,9 @@ class GpsCarScreen(context: CarContext,private val map: CarMapSurface,private va
     companion object {
         fun step(state: CarSnapshot): Step {
             val type=when {
+                state.maneuver.startsWith("ARRIVE") -> Maneuver.TYPE_DESTINATION
                 state.maneuver.contains("LEFT") -> Maneuver.TYPE_TURN_NORMAL_LEFT
                 state.maneuver.contains("RIGHT") -> Maneuver.TYPE_TURN_NORMAL_RIGHT
-                state.maneuver.contains("ARRIVE") -> Maneuver.TYPE_DESTINATION
                 else -> Maneuver.TYPE_STRAIGHT
             }
             return Step.Builder(if(state.pending)"Recalculando ruta…" else state.instruction)

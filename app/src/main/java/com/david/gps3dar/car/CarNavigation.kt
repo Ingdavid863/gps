@@ -93,6 +93,14 @@ object CarNavigation {
             } }
         }
     }
+    private fun glyph(maneuver: String): String = when {
+        maneuver.startsWith("ARRIVE") -> "🏁"
+        maneuver.contains("UTURN") -> "↶"
+        maneuver.startsWith("ROUNDABOUT") -> "↻"
+        maneuver.contains("LEFT") -> "↰"
+        maneuver.contains("RIGHT") -> "↱"
+        else -> "↑"
+    }
     fun key(context: Context): String = context.packageManager.getApplicationInfo(context.packageName,
         PackageManager.GET_META_DATA).metaData?.getString("com.david.gps3dar.TOMTOM_API_KEY").orEmpty()
     fun routeTo(context: Context, destination: RealisticMapActivity.GeoPoint, label: String, avoid: Boolean = state.route?.avoidsTolls ?: context.getSharedPreferences("RealisticMapActivity",Context.MODE_PRIVATE).getBoolean("avoidTolls",false)) {
@@ -142,7 +150,7 @@ object CarNavigation {
                             val steps=(0 until guidance.length()).map { i ->
                                 val item=guidance.getJSONObject(i);val p=item.getJSONObject("point");val index=item.optInt("pointIndex",0).coerceIn(points.indices)
                                 RealisticMapActivity.NavStep(p.getDouble("latitude"),p.getDouble("longitude"),
-                                    item.optString("message","Continúa hacia tu destino"),"↑",index,item.optString("maneuver","STRAIGHT"),
+                                    item.optString("message","Continúa hacia tu destino"),glyph(item.optString("maneuver","STRAIGHT")),index,item.optString("maneuver","STRAIGHT"),
                                     path.instructionAlong(RouteGeometry.Point(p.getDouble("latitude"),p.getDouble("longitude")),index,
                                         item.optDouble("routeOffsetInMeters",Double.NaN))) }
                             val summary=json.getJSONObject("summary")
