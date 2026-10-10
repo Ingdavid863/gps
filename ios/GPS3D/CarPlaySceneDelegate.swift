@@ -47,7 +47,7 @@ import Combine
             if revision != route.id { navigation?.cancelTrip();navigation=nil;currentTrip=nil;revision=route.id }
             if navigation==nil { let trip=makeTrip(destination);currentTrip=trip;navigation=map.startNavigationSession(for:trip) }
             let maneuver=CPManeuver();maneuver.instructionVariants=[store.pending ? "Recalculando ruta…":store.instruction]
-            let symbol=store.maneuver.contains("LEFT") ? "arrow.turn.up.left" : (store.maneuver.contains("RIGHT") ? "arrow.turn.up.right" : (store.maneuver.contains("ARRIVE") ? "flag.checkered":"arrow.up"))
+            let symbol=store.maneuver.hasPrefix("ARRIVE") ? "flag.checkered" : (store.maneuver.contains("LEFT") ? "arrow.turn.up.left" : (store.maneuver.contains("RIGHT") ? "arrow.turn.up.right":"arrow.up"))
             maneuver.symbolImage=UIImage(systemName:symbol)
             maneuver.initialTravelEstimates=CPTravelEstimates(distanceRemaining:Measurement(value:store.turnMeters,unit:UnitLength.meters),timeRemaining:store.seconds*store.turnMeters/max(1,store.remaining))
             navigation?.upcomingManeuvers=[maneuver]
