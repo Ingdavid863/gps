@@ -202,7 +202,8 @@
             android:text="GPS · esperando señal"
             android:textColor="#FFFFFF"
             android:textSize="12sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/mapCacheStatus"

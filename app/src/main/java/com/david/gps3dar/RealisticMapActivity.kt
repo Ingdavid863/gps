@@ -713,6 +713,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun syncMapAll() {
         syncVisualSettings()
         syncRoutes()
+        syncRouteProgress(force = true)
         syncTolls()
         displayLocation?.let { updateLocationMarker(it) }
         syncViewport()
@@ -828,7 +829,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         mapCache.prepare(routePoints.map { RouteGeometry.Point(it.lat, it.lon) }, routeProgressIndex) { prepared, total ->
             ui.post {
                 if (!isDestroyed) findViewById<TextView>(R.id.mapCacheStatus).apply {
-                    visibility = if (routeActive && !searchEditing) View.VISIBLE else View.GONE
+                    visibility = View.GONE
                     text = if (prepared == total) "Mapa próximo preparado" else "Mapa próximo guardado: ${prepared * 100 / total.coerceAtLeast(1)}%"
                 }
             }
@@ -1014,7 +1015,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val moving = rawLocation?.speed ?: 0f
         val raw = rawLocation
         if (raw?.hasBearing() == true && moving > 1.0f) {
-            lastCameraBearing = smoothBearing(lastCameraBearing, raw.bearing.toDouble(), if (moving > 8f) 0.38 else 0.24)
+            // WebView animates the fresh heading continuously; filtering it once per fix creates steps.
+            lastCameraBearing = raw.bearing.toDouble()
         }
 
         if (viewMode == 2 || SystemClock.elapsedRealtime() < manualCameraUntilMs) return
@@ -1214,10 +1216,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun updateSearchChrome() {
         if (!::searchInput.isInitialized) return
         findViewById<View>(R.id.searchPanel).visibility = if (routeActive && !searchEditing) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.changeDestinationButton).visibility = if (routeActive && !searchEditing) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.changeDestinationButton).visibility = View.GONE
         findViewById<View>(R.id.mapControls).visibility = if (searchEditing) View.GONE else View.VISIBLE
         findViewById<View>(R.id.turnBanner).visibility = if (searchEditing) View.GONE else View.VISIBLE
-        gpsStatus.visibility = if (searchEditing) View.GONE else View.VISIBLE
+        gpsStatus.visibility = View.GONE
         findViewById<View>(R.id.bottomPanel).visibility = if (searchEditing) View.GONE else View.VISIBLE
         if (searchEditing) {
             routeChoices.visibility = View.GONE
@@ -2319,12 +2321,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
     private fun pointsJson(points: List<GeoPoint>): String = points.joinToString(prefix = "[", postfix = "]") {
         "[${num(it.lon)},${num(it.lat)}]"
-    }
-
-    private fun smoothBearing(old: Double, target: Double, alpha: Double): Double {
-        if (old == 0.0) return target
-        val delta = (target - old + 540.0) % 360.0 - 180.0
-        return (old + delta * alpha + 360.0) % 360.0
     }
 
     private fun formatDistance(meters: Double): String = when {

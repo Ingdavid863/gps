@@ -52,25 +52,19 @@
             box-shadow: 0 3px 14px rgba(0,0,0,.22);
         }
         #loading.error { color: #9c2b24; font-weight: 600; }
-        #traffic-status { position:absolute; z-index:5; left:12px; bottom:calc(16% + 38px);
-            max-width:calc(100% - 94px); padding:6px 10px; border-radius:16px;
-            background:rgba(19,30,43,.93); color:#edf3f8; font-size:12px;
-            box-shadow:0 2px 7px #0003; pointer-events:none; }
-        #traffic-status[data-state="live"]::before { content:'●'; color:#28b56e; margin-right:6px; }
-        #traffic-status[data-state="disabled"] { display:none; }
-        #signal-status { position:absolute; z-index:5; left:12px; bottom:calc(16% + 78px);
-            max-width:calc(100% - 116px); padding:7px 10px; border-radius:12px; white-space:pre-line;
-            background:rgba(19,30,43,.93); color:#edf3f8; font-size:12px; line-height:1.35; pointer-events:none; }
-        #signal-status:empty { display:none; }
+        #traffic-status, #signal-status { display:none !important; }
+        .maplibregl-ctrl-attrib { font-size:10px; line-height:14px; padding:0 4px;
+            background:rgba(255,255,255,.86); border-radius:3px; max-width:calc(100vw - 16px); }
     </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="loading">Iniciando motor GPS3D…</div>
-<div id="traffic-status" role="status" aria-live="polite">Cargando tráfico…</div>
-<div id="signal-status" role="status" aria-live="polite"></div>
+<div id="traffic-status" hidden aria-hidden="true">Cargando tráfico…</div>
+<div id="signal-status" hidden aria-hidden="true"></div>
 <script src="traffic-config.js"></script>
 <script src="vendor/maplibre-gl.js"></script>
+<script src="navigation-route-progress.js"></script>
 <script src="navigation-motion.js"></script>
 <script src="navigation-view.js"></script>
 <script src="navigation-styles.js"></script>
@@ -106,6 +100,9 @@
     let viewMode = 0;
     let viewportTop = 0.25, viewportBottom = 0.16;
     let remainingRoutePoints = [];
+    let routePath=NavigationRouteProgress.create([]), confirmedRouteAlong=0, renderedRouteAlong=0;
+    let renderedRoutePoints=[], renderedRouteTraffic=EMPTY, lastRouteRenderAt=0;
+
     let selectedPoint = null;
     let maneuverSteps = [], darkTheme = false, currentSeverity = '';
     let provider = TRAFFIC_API_KEY ? 'tomtom' : 'openfreemap';
@@ -138,7 +135,7 @@
         map.resize();
         // Follow uses an asymmetric anchor. Clear its padding before fitting full-route bounds.
         map.jumpTo({pitch:0, bearing:0, padding:{top:0,bottom:0,left:0,right:0}});
-        const points = NavigationView.overviewPoints(activeRoutePoints, lastLocation, selectedPoint);
+        const points = NavigationView.overviewPoints(remainingRoutePoints, lastLocation, selectedPoint);
         const options = { padding: currentPadding(true), pitch: 0, bearing: 0, duration: 0, essential: true };
         if (points.length < 2) {
             map.easeTo({ ...options, center: lastLocation, zoom: 14 });
@@ -196,20 +193,8 @@
         return;
     }
 
-    // MapLibre initially expands compact credits until a user drags the map.
-    // Navigation moves the camera programmatically, so start with the info button
-    // and keep the full credits available on tap, away from the native controls.
-    map.addControl(new maplibregl.AttributionControl({compact: true}), 'bottom-left');
-    function minimizeInitialAttribution() {
-        const credits = document.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact');
-        if (!credits || credits.classList.contains('maplibregl-attrib-empty')) return;
-        credits.classList.remove('maplibregl-compact-show');
-        map.off('styledata', minimizeInitialAttribution);
-        map.off('sourcedata', minimizeInitialAttribution);
-    }
-    map.on('styledata', minimizeInitialAttribution);
-    map.on('sourcedata', minimizeInitialAttribution);
-    minimizeInitialAttribution();
+    // Show provider credits as unobtrusive text, without an information button.
+    map.addControl(new maplibregl.AttributionControl({compact:false}), 'bottom-right');
 
     map.touchZoomRotate.enable();
     map.dragRotate.enable();
@@ -225,40 +210,52 @@
         pitchAlignment: 'map'
     }).setLngLat(lastLocation).addTo(map);
 
-    let displayedVehicle = lastLocation.slice();
-    let targetVehicle = lastLocation.slice();
-    let vehicleFrom = lastLocation.slice();
-    let motionStarted = null, motionDuration = 100, vehicleSpeed = 0, vehicleOnRoute = false;
-    let displayedBearing = 0, bearingFrom = 0;
-    let cameraMotion = null, displayedCamera = null;
-    let lastFixAt = null;
+    let displayedVehicle=lastLocation.slice(), displayedBearing=0;
+    const vehicleMotion=NavigationMotion.createTracker();
+    let vehiclePose=null, vehicleOnRoute=false;
+    let cameraMotion=null, cameraFrameAt=null;
+    function renderRemainingRoute(force=false,now=performance.now()) {
+        if(!ready||activeRoutePoints.length<2)return;
+        const along=vehiclePose?.path===routePath && vehicleOnRoute ? vehiclePose.along : confirmedRouteAlong;
+        const next=Math.max(renderedRouteAlong,confirmedRouteAlong,along||0);
+        if(!force&&(now-lastRouteRenderAt<50||next-renderedRouteAlong<.2))return;
+        renderedRouteAlong=Math.min(routePath.total,next);lastRouteRenderAt=now;
+        remainingRoutePoints=routePath.remaining(renderedRouteAlong);
+        renderedRoutePoints=remainingRoutePoints;
+        map.getSource('gps-route-active')?.setData(lineData(renderedRoutePoints));
+        // Alternatives are useful while choosing a route. Once moving,
+        // their untravelled full polylines must not resemble a trail behind the vehicle.
+        ['gps-route-alt-1-layer','gps-route-alt-2-layer'].forEach(id=>
+            setLayerVisible(id,renderedRouteAlong<3));
+        renderRouteTraffic();renderManeuvers();
+    }
     function animateVehicleMarker(now) {
-        if (motionStarted !== null) {
-            const elapsed = now - motionStarted;
-            const t = Math.min(1, elapsed / motionDuration);
-            const predicted = NavigationMotion.advance(targetVehicle,
-                Math.min(18, vehicleSpeed * Math.min(600, Math.max(0, elapsed)) / 1000),
-                lastBearing, vehicleOnRoute ? activeRoutePoints : [], routeProgressStartIndex);
-            displayedVehicle = NavigationMotion.mix(vehicleFrom, predicted, t);
-            displayedBearing = NavigationMotion.bearingMix(bearingFrom, lastBearing, t);
+        vehiclePose=vehicleMotion.sample(now);
+        if(vehiclePose) {
+            displayedVehicle=vehiclePose.point;displayedBearing=vehiclePose.bearing;
             vehicleMarker.setLngLat(displayedVehicle);
-            if (vehicleMarker.setRotation) vehicleMarker.setRotation(displayedBearing);
+            if(vehicleMarker.setRotation)vehicleMarker.setRotation(displayedBearing);
+            renderRemainingRoute(false,now);
         }
-        if (ready && cameraMotion && viewMode !== 2) {
-            const t = Math.min(1, (now - cameraMotion.at) / cameraMotion.duration);
-            displayedCamera = NavigationMotion.mix(cameraMotion.from, cameraMotion.to, t);
-            const delta = motionStarted === null ? [0, 0] : displayedVehicle.map((v, i) => v - targetVehicle[i]);
-            const center = displayedCamera.slice(0, 2).map((v, i) => v + delta[i]);
-            const bearing = NavigationMotion.bearingMix(cameraMotion.from[2], cameraMotion.to[2], t);
-            const padding = currentPadding(), current = map.getCenter(), actualPadding = map.getPadding();
-            // Repeating identical jumpTo calls every frame keeps the renderer permanently
-            // moving and prevents cached zooms from settling. Only apply a real change.
-            if (Math.abs(current.lng-center[0])>1e-8 || Math.abs(current.lat-center[1])>1e-8 ||
-                Math.abs(map.getZoom()-displayedCamera[3])>1e-6 || Math.abs(map.getPitch()-displayedCamera[4])>1e-6 ||
-                Math.abs((map.getBearing()-bearing+540)%360-180)>1e-6 || Object.keys(padding).some(k=>Math.abs(actualPadding[k]-padding[k])>.01)) {
-                map.jumpTo({center, bearing, zoom:displayedCamera[3], pitch:displayedCamera[4], padding});
+        if(ready&&cameraMotion&&viewMode!==2) {
+            const dt=Math.max(0,Math.min(.08,(now-(cameraFrameAt??now))/1000));
+            cameraFrameAt=now;
+            const motion=cameraMotion,alpha=1-Math.exp(-25*dt);
+            motion.offset=NavigationMotion.mix(motion.offset,motion.targetOffset,alpha);
+            motion.zoom+=(motion.targetZoom-motion.zoom)*alpha;
+            motion.pitch+=(motion.targetPitch-motion.pitch)*alpha;
+            const rotation=NavigationMotion.spring(motion.bearing,
+                motion.bearing+NavigationMotion.bearingDelta(motion.bearing,motion.targetBearing),motion.bearingVelocity,dt,14);
+            motion.bearing=rotation.value;motion.bearingVelocity=rotation.velocity;
+            const center=displayedVehicle.map((v,i)=>v+motion.offset[i]);
+            const padding=currentPadding(),current=map.getCenter(),actualPadding=map.getPadding();
+            if(Math.abs(current.lng-center[0])>1e-8||Math.abs(current.lat-center[1])>1e-8||
+                Math.abs(map.getZoom()-motion.zoom)>1e-6||Math.abs(map.getPitch()-motion.pitch)>1e-6||
+                Math.abs(NavigationMotion.bearingDelta(map.getBearing(),motion.bearing))>1e-6||
+                Object.keys(padding).some(k=>Math.abs(actualPadding[k]-padding[k])>.01)) {
+                map.jumpTo({center,bearing:motion.bearing,zoom:motion.zoom,pitch:motion.pitch,padding});
             }
-        }
+        } else cameraFrameAt=null;
         requestAnimationFrame(animateVehicleMarker);
     }
     requestAnimationFrame(animateVehicleMarker);
@@ -387,15 +384,15 @@
     setInterval(prepareViewport, 2000);
     function renderManeuvers() {
         const source=map.getSource('gps-maneuvers');
-        if(source) source.setData(NavigationManeuvers.features(activeRoutePoints,maneuverSteps,routeProgressStartIndex,viewMode===2));
+        if(source) source.setData(NavigationManeuvers.features(activeRoutePoints,maneuverSteps,routePath.indexAt(renderedRouteAlong),false));
     }
     const originElement = document.createElement('div'); originElement.className='route-origin'; originElement.title='Inicio de la ruta';
     const originMarker = new maplibregl.Marker({element:originElement});
     function renderOrigin() {
-        if(viewMode===2 && activeRoutePoints.length>1) originMarker.setLngLat(activeRoutePoints[0]).addTo(map); else originMarker.remove();
+        if(viewMode===2 && activeRoutePoints.length>1 && renderedRouteAlong<3) originMarker.setLngLat(activeRoutePoints[0]).addTo(map); else originMarker.remove();
     }
     function notifyTraffic() {
-        const along=routeTrafficMatcher.progress(routeProgressStartIndex,remainingRoutePoints[0]);
+        const along=renderedRouteAlong;
         const feature=routeTrafficFeatures.features.find(f=>f.properties.startAlong<=along+.5&&f.properties.endAlong>along);
         const severity = trafficEnabled && networkAvailable && !pedestrianRoute ? feature?.properties.severity || 'unknown' : 'unknown';
         if (severity === currentSeverity) return;
@@ -418,9 +415,9 @@
         const source=map.getSource(ROUTE_TRAFFIC_SOURCE_ID);
         if(!source)return;
         if(!trafficEnabled || !networkAvailable || !TRAFFIC_API_KEY || pedestrianRoute || activeRoutePoints.length<2) {
-            source.setData(EMPTY);notifyTraffic();return;
+            renderedRouteTraffic=EMPTY;source.setData(EMPTY);notifyTraffic();return;
         }
-        const minimum=viewMode===2 ? 0 : routeTrafficMatcher.progress(routeProgressStartIndex,remainingRoutePoints[0]);
+        const minimum=renderedRouteAlong;
         const features=[];
         for(const feature of routeTrafficFeatures.features) {
             if(feature.properties.endAlong<=minimum)continue;
@@ -438,7 +435,8 @@
                 if(clipped.length>1)features.push({...feature,geometry:{type:'LineString',coordinates:clipped}});
             } else features.push(feature);
         }
-        source.setData({type:'FeatureCollection',features});notifyTraffic();
+        renderedRouteTraffic={type:'FeatureCollection',features};
+        source.setData(renderedRouteTraffic);notifyTraffic();
     }
     function scheduleRouteTraffic() {
         if(routeTrafficTimer!==null)return;
@@ -631,7 +629,7 @@
             if (areaTraffic) areaTraffic.install();
             applyVisuals();
             const route = map.getSource('gps-route-active');
-            if (route) route.setData(lineData(viewMode === 2 ? activeRoutePoints : remainingRoutePoints));
+            if (route) route.setData(lineData(remainingRoutePoints));
             renderManeuvers(); renderRouteTraffic(); renderOrigin();
             return;
         }
@@ -721,7 +719,7 @@
                 geometry:{type:'LineString',coordinates:activeRoutePoints.slice(x.start,x.end+1)}}))};
             renderRouteTraffic();
         },
-        cameraState() { const c=map.getCenter(); return {ready:setupFinished,moving:map.isMoving(),width:map.getContainer().clientWidth,height:map.getContainer().clientHeight,mode:viewMode,pitch:map.getPitch(),center:[c.lng,c.lat],route:activeRoutePoints.map(p=>{const s=map.project(p);return [s.x,s.y]}),padding:currentPadding(true),dark:darkTheme}; },
+        cameraState() { const c=map.getCenter(); return {ready:setupFinished,moving:map.isMoving(),width:map.getContainer().clientWidth,height:map.getContainer().clientHeight,mode:viewMode,pitch:map.getPitch(),center:[c.lng,c.lat],route:remainingRoutePoints.map(p=>{const s=map.project(p);return [s.x,s.y]}),padding:currentPadding(true),dark:darkTheme}; },
         setVisuals(is3D, terrain, buildings, satellite) {
             visuals = { is3D: !!is3D, terrain: !!terrain, buildings: !!buildings, satellite: !!satellite };
             applyVisuals();
@@ -733,64 +731,54 @@
             refreshRouteTraffic();
         },
         trafficState() { return areaTraffic ? {...areaTraffic.state(), routeActive:activeRoutePoints.length>1,
-            routeRendered:trafficEnabled&&networkAvailable?routeTrafficFeatures.features.length:0,
-            routeBands:routeTrafficFeatures.features.reduce((counts,f)=>{const b=f.properties.severity;counts[b]=(counts[b]||0)+1;return counts;},{}),
-            routeFeatures:routeTrafficFeatures.features} : {status:'loading'}; },
+            routeRendered:trafficEnabled&&networkAvailable?renderedRouteTraffic.features.length:0,
+            routeBands:renderedRouteTraffic.features.reduce((counts,f)=>{const b=f.properties.severity;counts[b]=(counts[b]||0)+1;return counts;},{}),
+            routeFeatures:renderedRouteTraffic.features} : {status:'loading'}; },
         refreshTraffic() { if (areaTraffic) areaTraffic.refresh(); },
         trafficSourceFeatures() { return areaTraffic ? areaTraffic.sourceFeatures() : []; },
         setTrafficPaused(paused) { trafficPaused = !!paused; if (!trafficPaused && areaTraffic) areaTraffic.refresh(); },
         setLocation(lon, lat, bearing, speedMps, matched=false) {
-            const now = performance.now();
-            lastLocation = [Number(lon), Number(lat)];
-            vehicleOnRoute=!!matched;
-            vehicleFrom = displayedVehicle.slice();
-            bearingFrom = displayedBearing;
-            motionDuration = lastFixAt === null ? 100 : Math.max(80, Math.min(160, (now-lastFixAt)*.5));
-            if (lastFixAt === null || NavigationMotion.distance(vehicleFrom, lastLocation) > 150) {
-                vehicleFrom = lastLocation.slice();
-                displayedVehicle = lastLocation.slice();
-            }
-            targetVehicle = lastLocation.slice();
-            vehicleSpeed = Math.max(0, Number(speedMps) || 0);
-            lastBearing = Number(bearing) || 0;
-            motionStarted = now;
-            lastFixAt = now;
+            lastLocation=[Number(lon),Number(lat)];lastBearing=Number(bearing)||0;
+            vehicleOnRoute=!!matched&&activeRoutePoints.length>1;
+            vehiclePose=vehicleMotion.fix({point:lastLocation,bearing:lastBearing,speed:speedMps,now:performance.now(),
+                path:vehicleOnRoute?routePath:null,along:routePath.project(routeProgressStartIndex,lastLocation)});
+            displayedVehicle=vehiclePose.point;displayedBearing=vehiclePose.bearing;
         },
         setRoutes(active, alt1, alt2, walking=false) {
-            if (!ready) return;
-            activeRoutePoints = Array.isArray(active) ? active : [];
-            pedestrianRoute=!!walking;
-            routeTrafficMatcher=NavigationRouteTraffic.create(activeRoutePoints);
-            routeTrafficFeatures=EMPTY;
+            if(!ready)return;
+            const next=Array.isArray(active)?active:[];
+            const same=pedestrianRoute===!!walking&&activeRoutePoints.length===next.length&&
+                next.every((p,i)=>p[0]===activeRoutePoints[i][0]&&p[1]===activeRoutePoints[i][1]);
+            if(!same) {
+                activeRoutePoints=next;pedestrianRoute=!!walking;
+                routePath=NavigationRouteProgress.create(activeRoutePoints);
+                routeTrafficMatcher=NavigationRouteTraffic.create(activeRoutePoints);
+                routeTrafficFeatures=EMPTY;confirmedRouteAlong=0;renderedRouteAlong=0;
+                routeProgressStartIndex=0;currentSeverity='';vehicleOnRoute=false;
+            }
             if(areaTraffic)areaTraffic.setRouteActive(activeRoutePoints.length>1);
-            remainingRoutePoints = activeRoutePoints;
-            routeProgressStartIndex = 0;
-            currentSeverity = '';
-            const a = map.getSource('gps-route-active');
-            const b = map.getSource('gps-route-alt-1');
-            const c = map.getSource('gps-route-alt-2');
-            if (a) a.setData(lineData(activeRoutePoints));
-            if (b) b.setData(lineData(alt1));
-            if (c) c.setData(lineData(alt2));
-            setDestinationMarker(activeRoutePoints.length ? activeRoutePoints[activeRoutePoints.length - 1] : null);
-            renderManeuvers();
-            renderOrigin();
-            notifyTraffic();
-            refreshRouteTraffic();
-            if (viewMode === 2) showOverview();
+            remainingRoutePoints=routePath.remaining(renderedRouteAlong);
+            renderedRoutePoints=remainingRoutePoints;
+            map.getSource('gps-route-active')?.setData(lineData(renderedRoutePoints));
+            map.getSource('gps-route-alt-1')?.setData(lineData(alt1));
+            map.getSource('gps-route-alt-2')?.setData(lineData(alt2));
+            ['gps-route-alt-1-layer','gps-route-alt-2-layer'].forEach(id=>
+                setLayerVisible(id,renderedRouteAlong<3));
+            setDestinationMarker(activeRoutePoints.length?activeRoutePoints[activeRoutePoints.length-1]:null);
+            renderManeuvers();renderOrigin();refreshRouteTraffic();
+            if(viewMode===2)showOverview();
         },
         setRouteProgress(lon, lat, fromIndex) {
-            if (!ready || activeRoutePoints.length < 2) return;
-            const source = map.getSource('gps-route-active');
-            if (!source) return;
-            const index = Math.max(0, Math.min(activeRoutePoints.length - 2, Number(fromIndex) || 0));
-            routeProgressStartIndex = index;
-            const remaining = [[Number(lon), Number(lat)], ...activeRoutePoints.slice(index + 1)];
-            remainingRoutePoints = remaining;
-            source.setData(lineData(viewMode === 2 ? activeRoutePoints : remaining));
-            renderRouteTraffic();
-            renderManeuvers();
-            notifyTraffic();
+            if(!ready||activeRoutePoints.length<2)return;
+            routeProgressStartIndex=Math.max(0,Math.min(activeRoutePoints.length-2,Number(fromIndex)||0));
+            confirmedRouteAlong=Math.max(confirmedRouteAlong,
+                routePath.project(routeProgressStartIndex,[Number(lon),Number(lat)]));
+            renderRemainingRoute(true);
+        },
+        navigationState() {
+            return {vehicle:displayedVehicle.slice(),bearing:displayedBearing,cameraBearing:map.getBearing(),
+                progress:renderedRouteAlong,remaining:map.getSource('gps-route-active')?.serialize().data,
+                traffic:map.getSource(ROUTE_TRAFFIC_SOURCE_ID)?.serialize().data};
         },
         setTolls(points) {
             if (!ready) return;
@@ -839,8 +827,7 @@
             map.stop();
             visuals.is3D = viewMode===1;
             applyVisuals();
-            const source = map.getSource('gps-route-active');
-            if (source) source.setData(lineData(viewMode === 2 ? activeRoutePoints : remainingRoutePoints));
+            renderRemainingRoute(true);
             if (viewMode === 2) showOverview();
             renderRouteTraffic();
             renderManeuvers();
@@ -853,12 +840,12 @@
                 padding: currentPadding(true), duration: 300, essential: true});
         },
         follow(lon, lat, bearing, zoom, pitch, duration) {
-            if (!ready || viewMode === 2) return;
-            const center = map.getCenter();
-            const from = [center.lng, center.lat, map.getBearing(), map.getZoom(), map.getPitch()];
-            cameraMotion = {from, to: [Number(lon), Number(lat), Number(bearing) || 0,
-                Number(zoom) || 17, Number(pitch) || 0], at: performance.now(),
-                duration: Math.max(100, Math.min(400, motionDuration))};
+            if(!ready||viewMode===2)return;
+            const center=map.getCenter();
+            if(!cameraMotion) cameraMotion={offset:[center.lng-displayedVehicle[0],center.lat-displayedVehicle[1]],
+                bearing:map.getBearing(),bearingVelocity:0,zoom:map.getZoom(),pitch:map.getPitch()};
+            Object.assign(cameraMotion,{targetOffset:[Number(lon)-lastLocation[0],Number(lat)-lastLocation[1]],
+                targetBearing:Number(bearing)||0,targetZoom:Number(zoom)||17,targetPitch:Number(pitch)||0});
         },
         reload() { location.reload(); }
     };

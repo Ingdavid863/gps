@@ -86,6 +86,8 @@ class NavigationStateTest {
                 fix(p(0.0,80.0),0f)
                 assertEquals("En 0 m",activity.findViewById<TextView>(R.id.turnDistance).text.toString())
                 fix(p(5.0,80.0),90f)
+                assertEquals("Camera receives the fresh heading without per-fix filtering",90.0,
+                    field("lastCameraBearing").getDouble(activity),.001)
                 assertTrue(activity.findViewById<TextView>(R.id.instruction).text.toString().contains("destino"))
                 val shown=field("displayLocation").get(activity) as Location
                 assertTrue(RouteGeometry.distance(RouteGeometry.Point(shown.latitude,shown.longitude),p(5.0,80.0))<2.0)

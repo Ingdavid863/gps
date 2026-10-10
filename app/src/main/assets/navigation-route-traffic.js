@@ -11,6 +11,7 @@
         for(let i=1;i<route.length;i++)along.push(along[i-1]+meters(route[i-1],route[i]));
         function progress(index,point) {
             if(route.length<2)return 0;
+            if(point==null&&index>=route.length-1)return along[route.length-1];
             index=Math.max(0,Math.min(route.length-2,index));
             const a=xy(route[index]),b=xy(route[index+1]),p=xy(point||route[index]);
             const dx=b[0]-a[0],dy=b[1]-a[1];
