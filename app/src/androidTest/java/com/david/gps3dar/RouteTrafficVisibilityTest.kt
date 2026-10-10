@@ -67,8 +67,9 @@ class RouteTrafficVisibilityTest {
             // A style/theme switch must not accidentally bring all street colors back.
             evaluate(scenario,"GPS3D.setDarkTheme(true);true")
             assertFalse(waitFor(scenario) { it.optInt("routeRendered")>0 }.getBoolean("areaVisible"))
-            evaluate(scenario,"GPS3D.setNetworkAvailable(false);true")
-            val offline=JSONObject(evaluate(scenario,"GPS3D.trafficState()"))
+            // Capture the transition atomically. The emulator is actually online, so its
+            // native connectivity observer may restore online state between JS evaluations.
+            val offline=JSONObject(evaluate(scenario,"GPS3D.setNetworkAvailable(false);GPS3D.trafficState()"))
             assertEquals(0,offline.getInt("routeRendered"));assertEquals("offline",offline.getString("status"))
             evaluate(scenario,"GPS3D.setNetworkAvailable(true);GPS3D.setRoutes([],[],[]);true")
             val restored=waitFor(scenario) { it.optString("status")=="live" && it.optInt("rendered")>3 }

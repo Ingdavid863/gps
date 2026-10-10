@@ -56,11 +56,10 @@ class NavigationRenderTest {
             })()""")
             waitFor(scenario,"GPS3D.navigationState().progress>3")
             val advancing=JSONObject(evaluate(scenario,"GPS3D.navigationState()"))
-            val coordinates=advancing.getJSONObject("remaining").getJSONArray("features").getJSONObject(0)
-                .getJSONObject("geometry").getJSONArray("coordinates")
+            val coordinates=advancing.getJSONObject("remaining").getJSONObject("geometry").getJSONArray("coordinates")
             assertTrue("Completed geometry is trimmed between GNSS fixes",coordinates.getJSONArray(0).getDouble(1)>19.72)
             assertEquals("true",evaluate(scenario,"""(() => {
-                const s=GPS3D.navigationState(),start=s.remaining.features[0].geometry.coordinates[0];
+                const s=GPS3D.navigationState(),start=s.remaining.geometry.coordinates[0];
                 return NavigationMotion.distance(s.vehicle,start)<2.5 &&
                     getComputedStyle(document.getElementById('traffic-status')).display==='none' &&
                     getComputedStyle(document.getElementById('signal-status')).display==='none' &&
@@ -94,8 +93,7 @@ class NavigationRenderTest {
             assertEquals("true",evaluate(scenario,"window.trafficTrimmed"))
             evaluate(scenario,"GPS3D.setRoutes(fixtureRoute.map(p=>p.slice()),[],[],false);GPS3D.setViewMode(1);GPS3D.setDarkTheme(true);GPS3D.setViewMode(2);GPS3D.setViewMode(0);true")
             val restored=JSONObject(evaluate(scenario,"GPS3D.navigationState()"))
-            val remaining=restored.getJSONObject("remaining").getJSONArray("features").getJSONObject(0)
-                .getJSONObject("geometry").getJSONArray("coordinates")
+            val remaining=restored.getJSONObject("remaining").getJSONObject("geometry").getJSONArray("coordinates")
             assertEquals(2,remaining.length())
             assertTrue("Resync, overview and theme keep past streets removed",remaining.getJSONArray(0).getDouble(0)>-99.22)
             assertTrue(restored.getDouble("progress")>=89.9)
