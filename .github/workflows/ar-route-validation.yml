@@ -96,6 +96,9 @@ jobs:
             mkdir -p build/ar-native-qa
             adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
             adb install -r app/build/outputs/apk/release/app-release.apk
+            # Gradle removes its test package after connectedDebugAndroidTest.
+            adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell pm list instrumentation
             adb shell am instrument -w -r -e class com.david.gps3dar.SharedDestinationIntentTest com.david.gps3dar.test/androidx.test.runner.AndroidJUnitRunner > build/ar-native-qa/release-share-intents.txt
             python3 -c "from pathlib import Path; text = Path('build/ar-native-qa/release-share-intents.txt').read_text(); print(text); assert 'OK (1 test)' in text and 'FAILURES' not in text"
       - uses: actions/upload-artifact@v4
