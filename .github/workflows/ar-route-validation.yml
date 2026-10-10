@@ -1,4 +1,4 @@
-name: Validate continuous walking AR
+name: Validate walking AR and shared destinations
 on:
   pull_request:
     branches: [codex/gps3d-0.14.0]
@@ -42,23 +42,35 @@ jobs:
         run: |
           test -n "$ARCORE_API_KEY"
           test -n "$TOMTOM_API_KEY"
-          gradle testDebugUnitTest assembleDebug assembleDebugAndroidTest --stacktrace
+          gradle testDebugUnitTest assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace
       - name: Verify update identity
         run: |
           python3 - <<'PY'
           import os, pathlib, re, shutil, subprocess, hashlib
-          apk = pathlib.Path('app/build/outputs/apk/debug/app-debug.apk')
+          apk = pathlib.Path('app/build/outputs/apk/release/app-release.apk')
           tools = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
           certificate = subprocess.check_output([str(tools/'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
           digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', certificate).group(1)
           assert digest == 'afefdcd54dc7194464ef8dd4860ca09566100a12bbbc29acc05a3a4d4c81f620'
           package = subprocess.check_output([str(tools/'aapt'), 'dump', 'badging', str(apk)], text=True).splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='24'" in package and "versionName='0.19.0-beta-ar-continuity'" in package
-          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.19.0-beta-ar-continuity.apk')
+          assert "name='com.david.gps3dar'" in package and "versionCode='25'" in package and "versionName='0.19.1-beta-maps-share'" in package
+          manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
+          forbidden = ['BIND_ACCESSIBILITY_SERVICE', 'accessibilityservice.AccessibilityService',
+                       'BIND_NOTIFICATION_LISTENER_SERVICE', 'READ_SMS', 'RECEIVE_SMS',
+                       'REQUEST_INSTALL_PACKAGES', 'SYSTEM_ALERT_WINDOW', 'AutoRouteShareService']
+          assert not any(item in manifest for item in forbidden), 'Delivered APK must not include privileged automation'
+          assert not re.search(r'android:debuggable[^\n]*0xffffffff', manifest), 'Delivered APK must not be debuggable'
+          assert 'android.permission.CAMERA' in manifest and 'android.permission.ACCESS_FINE_LOCATION' in manifest
+          permissions = subprocess.check_output([str(tools/'aapt'), 'dump', 'permissions', str(apk)], text=True)
+          pathlib.Path('build').mkdir(exist_ok=True)
+          pathlib.Path('build/release-permissions.txt').write_text(permissions)
+          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.19.1-beta-maps-share.apk')
           out.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, out)
           print(package)
           print('Signature matches installed app:', digest)
+          print('Release manifest checked: no privileged automation; not debuggable')
+          print(permissions)
           print('APK SHA256:', hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest())
           PY
       - name: Enable emulator acceleration
@@ -80,20 +92,24 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell svc power stayon true
-            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest --stacktrace
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest --stacktrace
             mkdir -p build/ar-native-qa
             adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
+            adb install -r app/build/outputs/apk/release/app-release.apk
+            adb shell am instrument -w -r -e class com.david.gps3dar.SharedDestinationIntentTest com.david.gps3dar.test/androidx.test.runner.AndroidJUnitRunner > build/ar-native-qa/release-share-intents.txt
+            python3 -c "from pathlib import Path; text = Path('build/ar-native-qa/release-share-intents.txt').read_text(); print(text); assert 'OK (1 test)' in text and 'FAILURES' not in text"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.19-AR-validation
+          name: GPS3D-0.19.1-validation
           path: |
             app/build/test-results/testDebugUnitTest/
             app/build/outputs/androidTest-results/connected/
             app/build/reports/androidTests/connected/
             app/build/ar-qa/
             build/ar-native-qa/
+            build/release-permissions.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.19.0-beta-ar-continuity
-          path: build/delivery/GPS3D-AR-David-0.19.0-beta-ar-continuity.apk
+          name: GPS3D-AR-David-0.19.1-beta-maps-share
+          path: build/delivery/GPS3D-AR-David-0.19.1-beta-maps-share.apk

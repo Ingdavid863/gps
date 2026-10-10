@@ -265,6 +265,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_realistic_map)
+        // Retire the old automation state when upgrading from 0.18/0.19.
+        deleteSharedPreferences("automatic_route_share")
 
         fusedLocation = LocationServices.getFusedLocationProviderClient(this)
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
@@ -527,8 +529,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun setupButtons() {
         signalRepository = SignalRepository(http, java.io.File(filesDir, "osm-signals.json"))
-        findViewById<View>(R.id.settingsAutomaticRoutes).setOnClickListener {
-            startActivity(Intent(this, AutoRouteSetupActivity::class.java))
+        findViewById<View>(R.id.settingsMapsConnection).setOnClickListener {
+            startActivity(Intent(this, MapsConnectionActivity::class.java))
         }
         findViewById<View>(R.id.changeDestinationButton).setOnClickListener {
             hidePlacePreview()
@@ -1047,7 +1049,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
         // A shared driving destination must not inherit a previous VR walking route.
         pedestrianRoute = received.walking
-        AutoRouteShareService.destinationReceived()
         externalLinkCall?.cancel()
         destinationSearch.cancel()
         searchDebounce?.let { ui.removeCallbacks(it) }
@@ -1978,7 +1979,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun stopNavigation() {
-        AutoRouteShareService.routeStopped(this)
         routeActive = false
         pedestrianRoute = false
         updateSearchChrome()

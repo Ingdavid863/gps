@@ -112,14 +112,7 @@
             android:name=".ArNavigationActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
-        <activity android:name=".AutoRouteSetupActivity" android:exported="false" />
-        <service android:name=".AutoRouteShareService"
-            android:label="@string/automatic_route_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
-            <meta-data android:name="android.accessibilityservice" android:resource="@xml/automatic_route_service" />
-        </service>
+        <activity android:name=".MapsConnectionActivity" android:exported="false" />
     </application>
 </manifest>
 

@@ -168,11 +168,11 @@
                 android:textSize="14sp" />
 
             <TextView
-                android:id="@+id/settingsAutomaticRoutes"
+                android:id="@+id/settingsMapsConnection"
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:gravity="center_vertical"
-                android:text="Destinos automáticos desde Maps →"
+                android:text="Recibir destinos desde Maps →"
                 android:textColor="#1469D8"
                 android:textSize="16sp"
                 android:textStyle="bold" />

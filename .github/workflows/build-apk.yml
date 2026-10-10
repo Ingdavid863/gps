@@ -57,7 +57,7 @@ jobs:
         run: |
           node --test tests/*.test.cjs
           python -m unittest discover -s scripts -p 'test_*.py'
-          gradle testDebugUnitTest assembleDebug --stacktrace
+          gradle testDebugUnitTest assembleDebug assembleRelease --stacktrace
       - name: Verify map rendering and camera modes
         env:
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.18-map-validation
+          name: GPS3D-0.19.1-map-validation
           path: |
             build/map-qa/
             build/traffic-qa/
@@ -93,13 +93,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            GPS3D_AUTO_SHARE_QA=1 gradle :mapsFixture:assembleDebug --stacktrace
-            adb install mapsFixture/build/outputs/apk/debug/mapsFixture-debug.apk
             bash scripts/run-android-qa.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.18-android-validation
+          name: GPS3D-0.19.1-android-validation
           path: |
             build/native-map-qa/
             app/build/outputs/androidTest-results/connected/
@@ -107,7 +105,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import hashlib, os, pathlib, re, shutil, subprocess
-          apk = pathlib.Path('app/build/outputs/apk/debug/app-debug.apk')
+          apk = pathlib.Path('app/build/outputs/apk/release/app-release.apk')
           sdk = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools' / '36.0.0'
           report = subprocess.check_output([str(sdk / 'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
           certificate = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', report).group(1)
@@ -115,9 +113,12 @@ jobs:
           assert certificate == expected, 'APK must preserve the installed 0.14 signing certificate'
           badging = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'badging', str(apk)], text=True)
           package = badging.splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='23'" in package and "versionName='0.18.0-beta-auto-routes'" in package, package
+          assert "name='com.david.gps3dar'" in package and "versionCode='25'" in package and "versionName='0.19.1-beta-maps-share'" in package, package
+          manifest = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
+          assert not any(permission in manifest for permission in ['BIND_ACCESSIBILITY_SERVICE', 'BIND_NOTIFICATION_LISTENER_SERVICE', 'READ_SMS', 'RECEIVE_SMS', 'REQUEST_INSTALL_PACKAGES', 'SYSTEM_ALERT_WINDOW'])
+          assert not re.search(r'android:debuggable[^\n]*0xffffffff', manifest)
           assert re.search(r"sdkVersion:'26'", badging), 'Android minimum version must remain compatible'
-          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.18.0-beta-auto-routes.apk')
+          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.19.1-beta-maps-share.apk')
           destination.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, destination)
           print(package)
@@ -127,8 +128,8 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.18.0-beta-auto-routes
-          path: build/delivery/GPS3D-AR-David-0.18.0-beta-auto-routes.apk
+          name: GPS3D-AR-David-0.19.1-beta-maps-share
+          path: build/delivery/GPS3D-AR-David-0.19.1-beta-maps-share.apk
 
 
   signal-health:
@@ -162,7 +163,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.18-signal-validation
+          name: GPS3D-0.19.1-signal-validation
           path: |
             app/build/signal-qa/
             app/build/test-results/testDebugUnitTest/

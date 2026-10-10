@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 24
-        versionName = "0.19.0-beta-ar-continuity"
+        versionCode = 25
+        versionName = "0.19.1-beta-maps-share"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
         manifestPlaceholders["tomTomApiKey"] = tomTomApiKey
@@ -63,6 +63,13 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+    }
+
+    buildTypes.getByName("release") {
+        isDebuggable = false
+        // Preserve the certificate used by existing installs; changing it would
+        // force David to uninstall and lose app data. CI requires the saved key.
+        signingConfig = signingConfigs.getByName("debug")
     }
 
     sourceSets {
