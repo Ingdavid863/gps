@@ -49,12 +49,16 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as output:
               output.write('GPS3D_SIMULATOR_ID='+phones[0]['udid']+'\n')
           PY
+      - name: Start the selected iPhone simulator
+        run: |
+          xcrun simctl boot "$GPS3D_SIMULATOR_ID"
+          xcrun simctl bootstatus "$GPS3D_SIMULATOR_ID" -b
       - name: Compile and test iPhone route progress, search and toll avoidance
         env:
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
         run: |
           test -n "$TOMTOM_API_KEY"
-          xcodebuild -project ios/GPS3D.xcodeproj -scheme GPS3D -destination "platform=iOS Simulator,id=$GPS3D_SIMULATOR_ID" -derivedDataPath ios/build -resultBundlePath ios/build/NavigationTests.xcresult CODE_SIGNING_ALLOWED=NO TOMTOM_API_KEY="$TOMTOM_API_KEY" test > ios/build-log.txt 2>&1 || { tail -n 110 ios/build-log.txt; exit 1; }
+          xcodebuild -project ios/GPS3D.xcodeproj -scheme GPS3D -destination "platform=iOS Simulator,id=$GPS3D_SIMULATOR_ID" -parallel-testing-enabled NO -test-timeouts-enabled YES -maximum-test-execution-time-allowance 120 -derivedDataPath ios/build -resultBundlePath ios/build/NavigationTests.xcresult CODE_SIGNING_ALLOWED=NO TOMTOM_API_KEY="$TOMTOM_API_KEY" test > ios/build-log.txt 2>&1 || { tail -n 110 ios/build-log.txt; exit 1; }
           tail -n 30 ios/build-log.txt
       - name: Collect the real WebKit navigation screenshot
         run: |

@@ -95,8 +95,12 @@ class CarNavigationTest {
             val route=JSONObject().put("summary",JSONObject().put("lengthInMeters",200).put("travelTimeInSeconds",120))
                 .put("legs",JSONArray().put(JSONObject().put("points",JSONArray(points.map {
                     JSONObject().put("latitude",it.lat).put("longitude",it.lon) }))))
+            val free=JSONObject(route.toString()).put("legs",JSONArray().put(JSONObject().put("points",JSONArray(
+                listOf(points.first(),RealisticMapActivity.GeoPoint(points[1].lat,points[1].lon+.0015),points.last()).map {
+                    JSONObject().put("latitude",it.lat).put("longitude",it.lon) }))))
+            route.put("sections",JSONArray().put(JSONObject().put("sectionType","TOLL")))
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body(JSONObject().put("routes",JSONArray().put(route)).toString().toResponseBody("application/json".toMediaType())).build()
+                .body(JSONObject().put("routes",JSONArray().put(route).put(free)).toString().toResponseBody("application/json".toMediaType())).build()
         }.build()
         try {
             main {
@@ -109,7 +113,16 @@ class CarNavigationTest {
             release.countDown()
             // The cancelled callback must not resurrect its previous destination or toll preference.
             instrumentation.waitForIdleSync()
-            main { assertEquals("Nuevo destino del teléfono",CarNavigation.state.label);assertFalse(CarNavigation.state.pending) }
+            main {
+                assertEquals("Nuevo destino del teléfono",CarNavigation.state.label);assertFalse(CarNavigation.state.pending)
+                CarNavigation.routeTo(instrumentation.targetContext,points.last(),"Nueva ruta libre",true)
+            }
+            await { var finished=false;main { finished=!CarNavigation.state.pending };finished }
+            main {
+                assertEquals("Nueva ruta libre",CarNavigation.state.label);assertTrue(CarNavigation.state.route!!.avoidsTolls)
+                assertFalse(CarNavigation.state.route!!.hasTolls);assertNotEquals(points,CarNavigation.state.route!!.points)
+                assertEquals("car",CarNavigation.state.source)
+            }
         } finally { release.countDown();main { CarNavigation.stop("phone") };CarNavigation.routeClient=old }
     }
 }
