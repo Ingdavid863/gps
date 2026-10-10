@@ -7,6 +7,7 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import okhttp3.Call
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,7 +38,22 @@ class SharedDestinationIntentTest {
                     scenario.onActivity { activity ->
                         val selected = RealisticMapActivity::class.java.getDeclaredField("selectedMapPoint")
                             .apply { isAccessible = true }.get(activity) as? RealisticMapActivity.SearchResult
-                        matched = selected != null && selected.lat == lat && selected.lon == lon
+                        val pending = RealisticMapActivity::class.java.getDeclaredField("pendingExternalDestination")
+                            .apply { isAccessible = true }.get(activity) as? RealisticMapActivity.GeoPoint
+                        val call = RealisticMapActivity::class.java.getDeclaredField("routeCall")
+                            .apply { isAccessible = true }.get(activity) as? Call
+                        // Starting a route clears its preview pin. Verify the pending
+                        // destination or the actual request sent to the routing provider
+                        // as well, without waiting on the live service's response.
+                        val endpoint = call?.request()?.url?.pathSegments?.joinToString("/")
+                            ?.let { Regex("([+-]?\\d+(?:\\.\\d+)?),([+-]?\\d+(?:\\.\\d+)?)").findAll(it).lastOrNull() }
+                        val requested = endpoint?.let { SharedDestination.coordinates(it.value) }
+                        val received = SharedDestination.parse(activity.intent.data?.toString()
+                            ?: activity.intent.getStringExtra(Intent.EXTRA_TEXT))?.point
+                        matched = received?.lat == lat && received.lon == lon && (
+                            (selected?.lat == lat && selected.lon == lon) ||
+                            (pending?.lat == lat && pending.lon == lon) ||
+                            (requested?.lat == lat && requested.lon == lon))
                         if (matched) {
                             assertEquals(walking, RealisticMapActivity::class.java.getDeclaredField("pedestrianRoute")
                                 .apply { isAccessible = true }.getBoolean(activity))
