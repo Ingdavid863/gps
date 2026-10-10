@@ -23,6 +23,8 @@ targets:
       path: GPS3D/Info.plist
       properties:
         CFBundleDisplayName: GPS3D AR David
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         NSLocationWhenInUseUsageDescription: Tu ubicación permite guiarte por la ruta que eliges.
         NSLocationAlwaysAndWhenInUseUsageDescription: La ruta sigue actualizándose cuando usas CarPlay o apagas la pantalla.
@@ -31,6 +33,10 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Phone
+                UISceneClassName: UIWindowScene
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).PhoneSceneDelegate
             CPTemplateApplicationSceneSessionRoleApplication:
               - UISceneConfigurationName: CarPlay
                 UISceneClassName: CPTemplateApplicationScene

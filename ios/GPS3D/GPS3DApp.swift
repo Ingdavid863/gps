@@ -1,16 +1,21 @@
 import SwiftUI
 import CarPlay
 
-@main struct GPS3DApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene { WindowGroup { NavigationView() } }
-}
-@MainActor final class AppDelegate: NSObject, UIApplicationDelegate {
+@main @MainActor final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,configurationForConnecting session: UISceneSession,options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-        if session.role != .carTemplateApplication { return session.configuration }
-        let configuration=UISceneConfiguration(name:session.role == .carTemplateApplication ? "CarPlay":nil,sessionRole:session.role)
-        if session.role == .carTemplateApplication { configuration.delegateClass=CarPlaySceneDelegate.self }
+        let car=session.role == .carTemplateApplication
+        let configuration=UISceneConfiguration(name:car ? "CarPlay":"Phone",sessionRole:session.role)
+        configuration.delegateClass=car ? CarPlaySceneDelegate.self:PhoneSceneDelegate.self
         return configuration
+    }
+}
+@MainActor final class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+    func scene(_ scene: UIScene,willConnectTo session: UISceneSession,options connectionOptions: UIScene.ConnectionOptions) {
+        guard let scene=scene as? UIWindowScene else { return }
+        let window=UIWindow(windowScene:scene)
+        window.rootViewController=UIHostingController(rootView:NavigationView())
+        self.window=window;window.makeKeyAndVisible()
     }
 }
 private struct LiveMap: UIViewControllerRepresentable {
