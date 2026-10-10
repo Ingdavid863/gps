@@ -6,7 +6,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      - id: diff
+        env:
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          python3 - <<'PYCODE'
+          import os, subprocess
+          files=subprocess.check_output(['git','diff','--name-only','HEAD^','HEAD'],text=True).splitlines()
+          changed=os.environ['MANUAL']=='true' or any(name.startswith(('app/', 'tests/')) or name in ('build.gradle.kts','settings.gradle.kts','gradle.properties','.github/workflows/ar-route-validation.yml') for name in files)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write('run='+str(changed).lower()+'\n')
+          print('Relevant changes:',changed)
+          PYCODE
   ar-route:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:

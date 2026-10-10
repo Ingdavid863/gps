@@ -1,0 +1,90 @@
+name: Validate iPhone and CarPlay
+on:
+  pull_request:
+    branches: [codex/gps3d-0.14.0]
+    paths: ['ios/**', 'app/src/main/assets/**', '.github/workflows/carplay-validation.yml']
+  workflow_dispatch:
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      - id: diff
+        env:
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          python3 - <<'PYCODE'
+          import os, subprocess
+          files=subprocess.check_output(['git','diff','--name-only','HEAD^','HEAD'],text=True).splitlines()
+          changed=os.environ['MANUAL']=='true' or any(name.startswith(('ios/', 'app/src/main/assets/')) or name == '.github/workflows/carplay-validation.yml' for name in files)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write('run='+str(changed).lower()+'\n')
+          print('Relevant changes:',changed)
+          PYCODE
+  iphone:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate shared map assets and Xcode project
+        run: |
+          brew install xcodegen
+          python3 ios/scripts/prepare-map-assets.py
+          cd ios
+          xcodegen generate
+      - name: Select the available iPhone simulator
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))['devices']
+          phones=[d for runtime, items in devices.items() if 'iOS' in runtime for d in items if d['name'].startswith('iPhone')]
+          assert phones, 'No iPhone simulator installed'
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              output.write('GPS3D_SIMULATOR_ID='+phones[0]['udid']+'\n')
+          PY
+      - name: Compile and test iPhone route progress, search and toll avoidance
+        env:
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          test -n "$TOMTOM_API_KEY"
+          xcodebuild -project ios/GPS3D.xcodeproj -scheme GPS3D -destination "platform=iOS Simulator,id=$GPS3D_SIMULATOR_ID" -derivedDataPath ios/build -resultBundlePath ios/build/NavigationTests.xcresult CODE_SIGNING_ALLOWED=NO TOMTOM_API_KEY="$TOMTOM_API_KEY" test > ios/build-log.txt 2>&1 || { tail -n 110 ios/build-log.txt; exit 1; }
+          tail -n 30 ios/build-log.txt
+      - name: Verify device compilation without creating an installable IPA
+        env:
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          xcodebuild -project ios/GPS3D.xcodeproj -scheme GPS3D -destination 'generic/platform=iOS' -derivedDataPath ios/device-build CODE_SIGNING_ALLOWED=NO TOMTOM_API_KEY="$TOMTOM_API_KEY" build > ios/device-build-log.txt 2>&1 || { tail -n 90 ios/device-build-log.txt; exit 1; }
+          tail -n 10 ios/device-build-log.txt
+      - name: Redact configured keys from build reports
+        if: always()
+        env:
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          from pathlib import Path
+          key=os.environ.get('TOMTOM_API_KEY','')
+          for name in ('build-log.txt','device-build-log.txt'):
+              path=Path('ios')/name
+              if path.exists() and key:
+                  path.write_text(path.read_text().replace(key,'[configured key]'))
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GPS3D-iPhone-CarPlay-validation
+          path: |
+            ios/build/NavigationTests.xcresult
+            ios/build-log.txt
+            ios/device-build-log.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GPS3D-iPhone-0.23.0-simulator
+          path: ios/build/Build/Products/Debug-iphonesimulator/GPS3D.app
