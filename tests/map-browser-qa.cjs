@@ -24,8 +24,10 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
   return e&&!e.classList.contains('maplibregl-attrib-empty');
  });
  assert.equal(await credits.locator('summary').isVisible(),false,'information icon removed');
- assert.equal(await credits.locator('.maplibregl-ctrl-attrib-inner').isVisible(),true,'provider credits remain visible');
  assert.match(await credits.innerText(),/OpenStreetMap/);
+ await page.waitForFunction(()=>document.body.classList.contains('credits-dismissed'));
+ assert.equal(await credits.isVisible(),false,'provider label no longer overlays navigation');
+ assert.match(await page.evaluate(()=>GPS3D.mapCredits()),/OpenStreetMap/);
  assert.equal(await page.locator('#traffic-status').isVisible(),false);
  assert.equal(await page.locator('#signal-status').isVisible(),false);
  await page.evaluate(()=>{

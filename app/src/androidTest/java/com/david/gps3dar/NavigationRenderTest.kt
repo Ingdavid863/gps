@@ -58,12 +58,14 @@ class NavigationRenderTest {
             val advancing=JSONObject(evaluate(scenario,"GPS3D.navigationState()"))
             val coordinates=advancing.getJSONObject("remaining").getJSONObject("geometry").getJSONArray("coordinates")
             assertTrue("Completed geometry is trimmed between GNSS fixes",coordinates.getJSONArray(0).getDouble(1)>19.72)
+            waitFor(scenario,"document.body.classList.contains('credits-dismissed')")
             assertEquals("true",evaluate(scenario,"""(() => {
                 const s=GPS3D.navigationState(),start=s.remaining.geometry.coordinates[0];
                 return NavigationMotion.distance(s.vehicle,start)<2.5 &&
                     getComputedStyle(document.getElementById('traffic-status')).display==='none' &&
                     getComputedStyle(document.getElementById('signal-status')).display==='none' &&
-                    getComputedStyle(document.querySelector('.maplibregl-ctrl-attrib-button')).display==='none';
+                    getComputedStyle(document.querySelector('.maplibregl-ctrl-attrib')).display==='none' &&
+                    GPS3D.mapCredits().includes('OpenStreetMap');
             })()"""))
             evaluate(scenario,"""(() => {
                 const p=GPS3D.navigationState().vehicle;

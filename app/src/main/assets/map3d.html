@@ -55,6 +55,7 @@
         #traffic-status, #signal-status { display:none !important; }
         .maplibregl-ctrl-attrib { font-size:10px; line-height:14px; padding:0 4px;
             background:rgba(255,255,255,.86); border-radius:3px; max-width:calc(100vw - 16px); }
+        .credits-dismissed .maplibregl-ctrl-attrib { display:none; }
     </style>
 </head>
 <body>
@@ -193,8 +194,14 @@
         return;
     }
 
-    // Show provider credits as unobtrusive text, without an information button.
+    // Credit providers at startup, then keep licences accessible in the native menu.
     map.addControl(new maplibregl.AttributionControl({compact:false}), 'bottom-right');
+    let creditsDismissTimer = null;
+    map.once('style.load', () => {
+        if (creditsDismissTimer === null) creditsDismissTimer = setTimeout(() => {
+            document.body.classList.add('credits-dismissed');
+        }, 5500);
+    });
 
     map.touchZoomRotate.enable();
     map.dragRotate.enable();
@@ -682,6 +689,10 @@
     });
 
     window.GPS3D = {
+        mapCredits() {
+            const credits = document.querySelector('.maplibregl-ctrl-attrib-inner');
+            return credits ? credits.textContent.trim() : '© TomTom | © OpenStreetMap contributors';
+        },
         setDarkTheme: applyTheme,
         setNetworkAvailable(available) {
             networkAvailable = !!available;

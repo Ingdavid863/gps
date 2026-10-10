@@ -58,7 +58,7 @@ jobs:
           digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', certificate).group(1)
           assert digest == 'afefdcd54dc7194464ef8dd4860ca09566100a12bbbc29acc05a3a4d4c81f620'
           package = subprocess.check_output([str(tools/'aapt'), 'dump', 'badging', str(apk)], text=True).splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='27'" in package and "versionName='0.21.0-beta-navigation'" in package
+          assert "name='com.david.gps3dar'" in package and "versionCode='28'" in package and "versionName='0.22.0-beta-navigation'" in package
           manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
           forbidden = ['BIND_ACCESSIBILITY_SERVICE', 'accessibilityservice.AccessibilityService',
                        'BIND_NOTIFICATION_LISTENER_SERVICE', 'READ_SMS', 'RECEIVE_SMS',
@@ -69,7 +69,7 @@ jobs:
           permissions = subprocess.check_output([str(tools/'aapt'), 'dump', 'permissions', str(apk)], text=True)
           pathlib.Path('build').mkdir(exist_ok=True)
           pathlib.Path('build/release-permissions.txt').write_text(permissions)
-          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.21.0-beta-navigation.apk')
+          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.22.0-beta-navigation.apk')
           out.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, out)
           print(package)
@@ -97,7 +97,7 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell svc power stayon true
-            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest --stacktrace
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest --stacktrace
             mkdir -p build/ar-native-qa
             adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
             adb pull /sdcard/Download/GPS3DQA build/ar-native-qa
@@ -110,7 +110,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.21.0-validation
+          name: GPS3D-0.22.0-validation
           path: |
             app/build/test-results/testDebugUnitTest/
             app/build/outputs/androidTest-results/connected/
@@ -120,5 +120,5 @@ jobs:
             build/release-permissions.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.21.0-beta-navigation
-          path: build/delivery/GPS3D-AR-David-0.21.0-beta-navigation.apk
+          name: GPS3D-AR-David-0.22.0-beta-navigation
+          path: build/delivery/GPS3D-AR-David-0.22.0-beta-navigation.apk
