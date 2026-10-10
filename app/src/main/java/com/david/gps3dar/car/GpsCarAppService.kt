@@ -33,7 +33,7 @@ private class GpsCarSession(private val cluster: Boolean) : Session() {
     private var navigating=false
     private val navigationObserver: (CarSnapshot)->Unit = { state ->
         val manager=carContext.getCarService(NavigationManager::class.java)
-        if(state.route!=null) {
+        if(state.route!=null && !state.arrived) {
             if(!navigating) { manager.navigationStarted();navigating=true }
             val step=GpsCarScreen.step(state)
             manager.updateTrip(Trip.Builder()
@@ -43,7 +43,7 @@ private class GpsCarSession(private val cluster: Boolean) : Session() {
         } else if(navigating) { manager.navigationEnded();navigating=false }
     }
     override fun onCreateScreen(intent: Intent): Screen {
-        connections++
+        connections++;CarNavigation.connected=true
         CarNavigation.initialize(carContext)
         carContext.getCarService(NavigationManager::class.java).setNavigationManagerCallback(object : NavigationManagerCallback {
             override fun onStopNavigation() { CarNavigation.stop() }
@@ -62,7 +62,7 @@ private class GpsCarSession(private val cluster: Boolean) : Session() {
             override fun onDestroy(owner: LifecycleOwner) {
                 CarNavigation.remove(navigationObserver)
                 if(navigating)carContext.getCarService(NavigationManager::class.java).navigationEnded()
-                surface?.close();surface=null;connections--
+                surface?.close();surface=null;connections--;CarNavigation.connected=connections>0
                 if(connections==0)carContext.stopService(Intent(carContext,CarLocationService::class.java))
             }
         })

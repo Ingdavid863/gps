@@ -135,13 +135,14 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         ui.post {
             if (!isDestroyed && snapshot.revision == com.david.gps3dar.car.CarNavigation.state.revision && snapshot.revision != carRevision) {
                 carRevision = snapshot.revision
-                if (snapshot.source == "car") {
+                if (snapshot.source == "car" || (com.david.gps3dar.car.CarNavigation.connected && !routeActive && snapshot.route != null)) {
                     applyingCarRoute = true
                     routeCall?.cancel();routeGeneration++;rerouting=false;pendingAvoidTolls=null
                     val option=snapshot.route;val destination=snapshot.destination
                     if(option==null) stopNavigation()
                     else if(destination!=null) {
                         routeDestination=destination;routeAlternatives=listOf(option)
+                        suppressSearchWatcher=true;searchInput.setText(snapshot.label);suppressSearchWatcher=false
                         snapshot.location?.let { rawLocation=it;displayLocation=it }
                         activateRoute(0,false)
                     }
@@ -959,8 +960,6 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         if (accepted != null && location.elapsedRealtimeNanos <= accepted.elapsedRealtimeNanos) return
         if (accepted != null && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 3_000_000_000L) return
         rawLocation = location
-        com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
-        com.david.gps3dar.car.CarNavigation.fix(location)
 
         if (location.hasAccuracy() && location.accuracy > 65f) {
             gpsStatus.text = "GPS débil · ±${location.accuracy.toInt()} m"
@@ -974,6 +973,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             if (jumpSpeed > 85.0 && location.accuracy > 12f) return
         }
         lastAcceptedLocation = Location(location)
+        com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
+        com.david.gps3dar.car.CarNavigation.fix(location)
 
         // Use the fresh fix for progress and turn distances. Filtering is for stationary jitter;
         // filtering a moving position twice introduces avoidable delay at the intersection.
@@ -2503,6 +2504,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     override fun onDestroy() {
         com.david.gps3dar.car.CarNavigation.remove(carObserver)
+        if (!com.david.gps3dar.car.CarNavigation.connected) com.david.gps3dar.car.CarNavigation.stop("phone")
         if (::signalRepository.isInitialized) signalRepository.close()
         ui.removeCallbacks(ticker)
         searchDebounce?.let { ui.removeCallbacks(it) }

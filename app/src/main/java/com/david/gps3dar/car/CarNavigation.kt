@@ -22,7 +22,7 @@ data class CarSnapshot(
     val location: Location? = null, val segment: Int = 0, val along: Double = 0.0,
     val remaining: Double = 0.0, val seconds: Double = 0.0,
     val instruction: String = "Busca un destino para comenzar", val maneuver: String = "STRAIGHT",
-    val turnMeters: Double = 0.0, val pending: Boolean = false, val error: String? = null, val onRoute: Boolean = false
+    val turnMeters: Double = 0.0, val pending: Boolean = false, val error: String? = null, val onRoute: Boolean = false, val arrived: Boolean = false
 )
 
 /** The phone and car consume one immutable route; neither reconstructs a different polyline. */
@@ -37,6 +37,7 @@ object CarNavigation {
     private var appContext: Context? = null
     private var offRouteAt=0L;private var lastRerouteAt=0L
     private var rawLocation: Location? = null
+    var connected=false
     var phoneVisible=false
     var voiceEnabled=true
     internal var routeClient=OkHttpClient()
@@ -51,7 +52,9 @@ object CarNavigation {
         val normalized=route.copy(steps=route.steps.map { step -> if(step.alongMeters.isFinite())step else step.copy(
             alongMeters=geometry!!.instructionAlong(RouteGeometry.Point(step.lat,step.lon),step.routeIndex)) })
         publish(state.copy(revision=state.revision+1,source=source,route=normalized,destination=destination,
-            label=label,along=0.0,segment=0,remaining=geometry!!.length,seconds=route.durationSeconds,pending=false,error=null))
+            label=label,along=0.0,segment=0,remaining=geometry!!.length,seconds=route.durationSeconds,pending=false,error=null,arrived=false))
+        if(source=="car")appContext?.getSharedPreferences("RealisticMapActivity",Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("avoidTolls",route.avoidsTolls)?.apply()
         (rawLocation ?: state.location)?.let { fix(it, force=true) }
     }
     fun stop(source: String = "car") {
@@ -60,6 +63,11 @@ object CarNavigation {
     }
     fun fix(location: Location, force: Boolean = false) {
         if (!force && state.location?.elapsedRealtimeNanos?.let { it >= location.elapsedRealtimeNanos } == true) return
+        if(!force && location.hasAccuracy() && location.accuracy>65)return
+        rawLocation?.let { prior ->
+            val dt=((location.elapsedRealtimeNanos-prior.elapsedRealtimeNanos)/1_000_000_000.0).coerceAtLeast(.25)
+            if(!force && location.accuracy>12 && prior.distanceTo(location)/dt>85)return
+        }
         rawLocation=Location(location)
         val path=geometry;val route=state.route
         if (path==null || route==null) { publish(state.copy(location=Location(location)));return }
@@ -77,7 +85,7 @@ object CarNavigation {
         publish(state.copy(location=shown,segment=matched?.segment ?: state.segment,along=along,remaining=remaining,
             seconds=route.durationSeconds*remaining/path.length.coerceAtLeast(1.0),
             instruction=step?.instruction ?: "Continúa hacia tu destino",maneuver=step?.maneuver ?: "STRAIGHT",
-            turnMeters=((step?.alongMeters ?: path.length)-along).coerceAtLeast(0.0),onRoute=onRoute))
+            turnMeters=((step?.alongMeters ?: path.length)-along).coerceAtLeast(0.0),onRoute=onRoute,arrived=onRoute && remaining<5))
         if(!phoneVisible && !onRoute && now-offRouteAt>2400 && now-lastRerouteAt>6500 && !state.pending) {
             appContext?.let { context -> state.destination?.let { destination ->
                 lastRerouteAt=now;routeTo(context,destination,state.label,route.avoidsTolls)
@@ -86,7 +94,7 @@ object CarNavigation {
     }
     fun key(context: Context): String = context.packageManager.getApplicationInfo(context.packageName,
         PackageManager.GET_META_DATA).metaData?.getString("com.david.gps3dar.TOMTOM_API_KEY").orEmpty()
-    fun routeTo(context: Context, destination: RealisticMapActivity.GeoPoint, label: String, avoid: Boolean = state.route?.avoidsTolls ?: false) {
+    fun routeTo(context: Context, destination: RealisticMapActivity.GeoPoint, label: String, avoid: Boolean = state.route?.avoidsTolls ?: context.getSharedPreferences("RealisticMapActivity",Context.MODE_PRIVATE).getBoolean("avoidTolls",false)) {
         initialize(context)
         val current=rawLocation ?: state.location ?: return publish(state.copy(error="Esperando ubicación GPS…"))
         val key=key(context)
