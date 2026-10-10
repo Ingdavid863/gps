@@ -129,6 +129,27 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private var http = OkHttpClient()
     private val ui = Handler(Looper.getMainLooper())
+    private var applyingCarRoute = false
+    private var carRevision = -1L
+    private val carObserver: (com.david.gps3dar.car.CarSnapshot) -> Unit = { snapshot ->
+        ui.post {
+            if (!isDestroyed && snapshot.revision == com.david.gps3dar.car.CarNavigation.state.revision && snapshot.revision != carRevision) {
+                carRevision = snapshot.revision
+                if (snapshot.source == "car") {
+                    applyingCarRoute = true
+                    routeCall?.cancel();routeGeneration++;rerouting=false;pendingAvoidTolls=null
+                    val option=snapshot.route;val destination=snapshot.destination
+                    if(option==null) stopNavigation()
+                    else if(destination!=null) {
+                        routeDestination=destination;routeAlternatives=listOf(option)
+                        snapshot.location?.let { rawLocation=it;displayLocation=it }
+                        activateRoute(0,false)
+                    }
+                    applyingCarRoute = false
+                }
+            }
+        }
+    }
     private val destinationSearch = DestinationSearch(http)
     private lateinit var recentDestinations: RecentDestinations
     private var searchEditing = false
@@ -327,6 +348,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
+        com.david.gps3dar.car.CarNavigation.observe(carObserver)
         setupBackNavigation()
         refreshSettingsLabels()
         updateTollPanel()
@@ -782,6 +804,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         selectedMapPoint?.let { jsCall("setSelectionPin(${num(it.lon)},${num(it.lat)})") }
         if (viewMode == 2) jsCall("showOverview()") else recenter(false)
         maybeStartPendingExternalNavigation()
+        com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
+        com.david.gps3dar.car.CarNavigation.fix(location)
     }
 
     private fun syncVisualSettings() {
@@ -1901,6 +1925,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         refreshTolls()
         applyPalette()
         if (viewMode == 2) jsCall("showOverview()") else if (recenterMap) recenter(true)
+        if (!pedestrianRoute && !applyingCarRoute) routeDestination?.let { destination ->
+            com.david.gps3dar.car.CarNavigation.setRoute(option,destination,searchInput.text.toString().ifBlank { "Destino" },"phone")
+        }
     }
 
     private fun syncRoutes() {
@@ -2100,6 +2127,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun stopNavigation() {
+        if (!applyingCarRoute) com.david.gps3dar.car.CarNavigation.stop("phone")
         routeActive = false
         pedestrianRoute = false
         routeBeforeAr = null; arDestination = null; navigationGeometry = null; lastMatchAtNanos = 0L
@@ -2451,6 +2479,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     override fun onResume() {
         super.onResume()
+        com.david.gps3dar.car.CarNavigation.phoneVisible=true
         is3D = viewMode == 1
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
@@ -2462,6 +2491,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     override fun onPause() {
+        com.david.gps3dar.car.CarNavigation.phoneVisible=false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sensorManager.unregisterListener(this)
         webMapView.onPause()
@@ -2472,6 +2502,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     override fun onDestroy() {
+        com.david.gps3dar.car.CarNavigation.remove(carObserver)
         if (::signalRepository.isInitialized) signalRepository.close()
         ui.removeCallbacks(ticker)
         searchDebounce?.let { ui.removeCallbacks(it) }

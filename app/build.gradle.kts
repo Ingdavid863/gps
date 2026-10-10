@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 28
-        versionName = "0.22.0-beta-navigation"
+        versionCode = 29
+        versionName = "0.23.0-beta-car"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
         manifestPlaceholders["tomTomApiKey"] = tomTomApiKey
@@ -84,10 +84,12 @@ kotlin {
 }
 
 dependencies {
+    implementation("androidx.car.app:app-projected:1.7.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    androidTestImplementation("androidx.car.app:app-testing:1.7.0")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

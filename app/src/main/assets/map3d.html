@@ -689,6 +689,8 @@
     });
 
     window.GPS3D = {
+        carPan(x, y) { cameraMotion=null; map.panBy([Number(x),Number(y)],{duration:0}); },
+        carZoom(zoom) { cameraMotion=null; map.zoomTo(Number(zoom),{duration:180}); },
         mapCredits() {
             const credits = document.querySelector('.maplibregl-ctrl-attrib-inner');
             return credits ? credits.textContent.trim() : '© TomTom | © OpenStreetMap contributors';

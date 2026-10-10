@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
 
     <!-- GPS3D AR requires an ARCore-compatible camera/device. -->
     <uses-feature
@@ -20,6 +23,15 @@
         android:label="GPS3D AR David"
         android:theme="@style/Theme.GPS3DAR"
         android:usesCleartextTraffic="false">
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+        <service android:name=".car.GpsCarAppService" android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.NAVIGATION" />
+            </intent-filter>
+            <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1" />
+        </service>
+        <service android:name=".car.CarLocationService" android:exported="false" android:foregroundServiceType="location" />
 
         <!-- Override SceneView's optional declaration: GPS3D AR requires ARCore. -->
         <meta-data
