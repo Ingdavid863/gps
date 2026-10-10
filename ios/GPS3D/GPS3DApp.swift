@@ -69,7 +69,10 @@ struct NavigationView: View {
                     }.padding().background(.regularMaterial,in:RoundedRectangle(cornerRadius:22))
                 }
             }.padding()
-        }.onAppear { store.startLocation() }
+        }.onAppear {
+            // The hosted unit tests supply deterministic location fixes and must not open the system permission dialog.
+            if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil { store.startLocation() }
+        }
             .alert("GPS3D",isPresented:Binding(get:{store.error != nil},set:{if !$0 { store.dismissError() }})) { Button("Entendido") { store.dismissError() } } message: { Text(store.error ?? "") }
             .sheet(isPresented:$credits) {
                 VStack(alignment:.leading,spacing:20) {
