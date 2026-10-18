@@ -67,12 +67,6 @@ jobs:
           node-version: '22'
       - name: Check directional route traffic and map rendering helpers
         run: node --test tests/navigation-*.test.cjs
-      - name: Verify WebGL marker alignment and preserve map controls
-        run: |
-          npm install --prefix "$RUNNER_TEMP/gps3d-qa" playwright@1.51.1 pngjs@7.0.0
-          "$RUNNER_TEMP/gps3d-qa/node_modules/.bin/playwright" install --with-deps chromium
-          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
-          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-precision-qa.cjs
       - name: Compile app and exercise route geometry and continuity
         env:
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
@@ -81,6 +75,12 @@ jobs:
           test -n "$ARCORE_API_KEY"
           test -n "$TOMTOM_API_KEY"
           gradle testDebugUnitTest assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace
+      - name: Verify WebGL marker alignment and preserve map controls
+        run: |
+          npm install --prefix "$RUNNER_TEMP/gps3d-qa" playwright@1.51.1 pngjs@7.0.0
+          "$RUNNER_TEMP/gps3d-qa/node_modules/.bin/playwright" install --with-deps chromium
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-precision-qa.cjs
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

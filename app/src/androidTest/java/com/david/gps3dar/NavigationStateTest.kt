@@ -73,6 +73,9 @@ class NavigationStateTest {
         ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val points=listOf(origin,p(0.0,80.0),p(100.0,80.0));activate(activity,points)
+                // This fixture starts in Mexico independently of the emulator's real GNSS fix.
+                field("lastAcceptedLocation").set(activity,null)
+                field("filteredLocation").set(activity,null)
                 val method=RealisticMapActivity::class.java.getDeclaredMethod("processLocation",Location::class.java).apply { isAccessible=true }
                 fun fix(point: RouteGeometry.Point,bearing: Float) {
                     method.invoke(activity,Location("gps").apply {
