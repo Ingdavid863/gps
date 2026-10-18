@@ -67,6 +67,7 @@
 <script src="vendor/maplibre-gl.js"></script>
 <script src="navigation-route-progress.js"></script>
 <script src="navigation-motion.js"></script>
+<script src="navigation-road-position.js"></script>
 <script src="navigation-view.js"></script>
 <script src="navigation-styles.js"></script>
 <script src="navigation-basemap.js"></script>
@@ -219,6 +220,18 @@
 
     let displayedVehicle=lastLocation.slice(), displayedBearing=0;
     const vehicleMotion=NavigationMotion.createTracker();
+    const roadPosition=NavigationRoadPosition.create();
+    let roadMatch=null;
+    function nearbyRoads(point) {
+        if(!ready)return [];
+        // Bound the query geographically; ignore traffic strokes and their visual offsets.
+        const sx=111320*Math.max(.2,Math.cos(point[1]*Math.PI/180));
+        const corners=[[-60,-60],[-60,60],[60,-60],[60,60]].map(([x,y])=>
+            map.project([point[0]+x/sx,point[1]+y/110540]));
+        const box=[[Math.min(...corners.map(p=>p.x)),Math.min(...corners.map(p=>p.y))],
+            [Math.max(...corners.map(p=>p.x)),Math.max(...corners.map(p=>p.y))]];
+        return map.queryRenderedFeatures(box).filter(NavigationRoadPosition.isRoad);
+    }
     let vehiclePose=null, vehicleOnRoute=false;
     let cameraMotion=null, cameraFrameAt=null;
     function renderRemainingRoute(force=false,now=performance.now()) {
@@ -750,11 +763,16 @@
         refreshTraffic() { if (areaTraffic) areaTraffic.refresh(); },
         trafficSourceFeatures() { return areaTraffic ? areaTraffic.sourceFeatures() : []; },
         setTrafficPaused(paused) { trafficPaused = !!paused; if (!trafficPaused && areaTraffic) areaTraffic.refresh(); },
-        setLocation(lon, lat, bearing, speedMps, matched=false) {
+        setLocation(lon, lat, bearing, speedMps, matched=false, accuracyM=0, headingReliable=true) {
             lastLocation=[Number(lon),Number(lat)];lastBearing=Number(bearing)||0;
             vehicleOnRoute=!!matched&&activeRoutePoints.length>1;
-            vehiclePose=vehicleMotion.fix({point:lastLocation,bearing:lastBearing,speed:speedMps,now:performance.now(),
-                path:vehicleOnRoute?routePath:null,along:routePath.project(routeProgressStartIndex,lastLocation)});
+            const now=performance.now();
+            roadMatch=activeRoutePoints.length<2 ? roadPosition.match({point:lastLocation,bearing:lastBearing,
+                speed:Number(speedMps),accuracy:Number(accuracyM),headingReliable,now},
+                Number(speedMps)>=2.5&&Number(accuracyM)>0&&Number(accuracyM)<=40?nearbyRoads(lastLocation):[]) : null;
+            vehiclePose=vehicleMotion.fix({point:roadMatch?.point||lastLocation,bearing:roadMatch?.bearing??lastBearing,
+                speed:speedMps,now,path:vehicleOnRoute?routePath:roadMatch?.path||null,
+                along:vehicleOnRoute?routePath.project(routeProgressStartIndex,lastLocation):roadMatch?.along||0});
             displayedVehicle=vehiclePose.point;displayedBearing=vehiclePose.bearing;
         },
         setRoutes(active, alt1, alt2, walking=false) {
@@ -763,6 +781,7 @@
             const same=pedestrianRoute===!!walking&&activeRoutePoints.length===next.length&&
                 next.every((p,i)=>p[0]===activeRoutePoints[i][0]&&p[1]===activeRoutePoints[i][1]);
             if(!same) {
+                roadPosition.reset();roadMatch=null;
                 activeRoutePoints=next;pedestrianRoute=!!walking;
                 routePath=NavigationRouteProgress.create(activeRoutePoints);
                 routeTrafficMatcher=NavigationRouteTraffic.create(activeRoutePoints);
@@ -790,6 +809,7 @@
         },
         navigationState() {
             return {vehicle:displayedVehicle.slice(),bearing:displayedBearing,cameraBearing:map.getBearing(),
+                roadMatched:!!roadMatch,roadCorrectionMeters:roadMatch?.distance||0,
                 progress:renderedRouteAlong,remaining:map.getSource('gps-route-active')?.serialize().data,
                 traffic:map.getSource(ROUTE_TRAFFIC_SOURCE_ID)?.serialize().data};
         },

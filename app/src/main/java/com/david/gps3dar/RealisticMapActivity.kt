@@ -940,7 +940,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun startHighAccuracyLocation() {
         // Use the last fresh fix immediately so the map does not sit waiting for a new GNSS cycle.
         fusedLocation.lastLocation.addOnSuccessListener { last ->
-            if (last != null && System.currentTimeMillis() - last.time < 20_000L) {
+            if (last != null && SystemClock.elapsedRealtimeNanos() - last.elapsedRealtimeNanos in 0L..3_000_000_000L) {
                 processLocation(last)
             }
         }
@@ -958,8 +958,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun processLocation(location: Location) {
         val accepted = lastAcceptedLocation
         if (accepted != null && location.elapsedRealtimeNanos <= accepted.elapsedRealtimeNanos) return
-        if (accepted != null && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 3_000_000_000L) return
-        rawLocation = location
+        if (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos !in 0L..3_000_000_000L) return
 
         if (location.hasAccuracy() && location.accuracy > 65f) {
             gpsStatus.text = "GPS débil · ±${location.accuracy.toInt()} m"
@@ -970,8 +969,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         if (previous != null) {
             val dt = max(0.25, (location.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000_000.0)
             val jumpSpeed = previous.distanceTo(location) / dt
-            if (jumpSpeed > 85.0 && location.accuracy > 12f) return
+            if (jumpSpeed > 85.0) return
         }
+        rawLocation = Location(location)
         lastAcceptedLocation = Location(location)
         com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
         com.david.gps3dar.car.CarNavigation.fix(location)
@@ -1091,7 +1091,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
         val match = lastRouteMatch
         val onRoute = routeActive && match != null && distanceMeters(location.latitude,location.longitude,match.lat,match.lon) < .5
-        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())},$onRoute)")
+        val accuracy = raw?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0
+        val headingReliable = raw?.hasBearing() == true && raw.speed >= 2.5f &&
+            (!raw.hasBearingAccuracy() || raw.bearingAccuracyDegrees <= 35f)
+        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())},$onRoute,${num(accuracy)},$headingReliable)")
     }
 
     private fun pauseCameraFollow() {

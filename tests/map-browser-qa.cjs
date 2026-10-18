@@ -36,7 +36,7 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  await page.waitForTimeout(600);
  const marker=await page.locator('.vehicle-wrap').boundingBox();
  assert.ok(marker,'marker exists');
- assert.ok(Math.abs((marker.y+marker.height/2)-(840*(1-.16)-48))<3,'arrow anchored above bottom panel');
+ assert.ok(Math.abs((marker.y+marker.height/2)-(840*(1-.16)-60))<3,'arrow anchored 12 CSS px higher above bottom panel');
  const color=await page.locator('.vehicle-arrow').evaluate(e=>getComputedStyle(e).backgroundColor);
  assert.equal(color,'rgb(25, 180, 91)');
  await page.evaluate(()=>{

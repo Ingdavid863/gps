@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 29
-        versionName = "0.23.0-beta-car"
+        versionCode = 30
+        versionName = "0.24.0-beta-precision"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
         manifestPlaceholders["tomTomApiKey"] = tomTomApiKey
