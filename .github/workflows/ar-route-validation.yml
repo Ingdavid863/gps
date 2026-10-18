@@ -1,9 +1,7 @@
 name: Validate route traffic and navigation
 on:
-  push:
-    branches: [codex/gps3d-0.24-precision]
   pull_request:
-    branches: [codex/gps3d-0.14.0]
+    branches: [codex/gps3d-0.14.0, codex/gps3d-0.19.0-ar-continuity]
     paths: ["app/**", "tests/**", "build.gradle.kts", "settings.gradle.kts", "gradle.properties", ".github/workflows/ar-route-validation.yml"]
   workflow_dispatch:
 
