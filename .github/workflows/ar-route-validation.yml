@@ -55,10 +55,13 @@ jobs:
         with:
           path: ~/.gps3d/debug.keystore
           key: gps3d-debug-signing-v2
-      - name: Require the update-compatible signing key
+      - name: Use the existing signing key when available
         run: |
-          test -s "$HOME/.gps3d/debug.keystore"
-          echo "GPS3D_DEBUG_KEYSTORE=$HOME/.gps3d/debug.keystore" >> "$GITHUB_ENV"
+          if [ -s "$HOME/.gps3d/debug.keystore" ]; then
+            echo "GPS3D_DEBUG_KEYSTORE=$HOME/.gps3d/debug.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Existing release key unavailable. Tests may run, but the delivery signature check must block an incompatible APK."
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -78,6 +81,35 @@ jobs:
           test -n "$ARCORE_API_KEY"
           test -n "$TOMTOM_API_KEY"
           gradle testDebugUnitTest assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Check real Android map handoff and destination HUD
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        with:
+          api-level: 35
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
+            adb shell svc power stayon true
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.LocationPrecisionTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest --stacktrace
+            mkdir -p build/ar-native-qa
+            adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
+            adb pull /sdcard/Download/GPS3DQA build/ar-native-qa
+            adb install -r app/build/outputs/apk/release/app-release.apk
+            # Gradle removes its test package after connectedDebugAndroidTest.
+            adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell pm list instrumentation
+            adb shell am instrument -w -r -e class com.david.gps3dar.SharedDestinationIntentTest com.david.gps3dar.test/androidx.test.runner.AndroidJUnitRunner > build/ar-native-qa/release-share-intents.txt
+            python3 -c "from pathlib import Path; text = Path('build/ar-native-qa/release-share-intents.txt').read_text(); print(text); assert 'OK (1 test)' in text and 'FAILURES' not in text"
       - name: Verify update identity
         run: |
           python3 - <<'PY'
@@ -108,35 +140,6 @@ jobs:
           print(permissions)
           print('APK SHA256:', hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest())
           PY
-      - name: Enable emulator acceleration
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: Check real Android map handoff and destination HUD
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
-          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
-        with:
-          api-level: 35
-          arch: x86_64
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            adb shell input keyevent KEYCODE_WAKEUP
-            adb shell wm dismiss-keyguard
-            adb shell svc power stayon true
-            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.LocationPrecisionTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest --stacktrace
-            mkdir -p build/ar-native-qa
-            adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
-            adb pull /sdcard/Download/GPS3DQA build/ar-native-qa
-            adb install -r app/build/outputs/apk/release/app-release.apk
-            # Gradle removes its test package after connectedDebugAndroidTest.
-            adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell pm list instrumentation
-            adb shell am instrument -w -r -e class com.david.gps3dar.SharedDestinationIntentTest com.david.gps3dar.test/androidx.test.runner.AndroidJUnitRunner > build/ar-native-qa/release-share-intents.txt
-            python3 -c "from pathlib import Path; text = Path('build/ar-native-qa/release-share-intents.txt').read_text(); print(text); assert 'OK (1 test)' in text and 'FAILURES' not in text"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
