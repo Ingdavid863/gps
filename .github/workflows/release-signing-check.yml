@@ -1,0 +1,18 @@
+name: Check original GPS3D update signing key
+on:
+  pull_request:
+    branches: [codex/gps3d-0.14.0]
+    paths: ['.github/workflows/release-signing-check.yml']
+jobs:
+  signing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.gps3d/debug.keystore
+          key: gps3d-debug-signing-v2
+          fail-on-cache-miss: true
+      - name: Verify original update certificate without exporting the private key
+        run: |
+          test -s "$HOME/.gps3d/debug.keystore"
+          keytool -list -v -keystore "$HOME/.gps3d/debug.keystore" -storepass android -alias androiddebugkey | grep -F 'AF:EF:DC:D5:4D:C7:19:44:64:EF:8D:D4:86:0C:A0:95:66:10:0A:12:BB:BC:29:AC:C0:5A:3A:4D:4C:81:F6:20'
