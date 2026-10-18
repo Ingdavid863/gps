@@ -50,18 +50,25 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Restore the existing app signing key
+          cache-read-only: false
+      - name: Restore the persistent precision test signing key
         uses: actions/cache/restore@v4
         with:
-          path: ~/.gps3d/debug.keystore
-          key: gps3d-debug-signing-v2
-      - name: Use the existing signing key when available
-        run: |
-          if [ -s "$HOME/.gps3d/debug.keystore" ]; then
-            echo "GPS3D_DEBUG_KEYSTORE=$HOME/.gps3d/debug.keystore" >> "$GITHUB_ENV"
-          else
-            echo "::warning::Existing release key unavailable. Tests may run, but the delivery signature check must block an incompatible APK."
-          fi
+          path: ~/.gps3d/precision-test.keystore
+          key: gps3d-precision-test-signing-v3
+      - name: Prepare authorized test signing and encrypted recovery copy
+        run: python3 scripts/prepare_test_signing.py
+      - name: Cache the test signing key for subsequent builds
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.gps3d/precision-test.keystore
+          key: gps3d-precision-test-signing-v3
+      - name: Save encrypted signing recovery copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPS3D-0.24.0-encrypted-signing-backup
+          path: build/signing-backup/
+          retention-days: 30
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -110,7 +117,7 @@ jobs:
             adb shell pm list instrumentation
             adb shell am instrument -w -r -e class com.david.gps3dar.SharedDestinationIntentTest com.david.gps3dar.test/androidx.test.runner.AndroidJUnitRunner > build/ar-native-qa/release-share-intents.txt
             python3 -c "from pathlib import Path; text = Path('build/ar-native-qa/release-share-intents.txt').read_text(); print(text); assert 'OK (1 test)' in text and 'FAILURES' not in text"
-      - name: Verify update identity
+      - name: Verify APK identity and authorized test signing
         run: |
           python3 - <<'PY'
           import os, pathlib, re, shutil, subprocess, hashlib
@@ -118,7 +125,7 @@ jobs:
           tools = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
           certificate = subprocess.check_output([str(tools/'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
           digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', certificate).group(1)
-          assert digest == 'afefdcd54dc7194464ef8dd4860ca09566100a12bbbc29acc05a3a4d4c81f620'
+          assert digest == os.environ['GPS3D_EXPECTED_SIGNING_SHA256'], 'APK must use the backed-up test certificate'
           package = subprocess.check_output([str(tools/'aapt'), 'dump', 'badging', str(apk)], text=True).splitlines()[0]
           assert "name='com.david.gps3dar'" in package and "versionCode='30'" in package and "versionName='0.24.0-beta-precision'" in package
           manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
@@ -135,7 +142,7 @@ jobs:
           out.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, out)
           print(package)
-          print('Signature matches installed app:', digest)
+          print('Signature matches backed-up test key:', digest)
           print('Release manifest checked: no privileged automation; not debuggable')
           print(permissions)
           print('APK SHA256:', hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest())

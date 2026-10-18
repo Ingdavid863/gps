@@ -67,8 +67,8 @@ android {
 
     buildTypes.getByName("release") {
         isDebuggable = false
-        // Preserve the certificate used by existing installs; changing it would
-        // force David to uninstall and lose app data. CI requires the saved key.
+        // The authorized 0.24 test installation uses the backed-up test key.
+        // Keep this certificate for subsequent test builds.
         signingConfig = signingConfigs.getByName("debug")
     }
 
