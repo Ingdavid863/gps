@@ -70,9 +70,9 @@ class MapControlsTest {
             evaluate(scenario, "window.GPS3D.setTrafficIntervals([{start:0,end:1,severity:'heavy'},{start:1,end:2,severity:'moderate'}]);true;")
             instrumentation.waitForIdleSync()
             scenario.onActivity { assertEquals(Color.parseColor("#D93025"), it.findViewById<TextView>(R.id.etaText).currentTextColor) }
-            evaluate(scenario, "window.GPS3D.setRouteProgress(-99.135,19.44,1);true;")
+            val afterProgress = evaluate(scenario, "window.GPS3D.setRouteProgress(-99.135,19.44,1);window.GPS3D.navigationState();")
             instrumentation.waitForIdleSync()
-            scenario.onActivity { assertEquals(Color.parseColor("#F9AB00"), it.findViewById<TextView>(R.id.etaText).currentTextColor) }
+            scenario.onActivity { assertEquals("Traffic must advance at the segment boundary: $afterProgress", Color.parseColor("#F9AB00"), it.findViewById<TextView>(R.id.etaText).currentTextColor) }
         }
     }
 }

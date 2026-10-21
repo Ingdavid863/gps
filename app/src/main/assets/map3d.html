@@ -95,6 +95,7 @@
     let activeRoutePoints = [];
     let routeProgressStartIndex = 0;
     let routeTrafficFeatures = EMPTY, routeTrafficMatcher = NavigationRouteTraffic.create([]);
+    let routeTrafficFixture = false;
     let routeTrafficTimer = null, pedestrianRoute = false;
     let viewMode = 1;
     let viewportTop = 0.25, viewportBottom = 0.16;
@@ -458,6 +459,9 @@
         routeTrafficTimer=setTimeout(()=>{routeTrafficTimer=null;refreshRouteTraffic();},180);
     }
     function refreshRouteTraffic() {
+        // The explicit QA fixture hook must not race asynchronous live tile arrivals.
+        // Production never enables it, and every new route restores the live feed.
+        if(routeTrafficFixture) { renderRouteTraffic(); return; }
         routeTrafficFeatures=trafficEnabled && networkAvailable && !pedestrianRoute && areaTraffic && activeRoutePoints.length>1
             ? routeTrafficMatcher.match(areaTraffic.sourceFeatures()) : EMPTY;
         renderRouteTraffic();
@@ -734,6 +738,7 @@
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
         setTrafficIntervals(intervals) {
             // Deterministic screenshots only; production uses the loaded vector source.
+            routeTrafficFixture = true;
             routeTrafficFeatures={type:'FeatureCollection',features:(intervals||[]).filter(x=>x.end>x.start).map(x=>({
                 type:'Feature',properties:{severity:x.severity,color:NavigationTraffic.COLORS[x.severity]||'#087cf0',
                     startAlong:routeTrafficMatcher.progress(x.start),endAlong:routeTrafficMatcher.progress(x.end)},
@@ -777,6 +782,7 @@
                 next.every((p,i)=>p[0]===activeRoutePoints[i][0]&&p[1]===activeRoutePoints[i][1]);
             if(!same) {
                 roadPosition.reset();roadMatch=null;
+                routeTrafficFixture=false;
                 activeRoutePoints=next;pedestrianRoute=!!walking;
                 routePath=NavigationRouteProgress.create(activeRoutePoints);
                 routeTrafficMatcher=NavigationRouteTraffic.create(activeRoutePoints);

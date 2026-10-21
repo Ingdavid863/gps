@@ -52,6 +52,9 @@ let browser,server;
   measurements.push({zoom,rendered:state.rendered,roads:state.roads,areas:state.areas});
   if(zoom===14||zoom===3)await page.screenshot({path:path.join(output,`day-zoom-${zoom}.png`)});
  }
+ await page.evaluate(()=>window.GPS3D.follow(-99.133209,19.432608,0,18.65,65,1));
+ await page.waitForFunction(()=>{const s=GPS3D.mapState();return GPS3D.cameraState().pitch>64&&s.tilesLoaded&&s.roads>0});
+ await page.screenshot({path:path.join(output,'day-driving.png')});
  await page.evaluate(()=>{const g=window.GPS3D;g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
  await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return s.dark&&s.tilesLoaded&&s.rendered>0&&Math.abs(s.zoom-14)<.02});
  const night=await page.evaluate(()=>window.GPS3D.mapState());
