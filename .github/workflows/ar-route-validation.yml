@@ -137,7 +137,7 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell svc power stayon true
-            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.MapControlsTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.LocationPrecisionTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest,com.david.gps3dar.OfflineRouteRecoveryTest --stacktrace
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.MapControlsTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.LocationPrecisionTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest,com.david.gps3dar.OfflineRouteRecoveryTest,com.david.gps3dar.WholeRouteOfflineMapTest --stacktrace
             mkdir -p build/ar-native-qa
             adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
             adb pull /sdcard/Download/GPS3DQA build/ar-native-qa
