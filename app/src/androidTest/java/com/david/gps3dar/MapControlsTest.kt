@@ -35,11 +35,17 @@ class MapControlsTest {
             while (evaluate(scenario, ready) != "true" && System.currentTimeMillis() < deadline) Thread.sleep(250)
             assertEquals("true", evaluate(scenario, ready))
             instrumentation.waitForIdleSync()
+            val initial = JSONObject(evaluate(scenario, "window.GPS3D.cameraState()"))
+            assertEquals("Starts in driving perspective", 1, initial.getInt("mode"))
+            assertEquals(65.0, initial.getDouble("pitch"), 1.0)
+            // Move through overview and 2D, then verify the full cycle.
+            repeat(2) { scenario.onActivity { it.findViewById<ImageButton>(R.id.viewModeButton).performClick() } }
+            Thread.sleep(700)
             evaluate(scenario, "window.GPS3D.setRoutes([[-99.13,19.43],[-99.135,19.44],[-99.15,19.46]],[],[]);true;")
             scenario.onActivity { it.findViewById<ImageButton>(R.id.viewModeButton).performClick() }
             Thread.sleep(700)
             var state = JSONObject(evaluate(scenario, "window.GPS3D.cameraState()"))
-            assertEquals(1, state.getInt("mode"));assertEquals(45.0, state.getDouble("pitch"), 1.0)
+            assertEquals(1, state.getInt("mode"));assertEquals(65.0, state.getDouble("pitch"), 1.0)
             scenario.onActivity { it.findViewById<ImageButton>(R.id.viewModeButton).performClick() }
             Thread.sleep(700)
             state = JSONObject(evaluate(scenario, "window.GPS3D.cameraState()"))

@@ -37,8 +37,9 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  const marker=await page.locator('.vehicle-wrap').boundingBox();
  assert.ok(marker,'marker exists');
  assert.ok(Math.abs((marker.y+marker.height/2)-(840*(1-.16)-60))<3,'arrow anchored 12 CSS px higher above bottom panel');
- const color=await page.locator('.vehicle-arrow').evaluate(e=>getComputedStyle(e).backgroundColor);
- assert.equal(color,'rgb(25, 180, 91)');
+ assert.equal(await page.locator('.vehicle-arrow').count(),0,'old arrow replaced');
+ assert.ok(await page.locator('.vehicle-car polygon').count()>30,'local car mesh is rendered');
+ assert.equal(await page.locator('.vehicle-wrap').getAttribute('aria-label'),'Tu vehículo');
  await page.evaluate(()=>{
   const g=window.GPS3D;g.setRoutes([[-99.13,19.43],[-99.135,19.44],[-99.15,19.46]],[],[]);g.setViewMode(2);g.showOverview();
  });
@@ -70,7 +71,7 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  await page.waitForTimeout(500);
  assert.ok(Math.abs((await page.evaluate(()=>window.GPS3D.cameraState())).pitch)<.01,'third click restores default view');
  assert.deepEqual(errors,[]);
- console.log('Browser map QA passed: clean navigation UI, green marker anchor, overview lock, isometric switch; no JS errors.');
+ console.log('Browser map QA passed: local green car, geographic anchor, overview lock and three camera modes; no JS errors.');
  await browser.close();server.close();
 })().catch(e=>{console.error(e);process.exit(1)});
 

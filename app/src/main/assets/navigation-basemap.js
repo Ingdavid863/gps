@@ -32,7 +32,9 @@
             style.sources.vectorTiles.tiles = ['a', 'b', 'c', 'd'].map(host =>
                 `https://${host}.api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key || '')}`);
         }
-        return style;
+        const appearance = root.NavigationRoadAppearance ||
+            (typeof require !== 'undefined' ? require('./navigation-road-appearance.js') : null);
+        return appearance ? appearance.decorate(style, dark) : style;
     }
     function preserveNavigation(base, current) {
         const style = clone(base);

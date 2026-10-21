@@ -162,7 +162,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private val enteredTollPlazas = mutableListOf<Long>()
     private val passedTollPlazas = mutableSetOf<Long>()
     private var avoidTolls = false
-    private var viewMode = 0
+    private var viewMode = 1
     private var externalLinkCall: Call? = null
     private var routeGeneration = 0
     private var lastCatalogRevision = 0L
@@ -265,7 +265,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private var selectedMapPoint: SearchResult? = null
 
 
-    private var is3D = false
+    private var is3D = true
     private var terrainEnabled = false
     private var buildingsEnabled = false
     private var satelliteEnabled = false
@@ -637,7 +637,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             showRecentDestinations()
             (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
         }
-        findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(0); recenter(true) }
+        findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(1); recenter(true) }
         viewModeButton.setOnClickListener { setViewMode((viewMode + 1) % 3) }
         avoidTollsButton.setOnClickListener {
             if (pedestrianRoute || rerouting) return@setOnClickListener
@@ -1113,21 +1113,21 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
         val target = GeoPoint(location.latitude, location.longitude)
         val zoom = desiredZoom(moving)
-        val pitch = if (viewMode == 1) 45.0 else 0.0
+        val pitch = if (viewMode == 1) 65.0 else 0.0
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},110)"
         )
     }
 
     private fun desiredZoom(speedMps: Float): Double {
-        if (!autoZoomEnabled) return ZOOM_PRESETS[zoomPresetIndex]
-        return when {
+        val base = if (!autoZoomEnabled) ZOOM_PRESETS[zoomPresetIndex] else when {
             speedMps >= 30f -> ZOOM_PRESETS[0]
             speedMps >= 20f -> ZOOM_PRESETS[1]
             speedMps >= 12f -> ZOOM_PRESETS[2]
             speedMps >= 6f -> ZOOM_PRESETS[3]
             else -> ZOOM_PRESETS[4]
         }
+        return (base + if (viewMode == 1) 0.9 else 0.0).coerceAtMost(19.3)
     }
     private fun lookAheadTarget(location: Location, bearing: Double, speedMps: Float): GeoPoint {
         if (!routeActive || speedMps < 1.8f) return GeoPoint(location.latitude, location.longitude)
@@ -1145,7 +1145,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val moving = rawLocation?.speed ?: 0f
         if (viewMode == 2) { jsCall("showOverview()"); return }
         val target = GeoPoint(here.latitude, here.longitude)
-        val pitch = if (viewMode == 1) 45 else 0
+        val pitch = if (viewMode == 1) 65 else 0
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},$pitch,${if (animated) 180 else 1})"
         )
@@ -2146,8 +2146,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         pendingExternalQuery = null
         externalLinkCall?.cancel()
         destinationSearch.cancel()
-        viewMode = 0
-        is3D = false
+        viewMode = 1
+        is3D = true
         routeDestination = null
         routeCall?.cancel()
         rerouting = false
@@ -2415,9 +2415,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         is3D = viewMode == 1
         manualCameraUntilMs = 0L
         viewModeButton.contentDescription = when (viewMode) {
-            0 -> "Cambiar a vista isométrica"
+            0 -> "Cambiar a vista de conducción 3D"
             1 -> "Mostrar inicio y final de la ruta"
-            else -> "Volver a vista de navegación"
+            else -> "Cambiar a mapa 2D"
         }
         syncVisualSettings()
         syncViewport()

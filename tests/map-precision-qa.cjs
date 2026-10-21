@@ -69,10 +69,22 @@ let server,browser;
     assert.ok(Math.abs((routed.vehicle[0]-origin[0])*sx-50)<1,'new no-route logic cannot override the active route');
     await page.evaluate(()=>{GPS3D.setViewMode(1);GPS3D.setDarkTheme(true)});
     await page.setViewportSize({width:412,height:915});
-    await page.evaluate(p=>{GPS3D.setViewport(.30,.22);GPS3D.follow(...p,0,17.4,45,1);},at(50,40));
+    await page.evaluate(p=>{GPS3D.setViewport(.30,.22);GPS3D.follow(...p,0,18.3,65,1);},at(50,40));
     await page.waitForTimeout(600);
     const tilted=await page.locator('.vehicle-wrap').boundingBox();
     assert.ok(Math.abs(tilted.y+tilted.height/2-(915*.78-60))<3,'raised anchor remains accurate after pitch and native-panel resize');
+    assert.ok((await page.evaluate(()=>GPS3D.cameraState())).pitch>64,'driving camera stays behind the car');
+    assert.ok(await page.locator('.vehicle-car polygon').count()>30,'car survives theme and mode switches');
+    await page.evaluate(points=>{
+        GPS3D.setRoutes(points,[],[]);GPS3D.setLocation(...points[0],0,0,true,8,true);
+        GPS3D.follow(...points[0],0,18.7,65,1);
+    },[at(0,40),at(0,100),at(100,200),at(100,400)]);
+    await page.waitForTimeout(600);
+    const captures=path.resolve(__dirname,'../app/build/ar-qa');fs.mkdirSync(captures,{recursive:true});
+    await page.screenshot({path:path.join(captures,'roads-driving-night.png')});
+    await page.evaluate(()=>GPS3D.setDarkTheme(false));
+    await page.waitForTimeout(300);
+    await page.screenshot({path:path.join(captures,'roads-driving-day.png')});
     assert.deepEqual(errors,[]);
     console.log('Precision WebGL QA passed: raw GNSS correction, opposing roads, route isolation, raised anchor, pitch and resize.');
 })().catch(e=>{console.error(e);process.exitCode=1})
