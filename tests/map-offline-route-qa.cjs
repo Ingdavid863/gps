@@ -9,9 +9,18 @@ let server,browser,api;
 const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'https://a.api.tomtom.com/map/');
 (async()=>{
  api=await request.newContext();
+ const response=await api.get(`https://api.tomtom.com/routing/1/calculateRoute/${start[1]},${start[0]}:${end[1]},${end[0]}/json?key=${encodeURIComponent(key)}&traffic=false&maxAlternatives=0&routeRepresentation=polyline`,{timeout:20000});
+ assert.ok(response.ok(),'actual driving route must be available');
+ const chosen=(await response.json()).routes[0],points=chosen.legs.flatMap(l=>l.points.map(p=>[p.longitude,p.latitude]));
+ assert.ok(chosen.summary.lengthInMeters>20000,'route must exceed the previous 10 km look-ahead');
+ let along=0,middle=points[0];
+ for(let i=1;i<points.length;i++){
+  along+=Math.hypot((points[i][0]-points[i-1][0])*111320*Math.cos(points[i][1]*Math.PI/180),(points[i][1]-points[i-1][1])*110540);
+  if(along>chosen.summary.lengthInMeters*.6){middle=points[i];break;}
+ }
  const urls=new Set(),tile=(lon,lat,z)=>[Math.floor((lon+180)/360*2**z),Math.floor((1-Math.asinh(Math.tan(lat*Math.PI/180))/Math.PI)/2*2**z)];
- for(let z=3;z<=16;z++)for(let sample=0;sample<=40;sample++){
-  const [x,y]=tile(start[0],start[1]+(end[1]-start[1])*sample/40,z),n=2**z;
+ for(let z=3;z<=16;z++)for(const point of points){
+  const [x,y]=tile(...point,z),n=2**z;
   for(let dx=-2;dx<=2;dx++)for(let dy=-2;dy<=2;dy++)if(y+dy>=0&&y+dy<n)
    urls.add(`https://a.api.tomtom.com/map/1/tile/basic/main/${z}/${(x+dx+n)%n}/${y+dy}.pbf?key=${encodeURIComponent(key)}`);
  }
@@ -44,9 +53,9 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
   GPS3D.setRouteMapZoom(16);GPS3D.setNetworkAvailable(false);}}});
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
  await page.waitForFunction(()=>window.mapReady&&GPS3D.mapState().sourceMaxZoom===16);
- await page.evaluate(({start,end})=>{GPS3D.setRoutes([start,end],[],[]);GPS3D.setViewport(.25,.16);}, {start,end});
+ await page.evaluate(points=>{GPS3D.setRoutes(points,[],[]);GPS3D.setViewport(.25,.16);},points);
  const measurements=[];
- for(const [name,point,zoom,dark] of [['middle',[start[0],start[1]+.1],18.65,false],['destination',end,18.65,true],['overview',end,12,true]]){
+ for(const [name,point,zoom,dark] of [['middle',middle,18.65,false],['destination',points.at(-1),18.65,true],['overview',points.at(-1),12,true]]){
   const before=requests.length;
   await page.evaluate(({point,zoom,dark})=>{GPS3D.setDarkTheme(dark);GPS3D.setLocation(...point,0,0);GPS3D.follow(...point,0,zoom,zoom>16?65:0,1)}, {point,zoom,dark});
   await page.waitForFunction(({zoom,dark})=>{const s=GPS3D.mapState(true);return s.tilesLoaded&&s.sourceMaxZoom===16&&s.dark===dark&&Math.abs(s.zoom-zoom)<.02&&(s.roads>0||s.roadData>0)}, {zoom,dark},{timeout:10000});
@@ -54,11 +63,12 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
   const screenshot=await page.screenshot({path:path.join(output,name+'.png')}),png=PNG.sync.read(screenshot);
   const color=dark?[66,78,90]:[80,89,97];let pixels=0;
   for(let i=0;i<png.data.length;i+=4)if(color.every((c,k)=>Math.abs(c-png.data[i+k])<5))pixels++;
+  fs.writeFileSync(path.join(output,'latest.json'),JSON.stringify({name,routeMetres:chosen.summary.lengthInMeters,point,state,pixels,requests:requests.slice(before)},null,2));
   assert.ok(pixels>100,'actual streets render offline at '+name+', pixels='+pixels);
   assert.ok(requests.slice(before).filter(r=>/\/map\/1\/tile\//.test(r.path)).every(r=>r.saved),'no uncached detailed map requests during offline travel');
   measurements.push({name,zoom,roads:state.roads,roadData:state.roadData,streetPixels:pixels});
  }
- assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({resources:resources.size,measurements},null,2));
- console.log('Whole-route offline WebGL passed',JSON.stringify({resources:resources.size,measurements}));
+ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements},null,2));
+ console.log('Whole-route offline WebGL passed',JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements}));
 })().catch(e=>{console.error(String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]'));process.exitCode=1;})
  .finally(async()=>{if(browser)await browser.close();if(api)await api.dispose();if(server)server.close();});

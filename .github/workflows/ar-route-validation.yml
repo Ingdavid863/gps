@@ -74,6 +74,14 @@ jobs:
           node-version: '22'
       - name: Check directional route traffic and map rendering helpers
         run: node --test tests/navigation-*.test.cjs
+      - name: Compile navigation and test offline route storage
+        env:
+          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          test -n "$ARCORE_API_KEY"
+          test -n "$TOMTOM_API_KEY"
+          gradle testDebugUnitTest compileDebugAndroidTestKotlin --stacktrace
       - name: Verify WebGL marker alignment and preserve map controls
         env:
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
@@ -109,7 +117,7 @@ jobs:
         run: |
           test -n "$ARCORE_API_KEY"
           test -n "$TOMTOM_API_KEY"
-          gradle testDebugUnitTest assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace
+          gradle assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
