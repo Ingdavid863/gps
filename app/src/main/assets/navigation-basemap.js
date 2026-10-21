@@ -52,7 +52,13 @@
         style.layers.push(...(current.layers || []).filter(layer => layer.id.startsWith('gps-')).map(clone));
         return style;
     }
-    const api = {themedStyle, preserveNavigation};
+    function forConnection(style, online, routeMaxZoom) {
+        const prepared = clone(style);
+        if (!online && Number.isFinite(routeMaxZoom) && prepared.sources.vectorTiles)
+            prepared.sources.vectorTiles.maxzoom = Math.min(prepared.sources.vectorTiles.maxzoom || 18, routeMaxZoom);
+        return prepared;
+    }
+    const api = {themedStyle, preserveNavigation, forConnection};
     if (typeof module !== 'undefined') module.exports = api;
     root.NavigationBasemap = api;
 })(typeof window === 'undefined' ? globalThis : window);

@@ -78,6 +78,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.Calendar
 import java.util.WeakHashMap
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -138,6 +139,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 if (snapshot.source == "car" || (com.david.gps3dar.car.CarNavigation.connected && !routeActive && snapshot.route != null)) {
                     applyingCarRoute = true
                     routeCall?.cancel();routeGeneration++;rerouting=false;pendingAvoidTolls=null
+                    automaticRerouteInFlight=false;pendingAutoReroute=false
                     val option=snapshot.route;val destination=snapshot.destination
                     if(option==null) stopNavigation()
                     else if(destination!=null) {
@@ -180,16 +182,18 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private lateinit var audioManager: AudioManager
     private lateinit var audioFocus: AudioFocusRequest
     private lateinit var mapCache: MapResourceCache
+    private lateinit var sessionStore: NavigationSessionStore
     private lateinit var connectivity: ConnectivityManager
     private var networkAvailable = true
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
             setMapNetworkAvailable(capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
         }
-        override fun onLost(network: Network) { setMapNetworkAvailable(false) }
+        override fun onLost(network: Network) {
+            setMapNetworkAvailable(connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+                ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true)
+        }
     }
-    private var lastPreparedAt = 0L
-    private var lastPreparedIndex = -1
     private lateinit var sensorManager: SensorManager
     private val darkPolicy = AutoDarkMode()
     private var ambientLux: Double? = null
@@ -215,6 +219,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         if (previous != null && routeDestination == launchedDestination) {
             // AR calculates its walking route separately. It must never overwrite car navigation.
             routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+            automaticRerouteInFlight = false; pendingAutoReroute = false
             routeDestination = previous.destination; routeAlternatives = previous.options
             activateRoute(previous.index, recenterMap = false)
             setViewMode(previous.view)
@@ -225,6 +230,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             if (walking != null && RouteGeometry.distance(walking.destination, RouteGeometry.Point(lat, lon)) < 3.0) {
                 voiceEnabled = result.data?.getBooleanExtra("walking_voice", voiceEnabled) ?: voiceEnabled
                 routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+                automaticRerouteInFlight = false; pendingAutoReroute = false
                 val points = walking.points.map { GeoPoint(it.lat, it.lon) }
                 routeDestination = GeoPoint(walking.destination.lat, walking.destination.lon)
                 routeAlternatives = listOf(RouteOption(points, walking.steps.map { step ->
@@ -249,8 +255,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private var lastProgressRenderAtMs = 0L
     private var routeRemainingFromIndex = DoubleArray(0)
     private var lastRouteMatch: RouteMatch? = null
-    private var offRouteSinceMs = 0L
-    private var lastRerouteAtMs = 0L
+    private val reroutePolicy = ReroutePolicy()
+    private var pendingAutoReroute = false
+    private var automaticRerouteInFlight = false
     private var rerouting = false
     private var pendingAvoidTolls: Boolean? = null
     private var pendingExternalDestination: GeoPoint? = null
@@ -319,6 +326,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 if (change == AudioManager.AUDIOFOCUS_GAIN) ui.post { updateNavigationStep(displayLocation) }
             }.build()
         mapCache = MapResourceCache(this).also { it.configure(tomTomApiKey()) }
+        sessionStore = NavigationSessionStore(java.io.File(filesDir, "saved-navigation.json"))
         tts = TextToSpeech(this, this)
 
         bindViews()
@@ -349,6 +357,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
+        findViewById<View>(R.id.mapCacheStatus).setOnClickListener { mapCache.retryPreparation() }
         com.david.gps3dar.car.CarNavigation.observe(carObserver)
         setupBackNavigation()
         refreshSettingsLabels()
@@ -360,6 +369,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         webMapView.addOnLayoutChangeListener(viewportChanged)
         webMapView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> resizeSearchSuggestions() }
         handleNavigationIntent(intent)
+        restoreSavedNavigation()
         requestLocationPermission()
         ui.post(ticker)
     }
@@ -470,8 +480,27 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             val restored = !networkAvailable && available
             networkAvailable = available
             jsCall("setNetworkAvailable($available)")
-            if (restored) { lastPreparedAt = 0; prepareMapAhead(true) }
+            if (!available && automaticRerouteInFlight) {
+                routeCall?.cancel(); routeGeneration++; rerouting = false
+                automaticRerouteInFlight = false; pendingAutoReroute = true
+                updateNavigationStep(displayLocation); updateTollPanel()
+            }
+            if (restored && pendingAutoReroute) rawLocation?.let { maybeReroute(it, null) }
         }
+    }
+
+    private fun restoreSavedNavigation() {
+        if (intent?.data != null || intent?.hasExtra(WalkingRoute.EXTRA_LAT) == true) return
+        val generation = routeGeneration
+        sessionStore.load { saved -> ui.post {
+            if (saved == null || isDestroyed || routeGeneration != generation || routeActive ||
+                routeDestination != null || pendingExternalDestination != null || pendingExternalQuery != null) return@post
+            routeDestination = saved.destination; routeAlternatives = listOf(saved.route)
+            suppressSearchWatcher = true; searchInput.setText(saved.label); suppressSearchWatcher = false
+            viewMode = saved.view; is3D = viewMode == 1
+            activateRoute(0, false)
+            syncVisualSettings()
+        } }
     }
 
     private fun setupSearchUi() {
@@ -583,6 +612,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         pendingExternalQuery = null
         if (rerouting) {
             routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+            automaticRerouteInFlight = false; pendingAutoReroute = false
             updateTollPanel()
         }
         if (!routeActive) {
@@ -906,16 +936,21 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun prepareMapAhead(force: Boolean = false) {
-        if (!routeActive || routePoints.size < 2) return
-        val now = SystemClock.elapsedRealtime()
-        val advanced = lastPreparedIndex < 0 || distanceAlongRouteToIndex(lastPreparedIndex) <= 0.0 && routeProgressIndex - lastPreparedIndex > 10
-        if (!force && (!advanced || now - lastPreparedAt < 60000)) return
-        lastPreparedAt = now; lastPreparedIndex = routeProgressIndex
-        mapCache.prepare(routePoints.map { RouteGeometry.Point(it.lat, it.lon) }, routeProgressIndex) { prepared, total ->
+        if (!force || !routeActive || routePoints.size < 2) return
+        val snapshot = routePoints
+        mapCache.prepare(snapshot.map { RouteGeometry.Point(it.lat, it.lon) }) { progress ->
             ui.post {
-                if (!isDestroyed) findViewById<TextView>(R.id.mapCacheStatus).apply {
-                    visibility = View.GONE
-                    text = if (prepared == total) "Mapa próximo preparado" else "Mapa próximo guardado: ${prepared * 100 / total.coerceAtLeast(1)}%"
+                if (!isDestroyed && routeActive && routePoints === snapshot) findViewById<TextView>(R.id.mapCacheStatus).apply {
+                    visibility = View.VISIBLE
+                    val percent = progress.saved * 100 / progress.total.coerceAtLeast(1)
+                    text = when (progress.state) {
+                        "ready" -> "Ruta y mapa disponibles sin conexión ✓"
+                        "planning" -> "Ruta guardada · preparando mapa completo…"
+                        "offline" -> "Sin internet · mapa guardado: $percent%"
+                        "storage" -> "Mapa incompleto · falta espacio en el teléfono"
+                        "retrying", "error" -> "Mapa al $percent% · toca para reintentar"
+                        else -> "Guardando mapa de toda la ruta: $percent%"
+                    }
                 }
             }
         }
@@ -984,7 +1019,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
         val match = if (routeActive) findRouteMatch(predicted) else null
         lastRouteMatch = match
-        if (routeActive) maybeReroute(predicted, match)
+        if (routeActive) maybeReroute(location, match)
 
         val shown = if (routeActive) snapToRoute(predicted, match) else predicted
         displayLocation = shown
@@ -1676,6 +1711,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val generation = ++routeGeneration
         val requestedPedestrian = pedestrianRoute
         val requestedAvoid = (avoidOverride ?: avoidTolls) && !requestedPedestrian
+        val automatic = isReroute && avoidOverride == null && routeActive
+        automaticRerouteInFlight = automatic
+        pendingAutoReroute = false
         pendingAvoidTolls = avoidOverride
         rerouting = true
         instruction.text = if (requestedPedestrian) "Calculando ruta para caminar…" else if (requestedAvoid) "Calculando ruta sin casetas…" else if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
@@ -1688,8 +1726,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             ui.post {
                 if (isDestroyed || generation != routeGeneration) return@post
                 rerouting = false
+                automaticRerouteInFlight = false
                 pendingAvoidTolls = null
                 updateTollPanel()
+                if (automatic) {
+                    pendingAutoReroute = true
+                    reroutePolicy.failed(SystemClock.elapsedRealtime())
+                    updateNavigationStep(displayLocation)
+                    return@post
+                }
                 instruction.text = message
                 turnIcon.text = "!"
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -1698,6 +1743,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
         val key = tomTomApiKey()
         if (key.isBlank()) { fail("El servicio de rutas no está configurado"); return }
+        if (!networkAvailable) { fail("Sin internet. La ruta guardada sigue disponible."); return }
         val builder = HttpUrl.Builder().scheme("https").host("api.tomtom.com")
             .addPathSegment("routing").addPathSegment("1").addPathSegment("calculateRoute")
             .addPathSegment("$fromLat,$fromLon:$toLat,$toLon").addPathSegment("json")
@@ -1730,7 +1776,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 request.post(JSONObject().put("avoidAreas", JSONObject().put("rectangles", rectangles))
                     .toString().toRequestBody("application/json".toMediaType()))
             }
-            routeCall = http.newCall(request.build())
+            // A stalled cellular request must not hold navigation for the default TCP timeout.
+            val transport = if (automatic) http.newBuilder().connectTimeout(2, TimeUnit.SECONDS)
+                .readTimeout(4, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(false).build() else http
+            routeCall = transport.newCall(request.build())
             routeCall?.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     if (!call.isCanceled()) fail("No se pudo consultar la ruta. Revisa la conexión.")
@@ -1787,10 +1837,21 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                     }
                     ui.post {
                         if (isDestroyed || generation != routeGeneration) return@post
+                        val current = rawLocation
+                        if (automatic && current != null && SystemClock.elapsedRealtimeNanos() - current.elapsedRealtimeNanos in 0L..3_000_000_000L) {
+                            val distance = RouteGeometry.project(acceptable.first().points.map { RouteGeometry.Point(it.lat, it.lon) },
+                                RouteGeometry.Point(current.latitude, current.longitude))?.distance ?: Double.MAX_VALUE
+                            if (distance > max(35.0, current.accuracy * 2.0)) {
+                                // The driver took another turn while the service was responding.
+                                requestRoute(current.latitude, current.longitude, toLat, toLon, true)
+                                return@post
+                            }
+                        }
                         routeDestination = GeoPoint(toLat, toLon)
                         routeAlternatives = acceptable
                         activeRouteIndex = 0
-                        rerouting = false; pendingAvoidTolls = null; offRouteSinceMs = 0L
+                        rerouting = false; pendingAvoidTolls = null
+                        automaticRerouteInFlight = false; pendingAutoReroute = false; reroutePolicy.reset()
                         activateRoute(0, recenterMap = !isReroute)
                         if (isReroute) runCatching { rerouteTone.startTone(ToneGenerator.TONE_PROP_BEEP, 180) }
                     }
@@ -1906,7 +1967,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         lastRenderedProgressIndex = -1
         lastProgressRenderAtMs = 0L
         lastRouteMatch = null
-        offRouteSinceMs = 0L
+        reroutePolicy.reset(); pendingAutoReroute = false; automaticRerouteInFlight = false
         rebuildRouteDistanceCache()
         lastMatchAtNanos = 0L
         (rawLocation ?: displayLocation)?.let { location ->
@@ -1918,6 +1979,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
 
         syncRoutes()
+        routeDestination?.let { destination -> sessionStore.save(NavigationSessionStore.Session(
+            option.copy(steps = navSteps), destination, searchInput.text.toString().ifBlank { "Destino" }, viewMode)) }
         prepareMapAhead(true)
         syncRouteProgress(force = true)
         stopButton.visibility = if (routeActive) View.VISIBLE else View.GONE
@@ -1935,6 +1998,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun syncRoutes() {
+        jsCall("setRouteMapZoom(${if (routeActive) MapTilePlanner.OFFLINE_MAX_ZOOM.toString() else "null"})")
         val others = routeAlternatives.indices.filter { it != activeRouteIndex }.take(2)
         val alt1 = others.getOrNull(0)?.let { routeAlternatives[it].points } ?: emptyList()
         val alt2 = others.getOrNull(1)?.let { routeAlternatives[it].points } ?: emptyList()
@@ -2059,6 +2123,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun updateNavigationStep(location: Location?) {
         if (rerouting) return
+        if (routeActive && pendingAutoReroute) {
+            instruction.text = if (networkAvailable) "Reintentando recálculo…" else "Sin internet · conservando la ruta guardada"
+            turnIcon.text = "!"
+            turnDistance.text = if (networkAvailable) "Esperando respuesta del servicio de rutas" else "El recálculo continuará al volver la conexión"
+            return
+        }
         if (!routeActive || navSteps.isEmpty() || location == null) {
             if (!routeActive) {
                 instruction.text = "Busca un destino o mantén pulsado el mapa"
@@ -2163,9 +2233,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         lastRenderedProgressIndex = -1
         routeRemainingFromIndex = DoubleArray(0)
         lastRouteMatch = null
-        offRouteSinceMs = 0L
+        reroutePolicy.reset(); pendingAutoReroute = false; automaticRerouteInFlight = false
         announcements.reset(); voiceRouteId++
         mapCache.cancel()
+        sessionStore.clear()
         findViewById<View>(R.id.mapCacheStatus).visibility = View.GONE
         tts.stop()
         audioManager.abandonAudioFocusRequest(audioFocus)
@@ -2214,48 +2285,30 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         return RouteMatch(match.segment,match.point.lat,match.point.lon,match.distance,match.bearing,match.along)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun maybeReroute(location: Location, match: RouteMatch?) {
         val destination = routeDestination ?: return
         if (rerouting || !routeActive) return
-
-        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 18.0
-        if (accuracy > 40.0) {
-            offRouteSinceMs = 0L
-            return
-        }
-
-        val speed = rawLocation?.speed ?: 0f
-        val distanceThreshold = max(22.0, min(45.0, accuracy * 1.8))
-        val bearingMismatch = if (
-            match != null &&
-            rawLocation?.hasBearing() == true &&
-            speed > 4.5f
-        ) {
-            angularDifference(rawLocation!!.bearing.toDouble(), match.segmentBearing)
-        } else {
-            0.0
-        }
-
-        val clearlyOffRoute = match == null ||
-            match.distanceMeters > distanceThreshold ||
-            (speed > 4.5f && match.distanceMeters > 13.0 && bearingMismatch > 72.0)
-
+        if (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos !in 0L..3_000_000_000L) return
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else Double.NaN
+        val speed = location.speed.toDouble()
+        val heading = location.bearing.toDouble().takeIf { location.hasBearing() && speed > 3.0 &&
+            (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees < 35f) }
+        // A fresh, unrestricted match detects an actual departure, including wrong-way driving.
+        // Predicted marker motion and a constrained progress window cannot trigger a new route.
+        val current = navigationGeometry?.match(RouteGeometry.Point(location.latitude, location.longitude), heading) ?: return
+        val mismatch = heading?.let { angularDifference(it, current.bearing) }
         val now = SystemClock.elapsedRealtime()
-        if (!clearlyOffRoute) {
-            offRouteSinceMs = 0L
+        if (!reroutePolicy.offRoute(current.distance, accuracy, speed, mismatch) && pendingAutoReroute && accuracy in 0.1..35.0) {
+            pendingAutoReroute = false
+            updateNavigationStep(displayLocation)
+        }
+        if (!reroutePolicy.shouldRequest(now, location.elapsedRealtimeNanos, current.distance, accuracy, speed, mismatch, pendingAutoReroute)) return
+        if (!networkAvailable) {
+            pendingAutoReroute = true
+            updateNavigationStep(displayLocation)
             return
         }
-
-        if (offRouteSinceMs == 0L) {
-            offRouteSinceMs = now
-            return
-        }
-
-        val confirmationMs = if (speed > 8f) 1_600L else 2_400L
-        if (now - offRouteSinceMs < confirmationMs || now - lastRerouteAtMs < 6_500L) return
-
-        lastRerouteAtMs = now
-        offRouteSinceMs = 0L
         requestRoute(
             location.latitude,
             location.longitude,
@@ -2524,6 +2577,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         audioManager.abandonAudioFocusRequest(audioFocus)
         if (::connectivity.isInitialized) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         mapCache.close()
+        sessionStore.close()
         rerouteTone.release()
         webMapView.removeJavascriptInterface("AndroidBridge")
         webMapView.loadUrl("about:blank")

@@ -44,14 +44,14 @@ class NavigationReliabilityTest {
         assertTrue(AutoDarkMode.solarElevation(noon, 19.43, -99.13) > 50)
         assertTrue(AutoDarkMode.solarElevation(midnight, 19.43, -99.13) < -50)
     }
-    @Test fun bufferingIsBoundedAndMovesAheadWithRouteProgress() {
+    @Test fun bufferingIncludesTheWholeTripRegardlessOfProgress() {
         val route = (0..300).map { RouteGeometry.Point(19.0 + it * .001, -99.0) }
         val before = MapTilePlanner.plan(route, 0)
         val after = MapTilePlanner.plan(route, 200)
-        assertTrue(before.size <= 320)
+        assertTrue(before.size > 320)
         assertEquals(before.size, before.toSet().size)
-        assertNotEquals(before.filter { it.z == 18 }, after.filter { it.z == 18 })
-        assertTrue(before.any { it.z == 18 })
+        assertEquals(before, after)
+        assertTrue(before.contains(MapTilePlanner.tile(route.last().lon, route.last().lat, MapTilePlanner.OFFLINE_MAX_ZOOM)))
         assertTrue(MapTilePlanner.plan(emptyList(), 0).isEmpty())
     }
 }

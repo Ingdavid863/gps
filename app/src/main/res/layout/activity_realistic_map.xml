@@ -221,7 +221,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="end"
             android:layout_marginTop="3dp"
-            android:text="Preparando mapa próximo…"
+            android:text="Preparando mapa de toda la ruta…"
             android:textColor="#27313A"
             android:textSize="11sp"
             android:visibility="gone" />

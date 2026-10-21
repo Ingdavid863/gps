@@ -94,7 +94,7 @@
     let lastLocation = [-99.133209, 19.432608];
     let lastBearing = 0;
     let activeRoutePoints = [];
-    let routeProgressStartIndex = 0;
+    let routeProgressStartIndex = 0, routeMapZoom = null;
     let routeTrafficFeatures = EMPTY, routeTrafficMatcher = NavigationRouteTraffic.create([]);
     let routeTrafficFixture = false;
     let routeTrafficTimer = null, pedestrianRoute = false;
@@ -366,20 +366,25 @@
 
     function applyVisuals() {
         if (!ready) return;
-        const terrainActive = visuals.is3D && visuals.terrain && !!map.getSource(TERRAIN_ID);
+        const preparedOffline = !networkAvailable && routeMapZoom !== null;
+        const terrainActive = visuals.is3D && visuals.terrain && !preparedOffline && !!map.getSource(TERRAIN_ID);
         try {
             map.setTerrain(terrainActive ? { source: TERRAIN_ID, exaggeration: 1.0 } : null);
         } catch (e) { console.warn('terrain', e); }
         setLayerVisible(HILLSHADE_ID, visuals.terrain);
         setLayerVisible(BUILDINGS_ID, visuals.is3D && visuals.buildings);
-        setLayerVisible(SATELLITE_LAYER, visuals.satellite);
-        setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
+        setLayerVisible(SATELLITE_LAYER, visuals.satellite && !preparedOffline);
+        setLayerVisible(HYBRID_ROADS_ID, visuals.satellite && !preparedOffline);
         setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         if (areaTraffic) { areaTraffic.setEnabled(trafficEnabled); areaTraffic.setRouteActive(activeRoutePoints.length>1); }
         applySky(visuals.is3D && !darkTheme);
         if (viewMode !== 2) map.easeTo({ pitch: viewMode === 1 ? 65 : 0, duration: 180, essential: true });
     }
 
+    function connectionStyle() {
+        return NavigationBasemap.forConnection(
+            NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY), networkAvailable, routeMapZoom);
+    }
     function applyTheme(dark) {
         darkTheme = !!dark;
         document.documentElement.style.background = darkTheme ? '#1c2430' : '#d9e2e8';
@@ -387,7 +392,7 @@
         if (!ready) return;
         if (appliedTheme !== darkTheme) {
             appliedTheme = darkTheme;
-            const themed = NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY);
+            const themed = connectionStyle();
             // Day and night have different layers, filters and label layouts. Painting
             // matching IDs alone leaves bright daytime land cover and missing night layers.
             // Apply the full style difference while retaining already prepared vector tiles.
@@ -717,16 +722,31 @@
             return credits ? credits.textContent.trim() : '© TomTom | © OpenStreetMap contributors';
         },
         setDarkTheme: applyTheme,
+        setRouteMapZoom(maxZoom) {
+            const next = typeof maxZoom === 'number' && Number.isFinite(maxZoom) ? maxZoom : null;
+            if (next === routeMapZoom) return;
+            routeMapZoom = next;
+            if (ready && !networkAvailable) map.setStyle(
+                NavigationBasemap.preserveNavigation(connectionStyle(), map.getStyle()), {diff:true});
+        },
         setNetworkAvailable(available) {
+            const wasOnline = networkAvailable;
             networkAvailable = !!available;
             if (areaTraffic) areaTraffic.setOnline(networkAvailable);
             refreshRouteTraffic();
-            if (!available || !ready) return;
+            if (!ready) return;
+            applyVisuals();
             if (TRAFFIC_API_KEY && provider !== 'tomtom') {
+                if (!available) return;
                 provider = 'tomtom'; baseFailures = 0;
                 map.setStyle(NavigationBasemap.preserveNavigation(
-                    NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY), map.getStyle()), {diff:true});
+                    connectionStyle(), map.getStyle()), {diff:true});
+            } else if (wasOnline !== networkAvailable && routeMapZoom !== null) {
+                // Use the saved vector detail at every close zoom, rather than requesting
+                // uncached level-17/18 tiles and leaving the road underneath the car blank.
+                map.setStyle(NavigationBasemap.preserveNavigation(connectionStyle(), map.getStyle()), {diff:true});
             }
+            if (!available) return;
             viewportSignature = '';
             if (map.refreshTiles) {
                 const source = provider === 'tomtom' ? 'vectorTiles' : 'openmaptiles';
@@ -744,7 +764,8 @@
             const region=map.getPitch()>55 ? [[0,container.clientHeight*.35],
                 [container.clientWidth,container.clientHeight]] : undefined;
             const features=map.queryRenderedFeatures(region).filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
-            return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
+            return {provider, dark:darkTheme, zoom:map.getZoom(), sourceMaxZoom:snapshot.sources.vectorTiles?.maxzoom,
+                tilesLoaded:map.areTilesLoaded(),
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
                 roadData:includeRoad ? sourceRoads.nearby(lastLocation).length : undefined,
                 roadGeometry:includeRoad ? features.filter(f=>f.layer.type==='line' && NavigationRoadPosition.isRoad(f))

@@ -1,0 +1,64 @@
+// Real provider geometry, fresh WebGL page, offline travel beyond the old 10 km buffer.
+const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
+const {chromium,request}=require(process.env.GPS3D_QA_NODE_MODULES+'/playwright');
+const {PNG}=require(process.env.GPS3D_QA_NODE_MODULES+'/pngjs');
+const key=process.env.TOMTOM_API_KEY;assert.ok(key,'service credential required');
+const base=path.resolve(__dirname,'../app/src/main/assets'),output=path.resolve('build/map-qa/offline-route');fs.mkdirSync(output,{recursive:true});
+const start=[-99.133209,19.432608],end=[start[0],start[1]+.20],resources=new Map(),requests=[];
+let server,browser,api;
+const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'https://a.api.tomtom.com/map/');
+(async()=>{
+ api=await request.newContext();
+ const urls=new Set(),tile=(lon,lat,z)=>[Math.floor((lon+180)/360*2**z),Math.floor((1-Math.asinh(Math.tan(lat*Math.PI/180))/Math.PI)/2*2**z)];
+ for(let z=3;z<=16;z++)for(let sample=0;sample<=40;sample++){
+  const [x,y]=tile(start[0],start[1]+(end[1]-start[1])*sample/40,z),n=2**z;
+  for(let dx=-2;dx<=2;dx++)for(let dy=-2;dy<=2;dy++)if(y+dy>=0&&y+dy<n)
+   urls.add(`https://a.api.tomtom.com/map/1/tile/basic/main/${z}/${(x+dx+n)%n}/${y+dy}.pbf?key=${encodeURIComponent(key)}`);
+ }
+ const style='https://api.tomtom.com/style/1',sprite=style+'/sprite/22.2.1-9/sprite';
+ for(const suffix of ['.json','.png','@2x.json','@2x.png'])urls.add(`${sprite}${suffix}?map=basic_main&key=${encodeURIComponent(key)}`);
+ for(const font of ['NotoSans-MediumItalic','Noto-Regular','Noto-Bold','Noto-Medium'])for(const range of ['0-255','256-511','8192-8447'])
+  urls.add(`${style}/glyph/22.2.1-9/${font}/${range}.pbf?key=${encodeURIComponent(key)}`);
+ const all=[...urls];
+ for(let i=0;i<all.length;i+=4)await Promise.all(all.slice(i,i+4).map(async url=>{
+  let response;for(let retry=0;retry<3;retry++){response=await api.get(url,{timeout:15000});if(response.ok())break;}
+  assert.ok(response.ok(),'complete route preparation failed, HTTP '+response.status());
+  resources.set(canonical(url),{status:200,headers:{'content-type':response.headers()['content-type']||'application/octet-stream','access-control-allow-origin':'*'},body:await response.body()});
+ }));
+ server=http.createServer((req,res)=>res.end());await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+ const context=await browser.newContext({viewport:{width:390,height:840}}),errors=[];
+ await context.route('**/*',async route=>{
+  const url=new URL(route.request().url());
+  if(url.hostname==='127.0.0.1'){
+   if(url.pathname==='/traffic-config.js')return route.fulfill({contentType:'text/javascript',body:'window.GPS3D_CONFIG='+JSON.stringify({tomtomApiKey:key})+';'});
+   const file=path.join(base,url.pathname);try{return route.fulfill({contentType:file.endsWith('.html')?'text/html':file.endsWith('.css')?'text/css':'text/javascript',body:fs.readFileSync(file)});}catch{return route.abort();}
+  }
+  const saved=resources.get(canonical(route.request().url()));requests.push({saved:!!saved,path:url.pathname});
+  if(saved)return route.fulfill(saved);return route.abort();
+ });
+ // No browser HTTP or in-memory map tile cache from the preparation stage survives here.
+ await context.setOffline(true);
+ const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>{window.AndroidBridge={onMapReady(){window.mapReady=true;GPS3D.setTrafficEnabled(false);
+  GPS3D.setRouteMapZoom(16);GPS3D.setNetworkAvailable(false);}}});
+ await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
+ await page.waitForFunction(()=>window.mapReady&&GPS3D.mapState().sourceMaxZoom===16);
+ await page.evaluate(({start,end})=>{GPS3D.setRoutes([start,end],[],[]);GPS3D.setViewport(.25,.16);}, {start,end});
+ const measurements=[];
+ for(const [name,point,zoom,dark] of [['middle',[start[0],start[1]+.1],18.65,false],['destination',end,18.65,true],['overview',end,12,true]]){
+  const before=requests.length;
+  await page.evaluate(({point,zoom,dark})=>{GPS3D.setDarkTheme(dark);GPS3D.setLocation(...point,0,0);GPS3D.follow(...point,0,zoom,zoom>16?65:0,1)}, {point,zoom,dark});
+  await page.waitForFunction(({zoom,dark})=>{const s=GPS3D.mapState(true);return s.tilesLoaded&&s.sourceMaxZoom===16&&s.dark===dark&&Math.abs(s.zoom-zoom)<.02&&(s.roads>0||s.roadData>0)}, {zoom,dark},{timeout:10000});
+  const state=await page.evaluate(()=>GPS3D.mapState(true));
+  const screenshot=await page.screenshot({path:path.join(output,name+'.png')}),png=PNG.sync.read(screenshot);
+  const color=dark?[66,78,90]:[80,89,97];let pixels=0;
+  for(let i=0;i<png.data.length;i+=4)if(color.every((c,k)=>Math.abs(c-png.data[i+k])<5))pixels++;
+  assert.ok(pixels>100,'actual streets render offline at '+name+', pixels='+pixels);
+  assert.ok(requests.slice(before).filter(r=>/\/map\/1\/tile\//.test(r.path)).every(r=>r.saved),'no uncached detailed map requests during offline travel');
+  measurements.push({name,zoom,roads:state.roads,roadData:state.roadData,streetPixels:pixels});
+ }
+ assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({resources:resources.size,measurements},null,2));
+ console.log('Whole-route offline WebGL passed',JSON.stringify({resources:resources.size,measurements}));
+})().catch(e=>{console.error(String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]'));process.exitCode=1;})
+ .finally(async()=>{if(browser)await browser.close();if(api)await api.dispose();if(server)server.close();});

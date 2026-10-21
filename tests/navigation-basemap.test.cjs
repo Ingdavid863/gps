@@ -6,6 +6,17 @@ const basemap = require('../app/src/main/assets/navigation-basemap.js');
 const context = {window:{}}; vm.createContext(context);
 vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../app/src/main/assets/navigation-styles.js'),'utf8'), context);
 const styles = context.window.NavigationStyles;
+test('offline route overscales prepared vectors and preserves all guidance on theme changes',()=>{
+ const day=basemap.themedStyle(styles,'tomtom',false,'test');
+ const offline=basemap.forConnection(day,false,16);
+ assert.equal(offline.sources.vectorTiles.maxzoom,16);
+ assert.equal(day.sources.vectorTiles.maxzoom,18,'online detail remains intact');
+ assert.equal(basemap.forConnection(day,true,16).sources.vectorTiles.maxzoom,18);
+ assert.equal(basemap.forConnection(day,false,null).sources.vectorTiles.maxzoom,18,'browsing cache still supports its prepared zooms');
+ const night=basemap.forConnection(basemap.themedStyle(styles,'tomtom',true,'test'),false,16);
+ assert.equal(night.sources.vectorTiles.maxzoom,16);
+ assert.equal(offline.sprite,night.sprite);
+});
 test('TomTom ground roads accept absent or explicit zero levels without including bridges', () => {
  for(const dark of [false,true]) {
   const styled=basemap.themedStyle(styles,'tomtom',dark,'test');
