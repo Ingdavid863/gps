@@ -43,6 +43,7 @@ const measurements=[],statuses={};
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
  await page.waitForFunction(()=>window.mapReady===true);
  await page.evaluate(()=>window.GPS3D.setTrafficEnabled(false));
+ let drivingRoad=null;
  for(const zoom of [17.4,16,14,12,10,6,3,18.65]){
   phase='zoom-'+zoom;
   await page.evaluate(z=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);g.follow(-99.133209,19.432608,0,z,0,1)},zoom);
@@ -51,12 +52,13 @@ const measurements=[],statuses={};
   assert.equal(state.provider,'tomtom','primary service must render the actual map');
   assert.equal(state.failures.vectorTiles||0,0,'no missing vector tiles while zooming');
   measurements.push({zoom,rendered:state.rendered,roads:state.roads,areas:state.areas});
+  if(zoom===16)drivingRoad=await page.evaluate(()=>GPS3D.mapState(true).roadGeometry);
   if(zoom===14||zoom===3)await page.screenshot({path:path.join(output,`day-zoom-${zoom}.png`)});
  }
  phase='driving';
  // The default reference coordinate lies in a pedestrian plaza. Use an actual
  // rendered drivable line for the behind-car check instead of inventing a road there.
- const road=await page.evaluate(()=>GPS3D.mapState(true).roadGeometry);
+ const road=drivingRoad;
  assert.ok(road&&road.length>1,'a real drivable feature is required for the driving fixture');
  const segment=Math.floor((road.length-2)/2),a=road[segment],b=road[segment+1];
  const drivePoint=[(a[0]+b[0])/2,(a[1]+b[1])/2];
