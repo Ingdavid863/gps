@@ -63,6 +63,7 @@
 <script src="navigation-route-progress.js"></script>
 <script src="navigation-motion.js"></script>
 <script src="navigation-road-position.js"></script>
+<script src="navigation-road-query.js"></script>
 <script src="navigation-view.js"></script>
 <script src="navigation-vehicle.js"></script>
 <script src="navigation-road-appearance.js"></script>
@@ -217,16 +218,24 @@
     let displayedVehicle=lastLocation.slice(), displayedBearing=0;
     const vehicleMotion=NavigationMotion.createTracker();
     const roadPosition=NavigationRoadPosition.create();
+    const sourceRoads=NavigationRoadQuery.create(map);
     let roadMatch=null;
     function nearbyRoads(point) {
         if(!ready)return [];
+        // Pitched rendered-feature queries can omit lines that are visible on screen.
+        // Use the loaded vector geometry, cached locally; no extra network requests.
+        if(map.getPitch()>55) {
+            const loaded=sourceRoads.nearby(point);
+            if(loaded.length)return loaded;
+        }
         // Bound the query geographically; ignore traffic strokes and their visual offsets.
         const sx=111320*Math.max(.2,Math.cos(point[1]*Math.PI/180));
         const corners=[[-60,-60],[-60,60],[60,-60],[60,60]].map(([x,y])=>
             map.project([point[0]+x/sx,point[1]+y/110540]));
         const box=[[Math.min(...corners.map(p=>p.x)),Math.min(...corners.map(p=>p.y))],
             [Math.max(...corners.map(p=>p.x)),Math.max(...corners.map(p=>p.y))]];
-        return map.queryRenderedFeatures(box).filter(NavigationRoadPosition.isRoad);
+        const rendered=map.queryRenderedFeatures(box).filter(NavigationRoadPosition.isRoad);
+        return rendered.length?rendered:sourceRoads.nearby(point);
     }
     let vehiclePose=null, vehicleOnRoute=false;
     let cameraMotion=null, cameraFrameAt=null;
@@ -737,6 +746,7 @@
             const features=map.queryRenderedFeatures(region).filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
             return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
+                roadData:includeRoad ? sourceRoads.nearby(lastLocation).length : undefined,
                 roadGeometry:includeRoad ? features.filter(f=>f.layer.type==='line' && NavigationRoadPosition.isRoad(f))
                     .flatMap(f=>f.geometry?.type==='LineString' ? [f.geometry.coordinates] :
                         f.geometry?.type==='MultiLineString' ? f.geometry.coordinates : [])

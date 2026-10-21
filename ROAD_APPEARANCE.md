@@ -20,6 +20,12 @@ Legacy ground-road filters now accept both an absent `z_level` and an explicit
 zero. The old absent-only filter hid close-range roads when tiles supplied zero;
 the fix keeps the existing separate filters for bridges, tunnels and construction.
 
+At high pitch, MapLibre can draw road lines while omitting them from rendered
+feature queries. No-route alignment now uses the already loaded vector geometry
+in that case, with a local cache invalidated by road-tile/style changes. Candidates
+remain bounded to 60 meters and pass the existing precision, direction and
+ambiguity checks. The flat view retains its rendered query with the same fallback.
+
 The supplied Facebook ad is a visual reference, not a geographic dataset.
 This build does not download Google Maps/Street View photographs or claim to
 reconstruct every avenue from them. Street View's official API returns static

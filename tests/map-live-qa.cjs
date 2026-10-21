@@ -65,8 +65,12 @@ const measurements=[],statuses={};
  const driveBearing=Math.atan2((b[0]-a[0])*Math.cos(drivePoint[1]*Math.PI/180),b[1]-a[1])*180/Math.PI;
  await page.evaluate(({point,bearing})=>{GPS3D.setViewMode(1);GPS3D.setLocation(...point,bearing,0);
   GPS3D.follow(...point,bearing,18.65,65,1)}, {point:drivePoint,bearing:driveBearing});
- await page.waitForFunction(()=>{const s=GPS3D.mapState();return GPS3D.cameraState().pitch>64&&s.tilesLoaded&&s.roads>0},null,{timeout:60000});
- await page.screenshot({path:path.join(output,'day-driving.png')});
+ await page.waitForFunction(()=>{const s=GPS3D.mapState(true);return GPS3D.cameraState().pitch>64&&s.tilesLoaded&&s.roadData>0},null,{timeout:30000});
+ const driving=PNG.sync.read(await page.screenshot({path:path.join(output,'day-driving.png')}));
+ let drivingRoadPixels=0;
+ for(let i=0;i<driving.data.length;i+=4){const [r,g,b]=driving.data.subarray(i,i+3);
+  if(Math.abs(r-80)<5&&Math.abs(g-89)<5&&Math.abs(b-97)<5)drivingRoadPixels++;}
+ assert.ok(drivingRoadPixels>200,'real asphalt must be visible behind the car; pixels='+drivingRoadPixels);
  phase='night';
  await page.evaluate(()=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);
   g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
@@ -102,8 +106,8 @@ const measurements=[],statuses={};
  console.log('Live map QA passed',JSON.stringify(report));
 })().catch(async e=>{
  const error=String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]');
- const state=page?await page.evaluate(()=>{const s=GPS3D.mapState();return {camera:GPS3D.cameraState(),
-  map:{provider:s.provider,zoom:s.zoom,rendered:s.rendered,roads:s.roads,tilesLoaded:s.tilesLoaded,failures:s.failures}}}).catch(()=>null):null;
+ const state=page?await page.evaluate(()=>{const s=GPS3D.mapState(true);return {camera:GPS3D.cameraState(),
+  map:{provider:s.provider,zoom:s.zoom,rendered:s.rendered,roads:s.roads,roadData:s.roadData,tilesLoaded:s.tilesLoaded,failures:s.failures}}}).catch(()=>null):null;
  const report={phase,error,state,measurements,statuses};
  fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify(report,null,2));
  if(page)await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});
