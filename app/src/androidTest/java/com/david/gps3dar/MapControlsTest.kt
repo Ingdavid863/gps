@@ -23,6 +23,18 @@ class MapControlsTest {
         assertTrue("WebView responds", latch.await(8, TimeUnit.SECONDS))
         return result
     }
+    private fun assertEtaColor(scenario: ActivityScenario<RealisticMapActivity>, expected: Int, detail: String = "") {
+        // JavaScriptInterface posts to the UI thread independently of evaluateJavascript.
+        // An idle UI queue alone does not mean that bridge callback has arrived yet.
+        val deadline = System.currentTimeMillis() + 5000
+        var actual = 0
+        do {
+            scenario.onActivity { actual = it.findViewById<TextView>(R.id.etaText).currentTextColor }
+            if (actual == expected) return
+            Thread.sleep(50)
+        } while (System.currentTimeMillis() < deadline)
+        assertEquals("Traffic color callback must reach the native HUD: $detail", expected, actual)
+    }
     @Test fun nativeEyeCyclesAllThreeViewsAndEtaFollowsCurrentTrafficSegment() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val packageName = instrumentation.targetContext.packageName
@@ -68,11 +80,9 @@ class MapControlsTest {
             state = JSONObject(evaluate(scenario, "window.GPS3D.cameraState()"))
             assertEquals(0, state.getInt("mode"));assertEquals(0.0, state.getDouble("pitch"), 1.0)
             evaluate(scenario, "window.GPS3D.setTrafficIntervals([{start:0,end:1,severity:'heavy'},{start:1,end:2,severity:'moderate'}]);true;")
-            instrumentation.waitForIdleSync()
-            scenario.onActivity { assertEquals(Color.parseColor("#D93025"), it.findViewById<TextView>(R.id.etaText).currentTextColor) }
+            assertEtaColor(scenario, Color.parseColor("#D93025"))
             val afterProgress = evaluate(scenario, "window.GPS3D.setRouteProgress(-99.135,19.44,1);window.GPS3D.navigationState();")
-            instrumentation.waitForIdleSync()
-            scenario.onActivity { assertEquals("Traffic must advance at the segment boundary: $afterProgress", Color.parseColor("#F9AB00"), it.findViewById<TextView>(R.id.etaText).currentTextColor) }
+            assertEtaColor(scenario, Color.parseColor("#F9AB00"), afterProgress)
         }
     }
 }
