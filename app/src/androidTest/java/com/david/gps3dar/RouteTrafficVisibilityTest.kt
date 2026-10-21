@@ -10,12 +10,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class RouteTrafficVisibilityTest {
+    @Before fun startWithoutARestoredNavigationSession() {
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteFile("saved-navigation.json")
+    }
     private fun evaluate(scenario: ActivityScenario<RealisticMapActivity>,script: String): String {
         val latch=CountDownLatch(1);var result="null"
         scenario.onActivity { it.findViewById<WebView>(R.id.webMapView).evaluateJavascript(script) { value -> result=value;latch.countDown() } }
