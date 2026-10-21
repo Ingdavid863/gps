@@ -5,7 +5,8 @@ const {PNG}=require(process.env.GPS3D_QA_NODE_MODULES+'/pngjs');
 const key=process.env.TOMTOM_API_KEY;
 assert.ok(key,'Map service credential configured for rendering QA');
 const output=path.resolve(__dirname,'../build/map-qa');fs.mkdirSync(output,{recursive:true});
-let browser,server;
+let browser,server,page,phase='startup';
+const measurements=[],statuses={};
 (async()=>{
  const base=path.resolve(__dirname,'../app/src/main/assets');
  server=http.createServer((req,res)=>{
@@ -16,7 +17,7 @@ let browser,server;
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  const context=await browser.newContext({viewport:{width:390,height:840}});
- const page=await context.newPage(),errors=[],statuses={},preparedResources=new Map();
+ page=await context.newPage();const errors=[],preparedResources=new Map();
  page.on('pageerror',e=>errors.push(e.message.replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]')));
  page.on('response',r=>{if(/\/map\/1\/tile\/basic\//.test(r.url()))statuses[r.status()]=(statuses[r.status()]||0)+1;});
  // Optional 3D/traffic services should not influence the basemap regression.
@@ -42,8 +43,8 @@ let browser,server;
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
  await page.waitForFunction(()=>window.mapReady===true);
  await page.evaluate(()=>window.GPS3D.setTrafficEnabled(false));
- const measurements=[];
  for(const zoom of [17.4,16,14,12,10,6,3,18.65]){
+  phase='zoom-'+zoom;
   await page.evaluate(z=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);g.follow(-99.133209,19.432608,0,z,0,1)},zoom);
   await page.waitForFunction(z=>{const s=window.GPS3D.mapState();return Math.abs(s.zoom-z)<.02&&s.tilesLoaded&&s.rendered>0},zoom,{timeout:30000});
   const state=await page.evaluate(()=>window.GPS3D.mapState());
@@ -52,15 +53,18 @@ let browser,server;
   measurements.push({zoom,rendered:state.rendered,roads:state.roads,areas:state.areas});
   if(zoom===14||zoom===3)await page.screenshot({path:path.join(output,`day-zoom-${zoom}.png`)});
  }
- await page.evaluate(()=>window.GPS3D.follow(-99.133209,19.432608,0,18.65,65,1));
- await page.waitForFunction(()=>{const s=GPS3D.mapState();return GPS3D.cameraState().pitch>64&&s.tilesLoaded&&s.roads>0});
+ phase='driving';
+ await page.evaluate(()=>{GPS3D.setViewMode(1);GPS3D.follow(-99.133209,19.432608,0,18.65,65,1)});
+ await page.waitForFunction(()=>{const s=GPS3D.mapState();return GPS3D.cameraState().pitch>64&&s.tilesLoaded&&s.roads>0},null,{timeout:60000});
  await page.screenshot({path:path.join(output,'day-driving.png')});
+ phase='night';
  await page.evaluate(()=>{const g=window.GPS3D;g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
  await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return s.dark&&s.tilesLoaded&&s.rendered>0&&Math.abs(s.zoom-14)<.02});
  const night=await page.evaluate(()=>window.GPS3D.mapState());
  assert.ok(night.layerIds.includes('Woodland'),'nighttime woodland layer installed');
  assert.ok(!night.layerIds.includes('Earth Cover 9-22'),'daytime land cover removed completely');
  await page.screenshot({path:path.join(output,'night-zoom-14.png')});
+ phase='offline';
  await page.evaluate(()=>window.GPS3D.setNetworkAvailable(false));await context.setOffline(true);
  const start=Date.now();
  await page.evaluate(()=>window.GPS3D.follow(-99.133209,19.432608,0,12,0,1));
@@ -85,6 +89,14 @@ let browser,server;
  const report={measurements,statuses,cachedMs,roadPixels,nightLayersCorrect:true};
  fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(report,null,2));
  console.log('Live map QA passed',JSON.stringify(report));
-})().catch(e=>{console.error(String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]'));process.exitCode=1})
+})().catch(async e=>{
+ const error=String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]');
+ const state=page?await page.evaluate(()=>{const s=GPS3D.mapState();return {camera:GPS3D.cameraState(),
+  map:{provider:s.provider,zoom:s.zoom,rendered:s.rendered,roads:s.roads,tilesLoaded:s.tilesLoaded,failures:s.failures}}}).catch(()=>null):null;
+ const report={phase,error,state,measurements,statuses};
+ fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify(report,null,2));
+ if(page)await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});
+ console.error(JSON.stringify(report));process.exitCode=1;
+})
  .finally(async()=>{if(browser)await browser.close();if(server)server.close()});
 
