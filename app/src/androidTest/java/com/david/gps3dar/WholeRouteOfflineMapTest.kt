@@ -98,7 +98,7 @@ class WholeRouteOfflineMapTest {
                     Thread.sleep(100)
                 }
                 assertTrue("saved vector map has loaded: $state",state.optBoolean("tilesLoaded"))
-                assertEquals(16,state.optInt("sourceMaxZoom"));assertTrue(state.optInt("roadData")>0)
+                assertEquals(16,state.optInt("sourceMaxZoom"));assertTrue("prepared native road data must be available: $state",state.optInt("roadData")>0)
                 Thread.sleep(250)
                 val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot());val pixels=IntArray(bitmap.width*bitmap.height)
                 bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)

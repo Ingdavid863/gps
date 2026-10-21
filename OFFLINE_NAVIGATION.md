@@ -10,6 +10,11 @@ todos los niveles 3–16. Ya no existe el recorte a 10 km/320 mosaicos. El detal
 online 18. No cambia el zoom de la cámara, la posición del carro ni la geometría de la ruta.
 Se incluyen los iconos y fuentes latinas de los estilos de día/noche.
 
+`SafeWebView` conserva el interceptor de mapas junto al cargador de recursos seguros.
+Anteriormente, `loadUrl` sustituía el `WebViewClient` de la actividad: las descargas se
+guardaban, pero las peticiones del mapa no llegaban a esa caché. La prueba de Android con
+wifi y datos apagados, caché HTTP eliminada y WebView nuevo cubre esta integración.
+
 El paquete de la ruta se guarda fuera de la caché HTTP de exploración: acercarse, alejarse
 o mirar otra zona no lo desaloja. Una nueva ruta sustituye el corredor anterior y reutiliza
 los recursos compartidos. Hay tres descargas simultáneas con prioridad para el mapa visible.

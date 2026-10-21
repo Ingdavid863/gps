@@ -41,9 +41,6 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.ImageButton
@@ -427,11 +424,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         webMapView.settings.builtInZoomControls = false
         webMapView.settings.displayZoomControls = false
         webMapView.webChromeClient = WebChromeClient()
-        webMapView.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                return request?.url?.toString()?.let { mapCache.intercept(it) }
-            }
-        }
+        (webMapView as SafeWebView).mapResourceInterceptor = { url -> mapCache.intercept(url) }
         webMapView.addJavascriptInterface(WebMapBridge(), "AndroidBridge")
         webMapView.setOnTouchListener { _, event ->
             if (event.actionMasked == MotionEvent.ACTION_DOWN ||
@@ -2602,6 +2595,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         tts.shutdown()
         audioManager.abandonAudioFocusRequest(audioFocus)
         if (::connectivity.isInitialized) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
+        (webMapView as SafeWebView).mapResourceInterceptor = null
         mapCache.close()
         sessionStore.close()
         rerouteTone.release()
