@@ -42,7 +42,8 @@ let server,browser;
     });
     await new Promise(r=>server.listen(0,'127.0.0.1',r));
     browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
-    const page=await browser.newPage({viewport:{width:390,height:840}}),errors=[];
+    const page=await browser.newPage({viewport:{width:390,height:840}}),errors=[],styleErrors=[];
+    page.on('console',m=>{if(/layers\[|paint\.|Invalid.*expression/i.test(m.text()))styleErrors.push(m.text());});
     page.on('pageerror',e=>errors.push(e.message));await page.route(/^https:\/\//,r=>r.abort());
     await page.addInitScript(()=>{window.AndroidBridge={onMapReady(){window.mapReady=true},onMapError(){}}});
     await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
@@ -70,7 +71,8 @@ let server,browser;
     await page.evaluate(()=>{GPS3D.setViewMode(1);GPS3D.setDarkTheme(true)});
     await page.setViewportSize({width:412,height:915});
     await page.evaluate(p=>{GPS3D.setViewport(.30,.22);GPS3D.follow(...p,0,18.3,65,1);},at(50,40));
-    await page.waitForTimeout(600);
+    try { await page.waitForFunction(()=>GPS3D.cameraState().pitch>64,null,{timeout:10000}); }
+    catch(error) { throw new Error('Driving camera did not settle: '+JSON.stringify(await page.evaluate(()=>GPS3D.cameraState()))+'; '+error.message); }
     const tilted=await page.locator('.vehicle-wrap').boundingBox();
     assert.ok(Math.abs(tilted.y+tilted.height/2-(915*.78-60))<3,'raised anchor remains accurate after pitch and native-panel resize');
     assert.ok((await page.evaluate(()=>GPS3D.cameraState())).pitch>64,'driving camera stays behind the car');
@@ -86,6 +88,7 @@ let server,browser;
     await page.waitForTimeout(300);
     await page.screenshot({path:path.join(captures,'roads-driving-day.png')});
     assert.deepEqual(errors,[]);
+    assert.deepEqual(styleErrors,[],'road style expressions must render without validation errors');
     console.log('Precision WebGL QA passed: raw GNSS correction, opposing roads, route isolation, raised anchor, pitch and resize.');
 })().catch(e=>{console.error(e);process.exitCode=1})
     .finally(async()=>{if(browser)await browser.close();if(server)server.close()});

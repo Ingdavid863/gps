@@ -10,9 +10,22 @@
             [[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7],[4,5,6,7]].forEach((v,i)=>
                 faces.push({points:v.map(j=>p[j]),color:colors[i] || colors[0]}));
         }
-        for (const x of [-1.03,.76]) for (const y of [-1.55,1.1])
-            box(x,y,.12,x+.27,y+.73,.65,['#101b20','#202b2e','#0d171a','#1e292d','#354346']);
-        box(-.92,-2.13,.35,.92,2.13,.72,['#12834b','#0c7744','#31c879','#179e57','#35d377']);
+        for (const x of [-1.03,.76]) for (const y of [-1.2,1.4]) {
+            // Rounded tire profiles instead of rectangular blocks.
+            const ring=Array.from({length:12},(_,i)=>{
+                const a=i*Math.PI/6;return [y+Math.cos(a)*.38,.43+Math.sin(a)*.35];
+            });
+            for(let i=0;i<12;i++){
+                const a=ring[i],b=ring[(i+1)%12];
+                faces.push({points:[[x,...a],[x+.27,...a],[x+.27,...b],[x,...b]],color:i<6?'#273438':'#10191c'});
+            }
+            for(const side of [x,x+.27])faces.push({points:ring.map(p=>[side,...p]),color:'#172428'});
+        }
+        const outline=[[-.68,-2.13],[.68,-2.13],[.92,-1.76],[.92,1.62],[.66,2.13],[-.66,2.13],[-.92,1.62],[-.92,-1.76]];
+        const lower=outline.map(([x,y])=>[x,y,.34]),upper=outline.map(([x,y])=>[x*.95,y*.98,.72]);
+        for(let i=0;i<outline.length;i++)faces.push({points:[lower[i],lower[(i+1)%8],upper[(i+1)%8],upper[i]],
+            color:['#13834b','#179e57','#118747','#29bd68','#31c879','#1caa5d','#0e8349','#159450'][i]});
+        faces.push({points:upper,color:'#35d377'});
         // Sloping cabin, front windshield toward +Y; rear glass toward the camera.
         const low=[[-.8,-1.1,.73],[.8,-1.1,.73],[.77,1.2,.73],[-.77,1.2,.73]];
         const high=[[-.64,-.65,1.36],[.64,-.65,1.36],[.62,.55,1.36],[-.62,.55,1.36]];
@@ -23,6 +36,12 @@
         for (const x of [-.81,.39]) box(x,-2.195,.54,x+.42,-2.18,.66,['#ff4e59']);
         box(-.32,-2.2,.43,.32,-2.19,.53,['#e3e6d3']);
         for (const x of [-.82,.45]) box(x,2.13,.54,x+.37,2.15,.65,['#ebf7ed']);
+        // Light strips are visible in the flat map as well as from behind.
+        for(const x of [-.65,.31]) {
+            box(x,-2.08,.72,x+.34,-1.98,.74,['#ff515e']);
+            box(x,1.93,.72,x+.34,2.03,.74,['#e6fff4']);
+        }
+        for(const x of [-1.05,.82])box(x,.35,.76,x+.23,.64,.87,['#148c50','#0c7644','#219f5b','#28b567','#4ddb84']);
         box(-.69,-2.22,.25,.69,-2.14,.36,['#142a27']);
         return faces;
     }

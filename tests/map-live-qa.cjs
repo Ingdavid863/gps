@@ -70,7 +70,7 @@ let browser,server;
  const screenshot=await page.screenshot({path:path.join(output,'offline-zoom-12.png')});
  const pixels=PNG.sync.read(screenshot);
  let roadPixels=0;
- for(let i=0;i<pixels.data.length;i+=4){const [r,g,b]=pixels.data.subarray(i,i+3);if(r>105&&r<190&&g>80&&g<155&&b>55&&b<110&&r>g+10&&g>b+10)roadPixels++;}
+ for(let i=0;i<pixels.data.length;i+=4){const [r,g,b]=pixels.data.subarray(i,i+3);if(Math.abs(r-66)<8&&Math.abs(g-78)<8&&Math.abs(b-90)<8)roadPixels++;}
  fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({measurements,statuses,cachedMs,roadPixels,offline:{rendered:offline.rendered,roads:offline.roads,areas:offline.areas}},null,2));
  console.log('MAP_QA_DIAGNOSTIC '+JSON.stringify({measurements,statuses,cachedMs,roadPixels,offline:{rendered:offline.rendered,roads:offline.roads,areas:offline.areas}}));
  console.log('MAP_QA_JPEG '+(await page.screenshot({type:'jpeg',quality:65})).toString('base64'));
