@@ -183,6 +183,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private lateinit var audioFocus: AudioFocusRequest
     private lateinit var mapCache: MapResourceCache
     private lateinit var sessionStore: NavigationSessionStore
+    private var routeSessionSaved = false
+    private var routeSessionSaveFailed = false
     private lateinit var connectivity: ConnectivityManager
     private var networkAvailable = true
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -357,7 +359,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
-        findViewById<View>(R.id.mapCacheStatus).setOnClickListener { mapCache.retryPreparation() }
+        findViewById<View>(R.id.mapCacheStatus).setOnClickListener {
+            if (routeSessionSaveFailed) routeAlternatives.getOrNull(activeRouteIndex)?.let { saveActiveRoute(it) }
+            mapCache.retryPreparation()
+        }
         com.david.gps3dar.car.CarNavigation.observe(carObserver)
         setupBackNavigation()
         refreshSettingsLabels()
@@ -940,20 +945,42 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val snapshot = routePoints
         mapCache.prepare(snapshot.map { RouteGeometry.Point(it.lat, it.lon) }) { progress ->
             ui.post {
-                if (!isDestroyed && routeActive && routePoints === snapshot) findViewById<TextView>(R.id.mapCacheStatus).apply {
-                    visibility = View.VISIBLE
-                    val percent = progress.saved * 100 / progress.total.coerceAtLeast(1)
-                    text = when (progress.state) {
-                        "ready" -> "Ruta y mapa disponibles sin conexión ✓"
-                        "planning" -> "Ruta guardada · preparando mapa completo…"
-                        "offline" -> "Sin internet · mapa guardado: $percent%"
-                        "storage" -> "Mapa incompleto · falta espacio en el teléfono"
-                        "retrying", "error" -> "Mapa al $percent% · toca para reintentar"
-                        else -> "Guardando mapa de toda la ruta: $percent%"
-                    }
+                if (!isDestroyed && routeActive && routePoints === snapshot) showMapPreparation(progress)
+            }
+        }
+    }
+
+    private fun showMapPreparation(progress: OfflineRoutePack.Progress) {
+        findViewById<TextView>(R.id.mapCacheStatus).apply {
+            visibility = View.VISIBLE
+            val percent = progress.saved * 100 / progress.total.coerceAtLeast(1)
+            text = when {
+                routeSessionSaveFailed -> "No se pudo guardar la ruta · revisa el espacio disponible"
+                !routeSessionSaved -> "Guardando ruta e instrucciones…"
+                else -> when (progress.state) {
+                    "ready" -> "Ruta y mapa disponibles sin conexión ✓"
+                    "planning" -> "Ruta guardada · preparando mapa completo…"
+                    "offline" -> "Sin internet · mapa guardado: $percent%"
+                    "storage" -> "Mapa incompleto · falta espacio en el teléfono"
+                    "retrying", "error" -> "Mapa al $percent% · toca para reintentar"
+                    else -> "Guardando mapa de toda la ruta: $percent%"
                 }
             }
         }
+    }
+
+    private fun saveActiveRoute(option: RouteOption) {
+        routeSessionSaved = false; routeSessionSaveFailed = false
+        val snapshot = routePoints
+        routeDestination?.let { destination -> sessionStore.save(NavigationSessionStore.Session(
+            option.copy(steps = navSteps), destination, searchInput.text.toString().ifBlank { "Destino" }, viewMode)) { saved ->
+            ui.post {
+                if (!isDestroyed && routeActive && routePoints === snapshot) {
+                    routeSessionSaved = saved; routeSessionSaveFailed = !saved
+                    showMapPreparation(mapCache.preparationState())
+                }
+            }
+        } }
     }
 
     private fun requestLocationPermission() {
@@ -1979,8 +2006,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
 
         syncRoutes()
-        routeDestination?.let { destination -> sessionStore.save(NavigationSessionStore.Session(
-            option.copy(steps = navSteps), destination, searchInput.text.toString().ifBlank { "Destino" }, viewMode)) }
+        saveActiveRoute(option)
         prepareMapAhead(true)
         syncRouteProgress(force = true)
         stopButton.visibility = if (routeActive) View.VISIBLE else View.GONE

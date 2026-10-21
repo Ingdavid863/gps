@@ -12,12 +12,13 @@ import java.util.concurrent.Executors
 class NavigationSessionStore(private val file: File) {
     data class Session(val route: RouteOption, val destination: GeoPoint, val label: String, val view: Int)
     private val io = Executors.newSingleThreadExecutor()
-    fun save(session: Session) { io.execute {
-        runCatching {
+    fun save(session: Session, done: (Boolean) -> Unit = {}) { io.execute {
+        val saved = runCatching {
             val temporary = File(file.parentFile, "${file.name}.new")
             temporary.writeText(encode(session))
             check(temporary.renameTo(file))
-        }
+        }.isSuccess
+        done(saved)
     } }
     fun load(done: (Session?) -> Unit) { io.execute { done(runCatching { decode(file.readText()) }.getOrNull()) } }
     fun clear() { io.execute { file.delete(); File(file.parentFile, "${file.name}.new").delete() } }

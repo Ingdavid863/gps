@@ -39,6 +39,7 @@ class OfflineNavigationTest {
     @Test fun completeRouteResourcesSurviveCacheEvictionRestartAndKeyRotation() {
         val failFirst = AtomicBoolean(true); val calls = AtomicInteger()
         val client = OkHttpClient.Builder().addInterceptor { chain ->
+            if (chain.request().cacheControl.onlyIfCached) return@addInterceptor chain.proceed(chain.request())
             calls.incrementAndGet()
             val fail = failFirst.compareAndSet(true,false)
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
@@ -118,6 +119,14 @@ class OfflineNavigationTest {
         assertTrue(saved.await(3,TimeUnit.SECONDS))
         store.clear();val cleared=CountDownLatch(1);store.load { assertNull(it);cleared.countDown() }
         assertTrue(cleared.await(3,TimeUnit.SECONDS));store.close()
+    }
+    @Test fun aFailedSessionWriteCannotBeReportedAsASavedRoute() {
+        val points=listOf(GeoPoint(23.0,-110.0),GeoPoint(23.1,-110.0))
+        val session=NavigationSessionStore.Session(RouteOption(points,emptyList(),60.0,1000.0),points.last(),"Destino",1)
+        val store=NavigationSessionStore(temp.newFolder("cannot-replace-directory"));val finished=CountDownLatch(1)
+        var saved=true
+        store.save(session){saved=it;finished.countDown()}
+        assertTrue(finished.await(3,TimeUnit.SECONDS));assertFalse(saved);store.close()
     }
     @Test fun confirmedDepartureStartsWithinOneSecondWithoutTheOldCooldown() {
         val p=ReroutePolicy()

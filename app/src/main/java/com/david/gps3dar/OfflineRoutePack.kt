@@ -7,6 +7,7 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Protected route resources: independent of the evictable browsing HTTP cache. */
@@ -64,24 +65,28 @@ class OfflineRoutePack(private val directory: File,
     }
     fun current() = progress
     private fun publish(value: Progress) { progress = value; listener(value) }
+    private fun enqueue(task: () -> Unit) {
+        if (closed) return
+        try { coordinator.execute(task) } catch (e: RejectedExecutionException) { if (!closed) throw e }
+    }
 
     /** Planning and all disk/network work stay off the UI thread. Same route resumes missing files. */
     fun prepare(id: String, plan: () -> List<String>, done: (Progress) -> Unit) {
         listener = done
         val version = generation.incrementAndGet()
-        coordinator.execute {
-            if (closed || version != generation.get()) return@execute
+        enqueue {
+            if (closed || version != generation.get()) return@enqueue
             active = true
             if (signature == id && resources.isNotEmpty()) {
                 if (progress.ready) listener(progress) else runPass(version)
-                return@execute
+                return@enqueue
             }
             publish(Progress(0, 0, "planning"))
             val planned = runCatching { plan().distinct() }.getOrElse {
                 if (version == generation.get()) publish(Progress(0, 0, "error"))
-                return@execute
+                return@enqueue
             }
-            if (closed || version != generation.get()) return@execute
+            if (closed || version != generation.get()) return@enqueue
             signature = id; resources = planned
             // Keep only this chosen corridor. These files are never removed by browsing/HTTP LRU.
             val keep = resources.mapTo(hashSetOf()) { name(it) }
@@ -124,13 +129,13 @@ class OfflineRoutePack(private val directory: File,
         val restored = !online && available
         online = available
         if (closed) return
-        coordinator.execute {
-            if (closed || !active) return@execute
+        enqueue {
+            if (closed || !active) return@enqueue
             if (restored && !progress.ready) runPass(generation.get())
             else if (!available && !progress.ready) publish(progress.copy(state = "offline"))
         }
     }
-    fun retry() { if (!closed) coordinator.execute { if (active && !progress.ready) runPass(generation.get()) } }
+    fun retry() { enqueue { if (active && !progress.ready) runPass(generation.get()) } }
     fun cancel() { active = false; generation.incrementAndGet() }
     fun close() { closed = true; cancel(); coordinator.shutdownNow(); downloads.shutdownNow() }
 }
