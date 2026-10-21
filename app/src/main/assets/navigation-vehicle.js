@@ -45,13 +45,15 @@
         box(-.69,-2.22,.25,.69,-2.14,.36,['#142a27']);
         return faces;
     }
-    function project(point, pitch, yaw) {
+    function projector(pitch, yaw) {
         const p=pitch*Math.PI/180, a=yaw*Math.PI/180;
-        const x=point[0]*Math.cos(a)+point[1]*Math.sin(a);
-        const y=point[1]*Math.cos(a)-point[0]*Math.sin(a);
-        return {x:40+x*12,y:48-(y*Math.cos(p)+point[2]*Math.sin(p))*12,
-            depth:y*Math.sin(p)-point[2]*Math.cos(p)};
+        const ca=Math.cos(a),sa=Math.sin(a),cp=Math.cos(p),sp=Math.sin(p);
+        return point=>{
+            const x=point[0]*ca+point[1]*sa,y=point[1]*ca-point[0]*sa;
+            return {x:40+x*12,y:48-(y*cp+point[2]*sp)*12,depth:y*sp-point[2]*cp};
+        };
     }
+    const project=(point,pitch,yaw)=>projector(pitch,yaw)(point);
     function create(element) {
         element.setAttribute('role','img');element.setAttribute('aria-label','Tu vehículo');
         const svg=document.createElementNS(NS,'svg');
@@ -71,7 +73,8 @@
             if(Math.abs(pitch-lastPitch)<.4 && Math.abs(yaw-lastYaw)<.4)return;
             lastPitch=pitch;lastYaw=yaw;
             shadow.setAttribute('ry',String(5+20*Math.cos(pitch*Math.PI/180)));
-            const polygons=faces.map(face=>({...face, projected:face.points.map(p=>project(p,pitch,yaw))}));
+            const projectPoint=projector(pitch,yaw);
+            const polygons=faces.map(face=>({...face, projected:face.points.map(projectPoint)}));
             polygons.sort((a,b)=>b.projected.reduce((s,p)=>s+p.depth,0)/b.projected.length-
                 a.projected.reduce((s,p)=>s+p.depth,0)/a.projected.length);
             const nodes=polygons.map(face=>{

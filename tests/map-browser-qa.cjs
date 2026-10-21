@@ -68,7 +68,7 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  await page.evaluate(()=>{window.GPS3D.setDarkTheme(true);window.GPS3D.setManeuvers([{index:1,maneuver:'TURN_LEFT'}]);});
  assert.equal((await page.evaluate(()=>window.GPS3D.cameraState())).dark,true);
  await page.evaluate(()=>{window.GPS3D.setViewMode(0);window.GPS3D.follow(-99.13,19.43,0,17.4,0,1);});
- await page.waitForTimeout(500);
+ await page.waitForFunction(()=>Math.abs(window.GPS3D.cameraState().pitch)<.01,null,{timeout:10000});
  assert.ok(Math.abs((await page.evaluate(()=>window.GPS3D.cameraState())).pitch)<.01,'third click restores default view');
  assert.deepEqual(errors,[]);
  console.log('Browser map QA passed: local green car, geographic anchor, overview lock and three camera modes; no JS errors.');
