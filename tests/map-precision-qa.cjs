@@ -88,6 +88,14 @@ let server,browser;
     await page.evaluate(()=>GPS3D.setDarkTheme(false));
     await page.waitForTimeout(300);
     await page.screenshot({path:path.join(captures,'roads-driving-day.png')});
+    await page.evaluate(p=>{
+        GPS3D.setRoutes([],[],[]);GPS3D.setLocation(...p,0,26,false,15,true);
+        GPS3D.follow(...p,0,18.7,65,1);
+    },at(18,40));
+    await page.waitForFunction(()=>GPS3D.navigationState().roadMatched);
+    const pitchedMatch=await page.evaluate(()=>GPS3D.navigationState());
+    assert.ok(Math.abs(pitchedMatch.roadCorrectionMeters-18)<1,'no-route alignment also works behind the car at high pitch');
+    assert.ok(Math.abs((pitchedMatch.vehicle[0]-origin[0])*sx)<1,'pitched matching still rejects the opposing carriageway');
     assert.deepEqual(errors,[]);
     assert.deepEqual(styleErrors,[],'road style expressions must render without validation errors');
     console.log('Precision WebGL QA passed: raw GNSS correction, opposing roads, route isolation, raised anchor, pitch and resize.');

@@ -729,7 +729,12 @@
             const snapshot=map.getStyle();
             if (!snapshot || !snapshot.layers) return {provider, dark:darkTheme, zoom:map.getZoom(),
                 tilesLoaded:false, layerIds:[], failures:{...resourceFailures}, rendered:0, roads:0, areas:0};
-            const features=map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
+            // A query crossing the sky/horizon can miss ground lines at high pitch.
+            // Diagnostics use the visible foreground, as the road matcher already does.
+            const container=map.getContainer();
+            const region=map.getPitch()>55 ? [[0,container.clientHeight*.35],
+                [container.clientWidth,container.clientHeight]] : undefined;
+            const features=map.queryRenderedFeatures(region).filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
             return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
                 roadGeometry:includeRoad ? features.filter(f=>f.layer.type==='line' && NavigationRoadPosition.isRoad(f))
