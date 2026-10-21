@@ -9,12 +9,15 @@ test('road presentation preserves provider geometry, access filters and bridge d
         const unchanged=JSON.stringify(original),styled=appearance.decorate(JSON.parse(unchanged),name==='night');
         assert.deepEqual(styled.sources,original.sources,'no fabricated or new road sources');
         const detail=styled.layers.filter(l=>l.id.startsWith('road-detail-'));
-        assert.ok(detail.length>0);assert.ok(detail.length<150,'bounded layer count');
+        assert.ok(detail.length>0);assert.ok(detail.length<180,'bounded layer count');
         assert.equal(new Set(styled.layers.map(l=>l.id)).size,styled.layers.length);
         assert.deepEqual(styled.layers.filter(l=>!l.id.startsWith('road-detail-')).map(l=>l.id),original.layers.map(l=>l.id));
         for(const layer of original.layers) {
             const changed=styled.layers.find(l=>l.id===layer.id);
             assert.deepEqual(changed.filter,layer.filter,'preserve road level and access conditions');
+            if(/motorway/i.test(layer['source-layer']||'') && layer.type==='line' &&
+                !/outline|casing| t$|under construction/i.test(layer.id))
+                assert.equal(changed.paint['line-color'],name==='night'?'#424e5a':'#505961','motorways use the same asphalt treatment');
             if(/under construction|rail|pedestrian|ferry/i.test(layer.id))assert.deepEqual(changed,layer);
         }
         for(const layer of detail){

@@ -29,6 +29,15 @@ test('TomTom v1 direction selects the correct carriageway even when the opposing
     assert.ok(south&&distance(south.point,at(20,40))<.01);
     assert.equal(south.bearing,180);
 });
+test('TomTom motorway, toll motorway and tunnel classes retain directional road alignment',()=>{
+    for(const sourceLayer of ['Motorway','Toll motorway','Motorway tunnel','Toll motorway tunnel']) {
+        const north={...road([[0,-100],[0,200]],{direction:-1}),sourceLayer};
+        const south={...road([[20,-100],[20,200]],{direction:1}),sourceLayer};
+        const match=create().match(fix(16,40),[north,south]);
+        assert.ok(match&&distance(match.point,at(0,40))<.01,sourceLayer);
+        assert.equal(create().match(fix(16,40,{accuracy:70}),[north,south]),null);
+    }
+});
 test('crossing streets, traffic offsets and pedestrian geometry cannot pull a driving marker away',()=>{
     const main=road([[0,-100],[0,200]],{direction:-1});
     const crossing=road([[-100,40],[100,40]],{direction:-1});

@@ -6,6 +6,15 @@ const basemap = require('../app/src/main/assets/navigation-basemap.js');
 const context = {window:{}}; vm.createContext(context);
 vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../app/src/main/assets/navigation-styles.js'),'utf8'), context);
 const styles = context.window.NavigationStyles;
+test('TomTom ground roads accept absent or explicit zero levels without including bridges', () => {
+ for(const dark of [false,true]) {
+  const styled=basemap.themedStyle(styles,'tomtom',dark,'test');
+  const ground=styled.layers.find(l=>l.id==='Major road - level0');
+  assert.deepEqual(ground.filter,['all',['any',['!has','z_level'],['==','z_level',0]],['!=','under_construction',true]]);
+  const raised=styled.layers.find(l=>l.id==='Major road - level+1');
+  assert.deepEqual(raised.filter,['all',['==','z_level',1],['!=','under_construction',true]]);
+ }
+});
 test('full night style removes daytime land cover and keeps route and traffic data', () => {
  const day = basemap.themedStyle(styles,'tomtom',false,'test');
  const night = basemap.themedStyle(styles,'tomtom',true,'test');

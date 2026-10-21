@@ -5,7 +5,7 @@
     function roadLayer(layer) {
         if (layer.type !== 'line') return false;
         const source = layer['source-layer'] || '';
-        if (/road(?: tunnel)?$/i.test(source)) return !/ferry|walkway|pedestrian|non public/i.test(source);
+        if (/(?:road|motorway)(?: tunnel)?$/i.test(source)) return !/ferry|walkway|pedestrian|non public/i.test(source);
         return source === 'transportation' && /^(road|bridge|tunnel)_/.test(layer.id) &&
             !/rail|path|pedestrian|service_track/.test(layer.id);
     }

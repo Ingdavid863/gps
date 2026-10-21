@@ -6,7 +6,7 @@
     const rad=Math.PI/180;
     function isRoad(feature) {
         const layer=feature.sourceLayer||feature.layer?.['source-layer']||'';
-        if(feature.source==='vectorTiles') return /road(?: tunnel)?$/i.test(layer) &&
+        if(feature.source==='vectorTiles') return /(?:road|motorway)(?: tunnel)?$/i.test(layer) &&
             !/pedestrian|walkway|ferry|parking|non public/i.test(layer);
         if(feature.source==='openmaptiles' && layer==='transportation')
             return /^(motorway|trunk|primary|secondary|tertiary|minor|service)$/.test(feature.properties?.class||'');

@@ -16,11 +16,11 @@ function tile(z,x,y) {
             Math.max(...points.map(p=>p[1]))<0||Math.min(...points.map(p=>p[1]))>4096)return null;
         const geometry=[9,zig(points[0][0]),zig(points[0][1]),(points.length-1)*8+2];
         for(let i=1;i<points.length;i++)geometry.push(zig(points[i][0]-points[i-1][0]),zig(points[i][1]-points[i-1][1]));
-        return field(2,Buffer.concat([integer(1,index+1),field(2,Buffer.concat([varint(0),varint(index)])),integer(3,2),
+        return field(2,Buffer.concat([integer(1,index+1),field(2,Buffer.concat([varint(0),varint(index),varint(1),varint(2)])),integer(3,2),
             field(4,Buffer.concat(geometry.map(varint)))]));
     }).filter(Boolean);
-    const layer=Buffer.concat([field(1,Buffer.from('Major road')),...encoded,field(3,Buffer.from('direction')),
-        ...roads.map(r=>field(4,integer(6,zig(r.direction)))),integer(5,4096),integer(15,2)]);
+    const layer=Buffer.concat([field(1,Buffer.from('Major road')),...encoded,field(3,Buffer.from('direction')),field(3,Buffer.from('z_level')),
+        ...roads.map(r=>field(4,integer(6,zig(r.direction)))),field(4,integer(6,0)),integer(5,4096),integer(15,2)]);
     return field(3,layer);
 }
 let server,browser;
@@ -33,7 +33,8 @@ let server,browser;
         if(url==='/navigation-styles.js'){
             const style={version:8,sources:{vectorTiles:{type:'vector',tiles:[`http://127.0.0.1:${server.address().port}/roads/{z}/{x}/{y}.pbf`],maxzoom:18}},
                 layers:[{id:'background',type:'background',paint:{'background-color':'#2b3440'}},
-                    {id:'fixture-road',type:'line',source:'vectorTiles','source-layer':'Major road',paint:{'line-color':'#b5a576','line-width':14}}]};
+                    {id:'fixture-road',type:'line',source:'vectorTiles','source-layer':'Major road',filter:['!has','z_level'],
+                        paint:{'line-color':'#b5a576','line-width':14}}]};
             res.setHeader('Content-Type','text/javascript');res.end('window.NavigationStyles='+JSON.stringify({fallback:style})+';');return;
         }
         const file=path.join(base,url);

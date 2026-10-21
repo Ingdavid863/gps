@@ -736,7 +736,7 @@
                     .flatMap(f=>f.geometry?.type==='LineString' ? [f.geometry.coordinates] :
                         f.geometry?.type==='MultiLineString' ? f.geometry.coordinates : [])
                     .find(line=>line.length>1) || null : null,
-                rendered:features.length, roads:features.filter(f=>f.layer.type==='line'&&/road/i.test(f.layer['source-layer']||'')).length,
+                rendered:features.length, roads:features.filter(f=>f.layer.type==='line'&&/road|motorway/i.test(f.layer['source-layer']||'')).length,
                 areas:features.filter(f=>f.layer.type==='fill').length};
         },
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
