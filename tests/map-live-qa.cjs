@@ -54,11 +54,20 @@ const measurements=[],statuses={};
   if(zoom===14||zoom===3)await page.screenshot({path:path.join(output,`day-zoom-${zoom}.png`)});
  }
  phase='driving';
- await page.evaluate(()=>{GPS3D.setViewMode(1);GPS3D.follow(-99.133209,19.432608,0,18.65,65,1)});
+ // The default reference coordinate lies in a pedestrian plaza. Use an actual
+ // rendered drivable line for the behind-car check instead of inventing a road there.
+ const road=await page.evaluate(()=>GPS3D.mapState(true).roadGeometry);
+ assert.ok(road&&road.length>1,'a real drivable feature is required for the driving fixture');
+ const segment=Math.floor((road.length-2)/2),a=road[segment],b=road[segment+1];
+ const drivePoint=[(a[0]+b[0])/2,(a[1]+b[1])/2];
+ const driveBearing=Math.atan2((b[0]-a[0])*Math.cos(drivePoint[1]*Math.PI/180),b[1]-a[1])*180/Math.PI;
+ await page.evaluate(({point,bearing})=>{GPS3D.setViewMode(1);GPS3D.setLocation(...point,bearing,0);
+  GPS3D.follow(...point,bearing,18.65,65,1)}, {point:drivePoint,bearing:driveBearing});
  await page.waitForFunction(()=>{const s=GPS3D.mapState();return GPS3D.cameraState().pitch>64&&s.tilesLoaded&&s.roads>0},null,{timeout:60000});
  await page.screenshot({path:path.join(output,'day-driving.png')});
  phase='night';
- await page.evaluate(()=>{const g=window.GPS3D;g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
+ await page.evaluate(()=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);
+  g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
  await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return s.dark&&s.tilesLoaded&&s.rendered>0&&Math.abs(s.zoom-14)<.02});
  const night=await page.evaluate(()=>window.GPS3D.mapState());
  assert.ok(night.layerIds.includes('Woodland'),'nighttime woodland layer installed');

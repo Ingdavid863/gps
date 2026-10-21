@@ -725,13 +725,15 @@
             }
             prepareViewport();
         },
-        mapState() {
+        mapState(includeRoad = false) {
             const snapshot=map.getStyle();
             if (!snapshot || !snapshot.layers) return {provider, dark:darkTheme, zoom:map.getZoom(),
                 tilesLoaded:false, layerIds:[], failures:{...resourceFailures}, rendered:0, roads:0, areas:0};
             const features=map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
             return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
+                roadGeometry:includeRoad ? features.find(f=>f.layer.type==='line' && NavigationRoadPosition.isRoad(f) &&
+                    f.geometry?.type==='LineString' && f.geometry.coordinates.length>1)?.geometry.coordinates || null : null,
                 rendered:features.length, roads:features.filter(f=>f.layer.type==='line'&&/road/i.test(f.layer['source-layer']||'')).length,
                 areas:features.filter(f=>f.layer.type==='fill').length};
         },
