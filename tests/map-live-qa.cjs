@@ -7,6 +7,11 @@ assert.ok(key,'Map service credential configured for rendering QA');
 const output=path.resolve(__dirname,'../build/map-qa');fs.mkdirSync(output,{recursive:true});
 let browser,server,page,phase='startup';
 const measurements=[],statuses={};
+const watchdog=setTimeout(()=>{
+ const failure={phase,error:'Rendering QA exceeded three minutes',measurements,statuses};
+ fs.writeFileSync(path.join(output,'timeout.json'),JSON.stringify(failure,null,2));
+ console.error(JSON.stringify(failure));process.exit(1);
+},180000);
 (async()=>{
  const base=path.resolve(__dirname,'../app/src/main/assets');
  server=http.createServer((req,res)=>{
@@ -46,6 +51,7 @@ const measurements=[],statuses={};
  let drivingRoad=null;
  for(const zoom of [17.4,16,14,12,10,6,3,18.65]){
   phase='zoom-'+zoom;
+  console.log('Live map phase',phase);
   await page.evaluate(z=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);g.follow(-99.133209,19.432608,0,z,0,1)},zoom);
   await page.waitForFunction(z=>{const s=window.GPS3D.mapState();return Math.abs(s.zoom-z)<.02&&s.tilesLoaded&&s.rendered>0},zoom,{timeout:30000});
   const state=await page.evaluate(()=>window.GPS3D.mapState());
@@ -56,6 +62,7 @@ const measurements=[],statuses={};
   if(zoom===14||zoom===3)await page.screenshot({path:path.join(output,`day-zoom-${zoom}.png`)});
  }
  phase='driving';
+ console.log('Live map phase',phase);
  // The default reference coordinate lies in a pedestrian plaza. Use an actual
  // rendered drivable line for the behind-car check instead of inventing a road there.
  const road=drivingRoad;
@@ -72,6 +79,7 @@ const measurements=[],statuses={};
   if(Math.abs(r-80)<5&&Math.abs(g-89)<5&&Math.abs(b-97)<5)drivingRoadPixels++;}
  assert.ok(drivingRoadPixels>200,'real asphalt must be visible behind the car; pixels='+drivingRoadPixels);
  phase='street-scene';
+ console.log('Live map phase',phase);
  await page.evaluate(({point,bearing,road,segment})=>{
   GPS3D.setRoutes([point,...road.slice(segment+1)],[],[]);GPS3D.setLocation(...point,bearing,0,true);
   GPS3D.follow(...point,bearing,19.3,65,1);
@@ -84,6 +92,7 @@ const measurements=[],statuses={};
  await page.screenshot({path:path.join(output,'night-street-scene.png')});
  await page.evaluate(()=>{GPS3D.setRoutes([],[],[]);GPS3D.setDarkTheme(false)});
  phase='night';
+ console.log('Live map phase',phase);
  await page.evaluate(()=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);
   g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
  await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return s.dark&&s.tilesLoaded&&s.rendered>0&&Math.abs(s.zoom-14)<.02});
@@ -92,6 +101,7 @@ const measurements=[],statuses={};
  assert.ok(!night.layerIds.includes('Earth Cover 9-22'),'daytime land cover removed completely');
  await page.screenshot({path:path.join(output,'night-zoom-14.png')});
  phase='offline';
+ console.log('Live map phase',phase);
  await page.evaluate(()=>window.GPS3D.setNetworkAvailable(false));await context.setOffline(true);
  const start=Date.now();
  await page.evaluate(()=>window.GPS3D.follow(-99.133209,19.432608,0,12,0,1));
@@ -126,5 +136,5 @@ const measurements=[],statuses={};
  if(page)await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});
  console.error(JSON.stringify(report));process.exitCode=1;
 })
- .finally(async()=>{if(browser)await browser.close();if(server)server.close()});
+ .finally(async()=>{if(browser)await browser.close();if(server)await new Promise(r=>server.close(r));clearTimeout(watchdog)});
 

@@ -5,7 +5,8 @@ const {PNG}=require(process.env.GPS3D_QA_NODE_MODULES+'/pngjs');
 const key=process.env.TOMTOM_API_KEY;assert.ok(key,'service credential required');
 const base=path.resolve(__dirname,'../app/src/main/assets'),output=path.resolve('build/map-qa/offline-route');fs.mkdirSync(output,{recursive:true});
 const start=[-99.133209,19.432608],end=[start[0],start[1]+.20],resources=new Map(),requests=[];
-let server,browser,api;
+let server,browser,api,phase='route';
+const watchdog=setTimeout(()=>{console.error(JSON.stringify({phase,saved:resources.size,error:'Whole-route map QA exceeded six minutes'}));process.exit(1)},360000);
 const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'https://a.api.tomtom.com/map/');
 (async()=>{
  api=await request.newContext();
@@ -29,11 +30,13 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
  for(const font of ['NotoSans-MediumItalic','Noto-Regular','Noto-Bold','Noto-Medium'])for(const range of ['0-255','256-511','8192-8447'])
   urls.add(`${style}/glyph/22.2.1-9/${font}/${range}.pbf?key=${encodeURIComponent(key)}`);
  const all=[...urls];
+ phase='preparing';console.log('Preparing complete route map',JSON.stringify({resources:all.length}));
  for(let i=0;i<all.length;i+=4)await Promise.all(all.slice(i,i+4).map(async url=>{
   let response;for(let retry=0;retry<3;retry++){response=await api.get(url,{timeout:15000});if(response.ok())break;}
   assert.ok(response.ok(),'complete route preparation failed, HTTP '+response.status());
   resources.set(canonical(url),{status:200,headers:{'content-type':response.headers()['content-type']||'application/octet-stream','access-control-allow-origin':'*'},body:await response.body()});
  }));
+ phase='browser';console.log('Complete route map downloaded',resources.size);
  server=http.createServer((req,res)=>res.end());await new Promise(r=>server.listen(0,'127.0.0.1',r));
  browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  const context=await browser.newContext({viewport:{width:390,height:840}}),errors=[];
@@ -56,6 +59,7 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
  await page.evaluate(points=>{GPS3D.setRoutes(points,[],[]);GPS3D.setViewport(.25,.16);},points);
  const measurements=[];
  for(const [name,point,zoom,dark] of [['middle',middle,18.65,false],['destination',points.at(-1),18.65,true],['overview',points.at(-1),12,true]]){
+  phase=name;console.log('Offline route phase',phase);
   const before=requests.length;
   await page.evaluate(({point,zoom,dark})=>{GPS3D.setDarkTheme(dark);GPS3D.setLocation(...point,0,0);GPS3D.follow(...point,0,zoom,zoom>16?65:0,1)}, {point,zoom,dark});
   await page.waitForFunction(({zoom,dark})=>{const s=GPS3D.mapState(true);return s.tilesLoaded&&s.sourceMaxZoom===16&&s.dark===dark&&Math.abs(s.zoom-zoom)<.02&&(s.roads>0||s.roadData>0)}, {zoom,dark},{timeout:10000});
@@ -72,4 +76,4 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements},null,2));
  console.log('Whole-route offline WebGL passed',JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements}));
 })().catch(e=>{console.error(String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]'));process.exitCode=1;})
- .finally(async()=>{if(browser)await browser.close();if(api)await api.dispose();if(server)server.close();});
+ .finally(async()=>{if(browser)await browser.close();if(api)await api.dispose();if(server)await new Promise(r=>server.close(r));clearTimeout(watchdog)});

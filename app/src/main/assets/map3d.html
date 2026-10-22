@@ -380,6 +380,7 @@
     function applyVisuals(adjustPitch=false) {
         if (!ready) return;
         const preparedOffline = !networkAvailable && routeMapZoom !== null;
+        const satelliteActive=visuals.satellite&&!preparedOffline;
         const terrainActive = visuals.is3D && visuals.terrain && !preparedOffline && !!map.getSource(TERRAIN_ID);
         try {
             map.setTerrain(terrainActive ? { source: TERRAIN_ID, exaggeration: 1.0 } : null);
@@ -387,13 +388,13 @@
         setLayerVisible(HILLSHADE_ID, visuals.terrain);
         // Use the primary map's cached footprints. Additional building downloads
         // are reserved for the optional satellite overlay.
-        setLayerVisible(BUILDINGS_ID, visuals.is3D && visuals.buildings && visuals.satellite);
+        setLayerVisible(BUILDINGS_ID, viewMode===1 && visuals.is3D && visuals.buildings && satelliteActive);
         for(const layer of map.getStyle()?.layers||[]) if(layer.id.startsWith('scene-building-')||layer.id==='building-3d')
-            setLayerVisible(layer.id,viewMode===1&&visuals.is3D&&visuals.buildings);
+            setLayerVisible(layer.id,viewMode===1&&visuals.is3D&&visuals.buildings&&!satelliteActive);
         for(const id of ['gps-route-floor-glow','gps-route-floor-ribbon','gps-route-floor-chevrons'])
             setLayerVisible(id,viewMode===1&&!pedestrianRoute);
-        setLayerVisible(SATELLITE_LAYER, visuals.satellite && !preparedOffline);
-        setLayerVisible(HYBRID_ROADS_ID, visuals.satellite && !preparedOffline);
+        setLayerVisible(SATELLITE_LAYER, satelliteActive);
+        setLayerVisible(HYBRID_ROADS_ID, satelliteActive);
         setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         if (areaTraffic) { areaTraffic.setEnabled(trafficEnabled); areaTraffic.setRouteActive(activeRoutePoints.length>1); }
         applySky(visuals.is3D && !darkTheme);
