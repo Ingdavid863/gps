@@ -98,7 +98,11 @@ class WholeRouteOfflineMapTest {
                     Thread.sleep(100)
                 }
                 assertTrue("saved vector map has loaded: $state",state.optBoolean("tilesLoaded"))
-                assertEquals(16,state.optInt("sourceMaxZoom"));assertTrue("prepared native road data must be available: $state",state.optInt("roadData")>0)
+                assertEquals(16,state.optInt("sourceMaxZoom"))
+                val diagnostic=JSONObject().put("rendered",state.optInt("rendered")).put("roadData",state.optInt("roadData"))
+                    .put("failures",state.optJSONObject("failures")).put("cacheRequests",state.optInt("nativeCacheRequests"))
+                assertTrue("prepared native road data must be available: $diagnostic",state.optInt("roadData")>0)
+                assertTrue("worker tiles use the native cache",state.optInt("nativeCacheRequests")>0)
                 Thread.sleep(250)
                 val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot());val pixels=IntArray(bitmap.width*bitmap.height)
                 bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)

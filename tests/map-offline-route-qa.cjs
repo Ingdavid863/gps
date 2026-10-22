@@ -49,7 +49,7 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
  // No browser HTTP or in-memory map tile cache from the preparation stage survives here.
  await context.setOffline(true);
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
- await page.addInitScript(()=>{window.AndroidBridge={onMapReady(){window.mapReady=true;GPS3D.setTrafficEnabled(false);
+ await page.addInitScript(()=>{window.AndroidBridge={prepareMapViewport(){},onMapReady(){window.mapReady=true;GPS3D.setTrafficEnabled(false);
   GPS3D.setRouteMapZoom(16);GPS3D.setNetworkAvailable(false);}}});
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
  await page.waitForFunction(()=>window.mapReady&&GPS3D.mapState().sourceMaxZoom===16);
@@ -60,6 +60,7 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
   await page.evaluate(({point,zoom,dark})=>{GPS3D.setDarkTheme(dark);GPS3D.setLocation(...point,0,0);GPS3D.follow(...point,0,zoom,zoom>16?65:0,1)}, {point,zoom,dark});
   await page.waitForFunction(({zoom,dark})=>{const s=GPS3D.mapState(true);return s.tilesLoaded&&s.sourceMaxZoom===16&&s.dark===dark&&Math.abs(s.zoom-zoom)<.02&&(s.roads>0||s.roadData>0)}, {zoom,dark},{timeout:10000});
   const state=await page.evaluate(()=>GPS3D.mapState(true));
+  assert.ok(state.nativeCacheRequests>0,'vector workers must use the main-thread cache protocol');
   const screenshot=await page.screenshot({path:path.join(output,name+'.png')}),png=PNG.sync.read(screenshot);
   const color=dark?[66,78,90]:[80,89,97];let pixels=0;
   for(let i=0;i<png.data.length;i+=4)if(color.every((c,k)=>Math.abs(c-png.data[i+k])<5))pixels++;

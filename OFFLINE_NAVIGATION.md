@@ -14,6 +14,9 @@ Se incluyen los iconos y fuentes latinas de los estilos de día/noche.
 Anteriormente, `loadUrl` sustituía el `WebViewClient` de la actividad: las descargas se
 guardaban, pero las peticiones del mapa no llegaban a esa caché. La prueba de Android con
 wifi y datos apagados, caché HTTP eliminada y WebView nuevo cubre esta integración.
+Los mosaicos vectoriales pasan por un protocolo de MapLibre ejecutado en el hilo principal,
+porque sus peticiones desde workers pueden evitar el interceptor del WebView. El protocolo
+conserva la cancelación y no interviene en las consultas de tráfico o búsqueda.
 
 El paquete de la ruta se guarda fuera de la caché HTTP de exploración: acercarse, alejarse
 o mirar otra zona no lo desaloja. Una nueva ruta sustituye el corredor anterior y reutiliza

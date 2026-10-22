@@ -69,6 +69,7 @@
 <script src="navigation-road-appearance.js"></script>
 <script src="navigation-styles.js"></script>
 <script src="navigation-basemap.js"></script>
+<script src="navigation-map-cache.js"></script>
 <script src="navigation-maneuvers.js"></script>
 <script src="navigation-traffic.js"></script>
 <script src="navigation-route-traffic.js"></script>
@@ -169,10 +170,12 @@
     // Local vector styles can start immediately, even when individual tiles are offline.
     const baseStyle = NavigationBasemap.themedStyle(NavigationStyles, provider, false, TRAFFIC_API_KEY);
 
+    const nativeMapCache = NavigationMapCache.install(maplibregl, window.AndroidBridge);
     let map;
     try {
         map = new maplibregl.Map({
             container: 'map',
+            transformRequest: nativeMapCache.transformRequest,
             style: baseStyle,
             center: lastLocation,
             zoom: 17.4,
@@ -765,6 +768,7 @@
                 [container.clientWidth,container.clientHeight]] : undefined;
             const features=map.queryRenderedFeatures(region).filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
             return {provider, dark:darkTheme, zoom:map.getZoom(), sourceMaxZoom:snapshot.sources.vectorTiles?.maxzoom,
+                nativeCacheRequests:nativeMapCache.requestCount(),
                 tilesLoaded:map.areTilesLoaded(),
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
                 roadData:includeRoad ? sourceRoads.nearby(lastLocation).length : undefined,
