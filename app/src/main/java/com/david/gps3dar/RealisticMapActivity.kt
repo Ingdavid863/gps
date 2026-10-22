@@ -85,6 +85,9 @@ import kotlin.math.sin
 
 class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, SensorEventListener {
 
+    private lateinit var musicPanel: com.david.gps3dar.music.MusicPanelController
+    private val speechOwner = "phone:${System.identityHashCode(this)}"
+
     private lateinit var webMapView: WebView
     private lateinit var signalRepository: SignalRepository
     private var lastSignalUiMs = 0L
@@ -329,6 +332,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         tts = TextToSpeech(this, this)
 
         bindViews()
+        musicPanel = com.david.gps3dar.music.MusicPanelController(this)
         val recentPrefs = getSharedPreferences("destinations", MODE_PRIVATE)
         recentDestinations = RecentDestinations({ recentPrefs.getString("recent", "[]") ?: "[]" },
             { recentPrefs.edit().putString("recent", it).apply() })
@@ -575,6 +579,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
         settingsVoice.setOnClickListener {
             voiceEnabled = !voiceEnabled
+            if (!voiceEnabled) stopNavigationSpeech()
             refreshSettingsLabels()
         }
         settingsAutoZoom.setOnClickListener {
@@ -692,6 +697,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         modeButton.setOnClickListener { openVrMode() }
         voiceButton.setOnClickListener {
             voiceEnabled = !voiceEnabled
+            if (!voiceEnabled) stopNavigationSpeech()
             refreshSettingsLabels()
             Toast.makeText(
                 this,
@@ -856,9 +862,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) {
-                    if (utteranceId == spokenUtterance) audioManager.abandonAudioFocusRequest(audioFocus)
-                }
+                override fun onDone(utteranceId: String?) = finishSpeech(utteranceId)
+                override fun onStop(utteranceId: String?, interrupted: Boolean) = finishSpeech(utteranceId)
                 @Deprecated("Legacy engine callback")
                 override fun onError(utteranceId: String?) {
                     ui.post {
@@ -866,12 +871,26 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                         if (parts.size == 3 && parts[0] == voiceRouteId.toString()) {
                             announcements.failed(parts.take(2).joinToString(":"), parts[2].toIntOrNull() ?: 0)
                         }
-                        audioManager.abandonAudioFocusRequest(audioFocus)
+                        finishSpeech(utteranceId)
                     }
                 }
             })
             ui.post { if (::instruction.isInitialized) updateNavigationStep(displayLocation) }
         }
+    }
+
+    private fun finishSpeech(utteranceId: String?) {
+        ui.post {
+            if (utteranceId == spokenUtterance) audioManager.abandonAudioFocusRequest(audioFocus)
+            if (utteranceId != null) com.david.gps3dar.music.NavigationAudioDucker.end(speechOwner, utteranceId)
+        }
+    }
+
+    private fun stopNavigationSpeech() {
+        tts.stop()
+        spokenUtterance = ""
+        audioManager.abandonAudioFocusRequest(audioFocus)
+        com.david.gps3dar.music.NavigationAudioDucker.end(speechOwner)
     }
 
     private fun updateEtaColor() {
@@ -2188,7 +2207,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             if (phase > 0 && audioManager.requestAudioFocus(audioFocus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
                 val phrase = if (phase == 3 && !arriving) "Ahora, $message" else "En ${formatDistance(distance)}, $message"
                 spokenUtterance = "$id:$phase"
+                com.david.gps3dar.music.NavigationAudioDucker.begin(speechOwner, spokenUtterance)
                 if (tts.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, spokenUtterance) == TextToSpeech.SUCCESS) announcements.accepted(id, phase)
+                else stopNavigationSpeech()
             }
         }
     }
@@ -2257,8 +2278,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         mapCache.cancel()
         sessionStore.clear()
         findViewById<View>(R.id.mapCacheStatus).visibility = View.GONE
-        tts.stop()
-        audioManager.abandonAudioFocusRequest(audioFocus)
+        stopNavigationSpeech()
 
         syncRoutes()
         routeChoices.visibility = View.GONE
@@ -2572,8 +2592,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         sensorManager.unregisterListener(this)
         webMapView.onPause()
         if (mapReady) jsCall("setTrafficPaused(true)")
-        tts.stop()
-        audioManager.abandonAudioFocusRequest(audioFocus)
+        stopNavigationSpeech()
         super.onPause()
     }
 
@@ -2591,9 +2610,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         placeImageCall?.cancel()
         routeCall?.cancel()
         fusedLocation.removeLocationUpdates(locationCallback)
-        tts.stop()
+        stopNavigationSpeech()
         tts.shutdown()
-        audioManager.abandonAudioFocusRequest(audioFocus)
+        musicPanel.close()
         if (::connectivity.isInitialized) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         (webMapView as SafeWebView).mapResourceInterceptor = null
         mapCache.close()

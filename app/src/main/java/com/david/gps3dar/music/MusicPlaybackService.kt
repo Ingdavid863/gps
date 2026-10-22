@@ -1,0 +1,91 @@
+package com.david.gps3dar.music
+
+import android.app.PendingIntent
+import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
+import com.google.common.util.concurrent.Futures
+import com.david.gps3dar.RealisticMapActivity
+
+/** The service owns playback, so rotating/reopening the map never restarts a song. */
+class MusicPlaybackService : MediaSessionService() {
+    private var session: MediaSession? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val duck: (Float) -> Unit = { volume -> session?.player?.volume = volume }
+    private val checkpoint = object : Runnable {
+        override fun run() {
+            saveQueue()
+            if (session?.player?.isPlaying == true) main.postDelayed(this, 5000)
+        }
+    }
+    override fun onCreate() {
+        super.onCreate()
+        val player = ExoPlayer.Builder(this).build().apply {
+            setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
+            setHandleAudioBecomingNoisy(true)
+            repeatMode = Player.REPEAT_MODE_ALL
+            val saved = MusicQueue.decode(getSharedPreferences(PREFS, MODE_PRIVATE).getString(QUEUE, "").orEmpty())
+            if (saved.tracks.isNotEmpty()) setMediaItems(saved.tracks.map(::mediaItem), saved.index, saved.positionMs)
+        }
+        val openMap = PendingIntent.getActivity(this, 28, Intent(this, RealisticMapActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        session = MediaSession.Builder(this, player).setSessionActivity(openMap)
+            .setCallback(object : MediaSession.Callback {
+                override fun onAddMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo,
+                    mediaItems: List<MediaItem>): com.google.common.util.concurrent.ListenableFuture<List<MediaItem>> {
+                    if (controller.packageName != packageName) return Futures.immediateFailedFuture(SecurityException("App queue only"))
+                    return Futures.immediateFuture(mediaItems.take(MusicQueue.MAX_TRACKS).map { item ->
+                        require(android.net.Uri.parse(item.mediaId).scheme == "content")
+                        item.buildUpon().setUri(item.mediaId).build()
+                    })
+                }
+            }).build()
+        player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION,
+                        Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_POSITION_DISCONTINUITY)) saveQueue()
+                if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
+                    main.removeCallbacks(checkpoint)
+                    if (player.isPlaying) main.postDelayed(checkpoint, 5000)
+                }
+            }
+        })
+        NavigationAudioDucker.observe(duck)
+    }
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+        session?.takeIf { controllerInfo.packageName == packageName || controllerInfo.isTrusted }
+
+    private fun saveQueue() {
+        val player = session?.player ?: return
+        val tracks = (0 until player.mediaItemCount).map { i ->
+            val item = player.getMediaItemAt(i)
+            MusicTrack(item.localConfiguration?.uri?.toString() ?: item.mediaId,
+                item.mediaMetadata.title?.toString() ?: "Canción")
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(QUEUE,
+            MusicQueue(tracks, player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition.coerceAtLeast(0)).encode()).apply()
+    }
+    override fun onDestroy() {
+        main.removeCallbacksAndMessages(null)
+        NavigationAudioDucker.remove(duck)
+        saveQueue()
+        session?.let { it.player.release(); it.release() }
+        session = null
+        super.onDestroy()
+    }
+    companion object {
+        const val PREFS = "gps3d_music"
+        const val QUEUE = "queue"
+        fun mediaItem(track: MusicTrack): MediaItem = MediaItem.Builder().setUri(track.uri).setMediaId(track.uri)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist("Canciones del teléfono").build()).build()
+    }
+}
