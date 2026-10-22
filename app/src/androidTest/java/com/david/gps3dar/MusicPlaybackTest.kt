@@ -96,6 +96,15 @@ class MusicPlaybackTest {
                     val map=activity.findViewById<android.view.View>(R.id.webMapView)
                     assertTrue("music remains inside the footer measured by the map",panel.top>map.height/2)
                 }
+                val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                val values=ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME,"android-music-playing.png")
+                    put(MediaStore.Downloads.MIME_TYPE,"image/png")
+                    put(MediaStore.Downloads.RELATIVE_PATH,"Download/GPS3DARQA")
+                }
+                val screenshot=requireNotNull(context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values))
+                context.contentResolver.openOutputStream(screenshot)!!.use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+                bitmap.recycle()
             } finally { onMain { player.release() } }
         }
     }

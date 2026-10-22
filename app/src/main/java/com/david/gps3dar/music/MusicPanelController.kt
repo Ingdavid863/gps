@@ -48,8 +48,8 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         source.setOnClickListener { showSources() }
         title.setOnClickListener { showSources() }
         subtitle.setOnClickListener { showSources() }
-        previous.setOnClickListener { controller?.seekToPreviousMediaItem() }
-        next.setOnClickListener { controller?.seekToNextMediaItem() }
+        previous.setOnClickListener { skip(forward = false) }
+        next.setOnClickListener { skip(forward = true) }
         play.setOnClickListener {
             controller?.let { player ->
                 if (player.playWhenReady) player.pause() else {
@@ -65,6 +65,12 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
             }.onFailure { subtitle.text = "Toca para volver a abrir la música" }
         }, ContextCompat.getMainExecutor(activity))
         render()
+    }
+    private fun skip(forward: Boolean) {
+        controller?.let { player ->
+            if (forward) player.seekToNextMediaItem() else player.seekToPreviousMediaItem()
+            if (player.playbackState == Player.STATE_IDLE || player.playerError != null) player.prepare()
+        }
     }
     private fun render() {
         if (closed) return
@@ -125,9 +131,9 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         io.execute {
             val tracks = selected.mapNotNull { uri -> runCatching {
                 activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val name = activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                val name = runCatching { activity.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) cursor.getString(0) else null
-                } ?: "Canción"
+                } }.getOrNull() ?: "Canción"
                 MusicTrack(uri.toString(), name.substringBeforeLast('.').ifBlank { name }.take(200))
             }.getOrNull() }
             activity.runOnUiThread {

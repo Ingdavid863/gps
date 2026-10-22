@@ -32,6 +32,7 @@ class MusicPlaybackService : MediaSessionService() {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             setHandleAudioBecomingNoisy(true)
+            setWakeMode(C.WAKE_MODE_LOCAL)
             repeatMode = Player.REPEAT_MODE_ALL
             val saved = MusicQueue.decode(getSharedPreferences(PREFS, MODE_PRIVATE).getString(QUEUE, "").orEmpty())
             if (saved.tracks.isNotEmpty()) setMediaItems(saved.tracks.map(::mediaItem), saved.index, saved.positionMs)
