@@ -1,0 +1,3 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries><provider android:authorities="com.david.gps3dar.test.music" /></queries>
+</manifest>

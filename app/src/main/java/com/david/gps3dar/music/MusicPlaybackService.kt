@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import java.lang.ref.WeakReference
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -28,6 +29,7 @@ class MusicPlaybackService : MediaSessionService() {
     }
     override fun onCreate() {
         super.onCreate()
+        instance = WeakReference(this)
         val player = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
@@ -75,15 +77,32 @@ class MusicPlaybackService : MediaSessionService() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(QUEUE,
             MusicQueue(tracks, player.currentMediaItemIndex.coerceAtLeast(0), player.currentPosition.coerceAtLeast(0)).encode()).apply()
     }
+    /** Release our media-key consumer before the user controls another music app. */
+    private fun handoff() {
+        saveQueue()
+        main.removeCallbacksAndMessages(null)
+        NavigationAudioDucker.remove(duck)
+        val old = session
+        session = null
+        old?.let { val player = it.player; player.pause(); it.release(); player.release() }
+        instance = null
+        stopSelf()
+    }
     override fun onDestroy() {
         main.removeCallbacksAndMessages(null)
         NavigationAudioDucker.remove(duck)
         saveQueue()
         session?.let { it.player.release(); it.release() }
         session = null
+        if (instance?.get() === this) instance = null
         super.onDestroy()
     }
     companion object {
+        private var instance: WeakReference<MusicPlaybackService>? = null
+        fun handoffToExternal() {
+            check(Looper.myLooper() == Looper.getMainLooper())
+            instance?.get()?.handoff()
+        }
         const val PREFS = "gps3d_music"
         const val QUEUE = "queue"
         fun mediaItem(track: MusicTrack): MediaItem = MediaItem.Builder().setUri(track.uri).setMediaId(track.uri)

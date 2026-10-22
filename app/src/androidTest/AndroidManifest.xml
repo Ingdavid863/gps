@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <application>
+        <!-- Runs as the test APK's own UID, outside the instrumented GPS3D process. -->
+        <activity android:name="com.david.gps3dar.fixture.MusicFixtureActivity" android:exported="true" />
+        <service android:name="com.david.gps3dar.fixture.MusicFixtureService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+        <provider android:name="com.david.gps3dar.fixture.MusicFixtureProvider" android:authorities="com.david.gps3dar.test.music" android:exported="true" />
+    </application>
+</manifest>

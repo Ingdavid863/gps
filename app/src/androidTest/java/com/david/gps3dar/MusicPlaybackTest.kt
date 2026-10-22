@@ -19,6 +19,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.david.gps3dar.music.*
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,6 +32,10 @@ class MusicPlaybackTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context: Context = instrumentation.targetContext
     private val documents = mutableListOf<Uri>()
+    @Before fun selectLocalPlayerForLocalAudioTests() {
+        context.getSharedPreferences(MusicPlaybackService.PREFS,Context.MODE_PRIVATE).edit()
+            .putString(MusicPanelController.SOURCE,MusicPanelController.LOCAL).commit()
+    }
     private fun onMain(block: () -> Unit) = instrumentation.runOnMainSync(block)
     private fun await(message: String, timeoutMs: Long = 12000, check: () -> Boolean) {
         val deadline=SystemClock.elapsedRealtime()+timeoutMs
