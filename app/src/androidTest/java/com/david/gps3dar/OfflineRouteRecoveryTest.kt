@@ -1,6 +1,8 @@
 package com.david.gps3dar
 
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.SystemClock
 import android.widget.EditText
 import android.widget.TextView
@@ -55,10 +57,25 @@ class OfflineRouteRecoveryTest {
         InstrumentationRegistry.getInstrumentation().targetContext.deleteFile("saved-navigation.json")
     }
     @After fun clearSavedNavigation() = cleanSavedNavigation()
+    private fun deviceInternet(online: Boolean) {
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        for(transport in listOf("wifi","data"))
+            instrumentation.uiAutomation.executeShellCommand("svc $transport ${if(online) "enable" else "disable"}")
+                .use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
+        val connectivity=instrumentation.targetContext.getSystemService(ConnectivityManager::class.java)
+        val deadline=SystemClock.elapsedRealtime()+15000
+        fun connected()=connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)==true
+        while(SystemClock.elapsedRealtime()<deadline&&(if(online)!connected() else connectivity.activeNetwork!=null))Thread.sleep(100)
+        if(online)assertTrue("device internet restored for subsequent cases",connected())
+        else assertNull("restore case has no internet transport",connectivity.activeNetwork)
+    }
 
     @Test fun selectedWholeRouteAndTurnsRestoreAfterActivityRecreationWhileOffline() {
         val points=(0..200).map{RealisticMapActivity.GeoPoint(23.1+it*.001,-110.0)}
-        ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
+        try {
+            deviceInternet(false)
+            ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
             scenario.onActivity { activity -> network(activity,false);activate(activity,points) }
             await(scenario){File(it.filesDir,"saved-navigation.json").isFile}
             scenario.recreate()
@@ -71,8 +88,12 @@ class OfflineRouteRecoveryTest {
                 assertEquals("Llegaste al destino",(steps.single() as RealisticMapActivity.NavStep).instruction)
                 assertEquals("Destino de prueba",activity.findViewById<EditText>(R.id.searchInput).text.toString())
             }
-            await(scenario){it.findViewById<TextView>(R.id.mapCacheStatus).text.contains("Sin internet")}
-        }
+            await(scenario){activity ->
+                val text=activity.findViewById<TextView>(R.id.mapCacheStatus).text
+                !field("networkAvailable").getBoolean(activity)&&
+                    (text.contains("Sin internet")||text.contains("disponibles sin conexión"))
+            }
+        } } finally { deviceInternet(true) }
     }
     @Test fun wrongTurnRequestsAFastRouteAndResumesAsSoonAsInternetReturns() {
         val initial=listOf(RealisticMapActivity.GeoPoint(23.1,-110.0),RealisticMapActivity.GeoPoint(23.103,-110.0))
