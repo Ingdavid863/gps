@@ -1,6 +1,6 @@
 # GPS3D 0.27 — vista de conducción 3D
 
-La vista inicial usa la cámara detrás del vehículo, zoom 18.65 y un carro blanco
+La vista inicial usa la cámara detrás del vehículo, zoom de conducción 19.3 y un carro blanco
 con cristal panorámico, luces y sombra. Se conserva el anclaje geográfico elevado,
 la corrección a carreteras, el movimiento continuo y el ciclo del ojo: conducción,
 recorrido completo y plano. Los botones de zoom siguen disponibles.

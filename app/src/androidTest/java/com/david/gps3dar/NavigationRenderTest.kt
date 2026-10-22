@@ -66,6 +66,11 @@ class NavigationRenderTest {
             assertEquals("true",evaluate(scenario,"""(() => {
                 const s=GPS3D.navigationState(),start=s.remaining.geometry.coordinates[0];
                 return NavigationMotion.distance(s.vehicle,start)<2.5 &&
+                    s.groundRoute.features.filter(f=>f.properties.kind==='ribbon').every(f=>{
+                        const ring=f.geometry.coordinates[0],left=ring[0],right=ring[ring.length-2];
+                        const center=left.map((v,i)=>(v+right[i])/2);
+                        return NavigationMotion.distance(start,center)<.15;
+                    }) &&
                     getComputedStyle(document.getElementById('traffic-status')).display==='none' &&
                     getComputedStyle(document.getElementById('signal-status')).display==='none' &&
                     getComputedStyle(document.querySelector('.maplibregl-ctrl-attrib')).display==='none' &&

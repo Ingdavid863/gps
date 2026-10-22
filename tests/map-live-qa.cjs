@@ -71,6 +71,18 @@ const measurements=[],statuses={};
  for(let i=0;i<driving.data.length;i+=4){const [r,g,b]=driving.data.subarray(i,i+3);
   if(Math.abs(r-80)<5&&Math.abs(g-89)<5&&Math.abs(b-97)<5)drivingRoadPixels++;}
  assert.ok(drivingRoadPixels>200,'real asphalt must be visible behind the car; pixels='+drivingRoadPixels);
+ phase='street-scene';
+ await page.evaluate(({point,bearing,road,segment})=>{
+  GPS3D.setRoutes([point,...road.slice(segment+1)],[],[]);GPS3D.setLocation(...point,bearing,0,true);
+  GPS3D.follow(...point,bearing,19.3,65,1);
+ },{point:drivePoint,bearing:driveBearing,road,segment});
+ await page.waitForFunction(()=>{const s=GPS3D.mapState(true);return s.tilesLoaded&&s.roadData>0&&Math.abs(s.zoom-19.3)<.02},null,{timeout:30000});
+ assert.ok((await page.evaluate(()=>GPS3D.navigationState())).groundRoute.features.length>1);
+ await page.screenshot({path:path.join(output,'day-street-scene.png')});
+ await page.evaluate(()=>{GPS3D.setDarkTheme(true)});
+ await page.waitForFunction(()=>{const s=GPS3D.mapState();return s.dark&&s.tilesLoaded},null,{timeout:30000});
+ await page.screenshot({path:path.join(output,'night-street-scene.png')});
+ await page.evaluate(()=>{GPS3D.setRoutes([],[],[]);GPS3D.setDarkTheme(false)});
  phase='night';
  await page.evaluate(()=>{const g=window.GPS3D;g.setLocation(-99.133209,19.432608,0,0);
   g.follow(-99.133209,19.432608,0,14,0,1);g.setDarkTheme(true)});
@@ -85,6 +97,7 @@ const measurements=[],statuses={};
  await page.evaluate(()=>window.GPS3D.follow(-99.133209,19.432608,0,12,0,1));
  await page.waitForFunction(()=>{const s=window.GPS3D.mapState();return Math.abs(s.zoom-12)<.02&&s.tilesLoaded&&s.rendered>0},{},{timeout:5000});
  const cachedMs=Date.now()-start;
+ console.log('Prepared offline viewport timing',JSON.stringify({cachedMs}));
  assert.ok(cachedMs<1500,'complete prepared viewport stays responsive offline');
  const offline=await page.evaluate(()=>window.GPS3D.mapState());
  assert.ok(offline.rendered>=measurements.find(m=>m.zoom===12).rendered*.70,'offline viewport must have full coverage, not a single surviving tile');

@@ -179,7 +179,7 @@
             transformRequest: nativeMapCache.transformRequest,
             style: baseStyle,
             center: lastLocation,
-            zoom: 18.65,
+            zoom: 19.3,
             pitch: 65,
             bearing: 0,
             maxPitch: 70,
@@ -242,10 +242,8 @@
         return rendered.length?rendered:sourceRoads.nearby(point);
     }
     let vehiclePose=null, vehicleOnRoute=false;
-    let lastFloorRenderAt=0;
-    function renderRouteFloor(force=false,now=performance.now()) {
-        if(!ready||(!force&&now-lastFloorRenderAt<140))return;
-        lastFloorRenderAt=now;
+    function renderRouteFloor() {
+        if(!ready)return;
         map.getSource('gps-route-floor')?.setData(NavigationDrivingScene.routeFloor(remainingRoutePoints,pedestrianRoute));
         for(const id of ['gps-route-floor-glow','gps-route-floor-ribbon','gps-route-floor-chevrons'])
             setLayerVisible(id,viewMode===1&&!pedestrianRoute);
@@ -260,7 +258,7 @@
         remainingRoutePoints=routePath.remaining(renderedRouteAlong);
         renderedRoutePoints=remainingRoutePoints;
         map.getSource('gps-route-active')?.setData(lineData(renderedRoutePoints));
-        renderRouteFloor(force,now);
+        renderRouteFloor();
         // Alternatives are useful while choosing a route. Once moving,
         // their untravelled full polylines must not resemble a trail behind the vehicle.
         ['gps-route-alt-1-layer','gps-route-alt-2-layer'].forEach(id=>
@@ -360,7 +358,9 @@
 
     function setLayerVisible(id, visible) {
         if (map.getLayer(id)) {
-            try { map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none'); } catch (_) {}
+            const value=visible?'visible':'none',current=map.getLayoutProperty(id,'visibility');
+            if(current===value||(visible&&current===undefined))return;
+            try { map.setLayoutProperty(id, 'visibility', value); } catch (_) {}
         }
     }
 
@@ -377,7 +377,7 @@
         } catch (_) {}
     }
 
-    function applyVisuals() {
+    function applyVisuals(adjustPitch=false) {
         if (!ready) return;
         const preparedOffline = !networkAvailable && routeMapZoom !== null;
         const terrainActive = visuals.is3D && visuals.terrain && !preparedOffline && !!map.getSource(TERRAIN_ID);
@@ -397,7 +397,7 @@
         setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         if (areaTraffic) { areaTraffic.setEnabled(trafficEnabled); areaTraffic.setRouteActive(activeRoutePoints.length>1); }
         applySky(visuals.is3D && !darkTheme);
-        if (viewMode !== 2) map.easeTo({ pitch: viewMode === 1 ? 65 : 0, duration: 180, essential: true });
+        if (adjustPitch && viewMode !== 2) map.easeTo({ pitch: viewMode === 1 ? 65 : 0, duration: 180, essential: true });
     }
 
     function connectionStyle() {
@@ -932,7 +932,7 @@
             cameraMotion = null;
             map.stop();
             visuals.is3D = viewMode===1;
-            applyVisuals();
+            applyVisuals(true);
             renderRemainingRoute(true);
             if (viewMode === 2) showOverview();
             renderRouteTraffic();
