@@ -34,10 +34,10 @@ class ExternalMusicControlTest {
     private val prefs get()=context.getSharedPreferences(MusicPlaybackService.PREFS,Context.MODE_PRIVATE)
     private val documents=mutableListOf<Uri>()
     private fun main(block: ()->Unit)=instrumentation.runOnMainSync(block)
-    private fun await(message: String, check: ()->Boolean) {
+    private fun await(message: String, details: (() -> String)? = null, check: ()->Boolean) {
         val end=SystemClock.elapsedRealtime()+15000
         while(SystemClock.elapsedRealtime()<end) { if(check())return;Thread.sleep(60) }
-        fail(message)
+        fail(message + (details?.let { " · " + it() } ?: ""))
     }
     private fun state(): JSONObject=context.contentResolver.query(fixture,null,null,null,null)!!.use {
         check(it.moveToFirst());JSONObject(it.getString(0))
@@ -50,10 +50,17 @@ class ExternalMusicControlTest {
     private fun click(scenario: ActivityScenario<RealisticMapActivity>, id: Int) {
         scenario.onActivity { it.findViewById<android.view.View>(id).performClick() }
     }
-    private fun clickText(text: String) {
+    private fun clickText(text: String, dialogTitle: String = "Música para tu viaje") {
         await("dialog option appears: $text") {
-            val nodes=instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(text).orEmpty()
-            nodes.firstOrNull { it.text?.toString()==text }?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
+            val root=instrumentation.uiAutomation.rootInActiveWindow
+            // The song title is also in the map behind the dialog. Wait for the dialog window,
+            // otherwise a fast accessibility click can reopen the source menu instead of selecting a track.
+            if(root?.findAccessibilityNodeInfosByText(dialogTitle).orEmpty().none { it.text?.toString()==dialogTitle }) false
+            else {
+                val node=root?.findAccessibilityNodeInfosByText(text).orEmpty().firstOrNull { it.text?.toString()==text }
+                node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true ||
+                    node?.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
+            }
         }
     }
     private fun startExternalAudio() {
@@ -135,9 +142,13 @@ class ExternalMusicControlTest {
                 startExternalAudio()
                 click(scenario,R.id.musicNext)
                 await("local queue cannot intercept the external next command") { state().optInt("next")==1 && state().optInt("index")==1 }
-                click(scenario,R.id.musicSourceButton);clickText("Mi lista de canciones");clickText("Mi archivo conservado")
+                click(scenario,R.id.musicSourceButton);clickText("Mi lista de canciones");clickText("Mi archivo conservado","Mis canciones")
                 val restored=connect()
-                try { await("saved local music can be selected again") {
+                try { await("saved local music can be selected again",details={
+                    var detail=""
+                    main { detail="connected=${restored.isConnected}, playing=${restored.isPlaying}, requested=${restored.playWhenReady}, state=${restored.playbackState}, item=${restored.currentMediaItem?.mediaId}, error=${restored.playerError}" }
+                    detail
+                }) {
                     var playing=false;main { playing=restored.isPlaying && restored.currentMediaItem?.mediaId==song.uri };playing
                 } } finally { main { restored.release() } }
                 await("returning to local music uses Android audio focus to pause the other player") { !state().optBoolean("playing") }
