@@ -107,6 +107,7 @@ class NavigationRenderTest {
             evaluate(scenario,"GPS3D.setRouteProgress(${target.getDouble(0)},${target.getDouble(1)},1);true")
             val arrived=JSONObject(evaluate(scenario,"GPS3D.navigationState()"))
             assertEquals("No route stroke after arrival",0,arrived.getJSONObject("remaining").getJSONArray("features").length())
+            assertEquals("No ground ribbon after arrival",0,arrived.getJSONObject("groundRoute").getJSONArray("features").length())
             assertEquals(0,arrived.getJSONObject("traffic").getJSONArray("features").length())
         }
     }

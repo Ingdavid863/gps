@@ -103,6 +103,8 @@ class WholeRouteOfflineMapTest {
                     .put("failures",state.optJSONObject("failures")).put("cacheRequests",state.optInt("nativeCacheRequests"))
                 assertTrue("prepared native road data must be available: $diagnostic",state.optInt("roadData")>0)
                 assertTrue("worker tiles use the native cache",state.optInt("nativeCacheRequests")>0)
+                assertTrue("driving buildings reuse the prepared primary vector map",state.optInt("sceneBuildings")>=5)
+                assertEquals("true",js(scenario,"GPS3D.navigationState().groundRoute.features.length>1 && !!document.querySelector('.vehicle-car polygon[fill=\"#eff6fc\"]')"))
                 Thread.sleep(250)
                 val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot());val pixels=IntArray(bitmap.width*bitmap.height)
                 bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)

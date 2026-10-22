@@ -41,7 +41,7 @@ jobs:
       - name: Save encrypted signing recovery copy
         uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-0.26.0-encrypted-signing-backup
+          name: GPS3D-0.27.0-encrypted-signing-backup
           path: build/signing-backup/
           retention-days: 30
       - name: Validate live service credentials
@@ -73,7 +73,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.26.0-map-validation
+          name: GPS3D-0.27.0-map-validation
           path: |
             build/map-qa/
             build/traffic-qa/
@@ -100,7 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.26.0-android-validation
+          name: GPS3D-0.27.0-android-validation
           path: |
             build/native-map-qa/
             app/build/outputs/androidTest-results/connected/
@@ -116,12 +116,12 @@ jobs:
           assert certificate == expected, 'APK must match the backed-up test certificate'
           badging = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'badging', str(apk)], text=True)
           package = badging.splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='32'" in package and "versionName='0.26.0-beta-offline'" in package, package
+          assert "name='com.david.gps3dar'" in package and "versionCode='33'" in package and "versionName='0.27.0-beta-3d'" in package, package
           manifest = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
           assert not any(permission in manifest for permission in ['BIND_ACCESSIBILITY_SERVICE', 'BIND_NOTIFICATION_LISTENER_SERVICE', 'READ_SMS', 'RECEIVE_SMS', 'REQUEST_INSTALL_PACKAGES', 'SYSTEM_ALERT_WINDOW'])
           assert not re.search(r'android:debuggable[^\n]*0xffffffff', manifest)
           assert re.search(r"sdkVersion:'26'", badging), 'Android minimum version must remain compatible'
-          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.26.0-beta-offline.apk')
+          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.27.0-beta-3d.apk')
           destination.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, destination)
           print(package)
@@ -131,8 +131,8 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.26.0-beta-offline
-          path: build/delivery/GPS3D-AR-David-0.26.0-beta-offline.apk
+          name: GPS3D-AR-David-0.27.0-beta-3d
+          path: build/delivery/GPS3D-AR-David-0.27.0-beta-3d.apk
 
 
   signal-health:
@@ -167,7 +167,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.26.0-signal-validation
+          name: GPS3D-0.27.0-signal-validation
           path: |
             app/build/signal-qa/
             app/build/test-results/testDebugUnitTest/

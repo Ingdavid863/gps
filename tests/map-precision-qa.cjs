@@ -16,12 +16,25 @@ function tile(z,x,y) {
             Math.max(...points.map(p=>p[1]))<0||Math.min(...points.map(p=>p[1]))>4096)return null;
         const geometry=[9,zig(points[0][0]),zig(points[0][1]),(points.length-1)*8+2];
         for(let i=1;i<points.length;i++)geometry.push(zig(points[i][0]-points[i-1][0]),zig(points[i][1]-points[i-1][1]));
-        return field(2,Buffer.concat([integer(1,index+1),field(2,Buffer.concat([varint(0),varint(index),varint(1),varint(2)])),integer(3,2),
+        return field(2,Buffer.concat([integer(1,index+1),field(2,Buffer.concat([varint(0),varint(index),varint(1),varint(2),varint(2),varint(index+3)])),integer(3,2),
             field(4,Buffer.concat(geometry.map(varint)))]));
     }).filter(Boolean);
-    const layer=Buffer.concat([field(1,Buffer.from('Major road')),...encoded,field(3,Buffer.from('direction')),field(3,Buffer.from('z_level')),
-        ...roads.map(r=>field(4,integer(6,zig(r.direction)))),field(4,integer(6,0)),integer(5,4096),integer(15,2)]);
-    return field(3,layer);
+    const layer=Buffer.concat([field(1,Buffer.from('Major road')),...encoded,field(3,Buffer.from('direction')),field(3,Buffer.from('z_level')),field(3,Buffer.from('lanes')),
+        ...roads.map(r=>field(4,integer(6,zig(r.direction)))),field(4,integer(6,0)),field(4,integer(6,zig(4))),field(4,integer(6,zig(2))),integer(5,4096),integer(15,2)]);
+    const buildings=[[[-35,75],[-17,75],[-17,105],[-35,105]],[[32,130],[67,130],[67,158],[32,158]]].map((ring,index)=>{
+        const points=ring.map(p=>at(...p)).map(([lon,lat])=>[Math.round(((lon+180)/360*size-x)*4096),
+            Math.round(((1-Math.asinh(Math.tan(lat*Math.PI/180))/Math.PI)/2*size-y)*4096)]);
+        if(Math.max(...points.map(p=>p[0]))<0||Math.min(...points.map(p=>p[0]))>4096||
+            Math.max(...points.map(p=>p[1]))<0||Math.min(...points.map(p=>p[1]))>4096)return null;
+        const geometry=[9,zig(points[0][0]),zig(points[0][1]),26];
+        for(let i=1;i<points.length;i++)geometry.push(zig(points[i][0]-points[i-1][0]),zig(points[i][1]-points[i-1][1]));
+        geometry.push(15);
+        return field(2,Buffer.concat([integer(1,index+10),field(2,Buffer.concat([varint(0),varint(0)])),integer(3,3),
+            field(4,Buffer.concat(geometry.map(varint)))]));
+    }).filter(Boolean);
+    const block=Buffer.concat([field(1,Buffer.from('Other building')),...buildings,field(3,Buffer.from('height')),
+        field(4,integer(6,zig(12))),integer(5,4096),integer(15,2)]);
+    return Buffer.concat([field(3,layer),field(3,block)]);
 }
 let server,browser;
 (async()=>{
@@ -33,6 +46,7 @@ let server,browser;
         if(url==='/navigation-styles.js'){
             const style={version:8,sources:{vectorTiles:{type:'vector',tiles:[`http://127.0.0.1:${server.address().port}/roads/{z}/{x}/{y}.pbf`],maxzoom:18}},
                 layers:[{id:'background',type:'background',paint:{'background-color':'#2b3440'}},
+                    {id:'fixture-building',type:'fill',source:'vectorTiles','source-layer':'Other building',paint:{'fill-color':'#536279'}},
                     {id:'fixture-road',type:'line',source:'vectorTiles','source-layer':'Major road',filter:['!has','z_level'],
                         paint:{'line-color':'#b5a576','line-width':14}}]};
             res.setHeader('Content-Type','text/javascript');res.end('window.NavigationStyles='+JSON.stringify({fallback:style})+';');return;
@@ -83,11 +97,19 @@ let server,browser;
         GPS3D.follow(...points[0],0,18.7,65,1);
     },[at(0,40),at(0,100),at(100,200),at(100,400)]);
     await page.waitForTimeout(600);
+    const scene=await page.evaluate(()=>({map:GPS3D.mapState(),navigation:GPS3D.navigationState()}));
+    assert.ok(scene.map.sceneBuildings>0,'3D buildings use the primary vector tiles');
+    assert.ok(scene.navigation.groundRoute.features.some(f=>f.properties.kind==='ribbon'),'chosen route has a ground ribbon');
+    assert.ok(await page.locator('.vehicle-car polygon[fill="#eff6fc"]').count()>0,'white car is bundled locally');
     const captures=path.resolve(__dirname,'../app/build/ar-qa');fs.mkdirSync(captures,{recursive:true});
     await page.screenshot({path:path.join(captures,'roads-driving-night.png')});
     await page.evaluate(()=>GPS3D.setDarkTheme(false));
     await page.waitForTimeout(300);
     await page.screenshot({path:path.join(captures,'roads-driving-day.png')});
+    await page.evaluate(()=>GPS3D.setViewMode(0));
+    assert.equal((await page.evaluate(()=>GPS3D.mapState())).sceneBuildings,0,'flat view hides 3D volumes');
+    await page.evaluate(()=>{GPS3D.setViewMode(1);GPS3D.setRoutes([],[],[])});
+    assert.equal((await page.evaluate(()=>GPS3D.navigationState())).groundRoute.features.length,0,'stopping removes ground ribbon and chevrons');
     await page.evaluate(p=>{
         GPS3D.setRoutes([],[],[]);GPS3D.setLocation(...p,0,26,false,15,true);
         GPS3D.follow(...p,0,18.7,65,1);

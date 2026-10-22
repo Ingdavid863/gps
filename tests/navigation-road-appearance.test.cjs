@@ -9,9 +9,9 @@ test('road presentation preserves provider geometry, access filters and bridge d
         const unchanged=JSON.stringify(original),styled=appearance.decorate(JSON.parse(unchanged),name==='night');
         assert.deepEqual(styled.sources,original.sources,'no fabricated or new road sources');
         const detail=styled.layers.filter(l=>l.id.startsWith('road-detail-'));
-        assert.ok(detail.length>0);assert.ok(detail.length<180,'bounded layer count');
+        assert.ok(detail.length>0);assert.ok(detail.length<240,'bounded layer count, including optional lane markings');
         assert.equal(new Set(styled.layers.map(l=>l.id)).size,styled.layers.length);
-        assert.deepEqual(styled.layers.filter(l=>!l.id.startsWith('road-detail-')).map(l=>l.id),original.layers.map(l=>l.id));
+        assert.deepEqual(styled.layers.filter(l=>!l.id.startsWith('road-detail-')&&!l.id.startsWith('scene-building-')).map(l=>l.id),original.layers.map(l=>l.id));
         for(const layer of original.layers) {
             const changed=styled.layers.find(l=>l.id===layer.id);
             assert.deepEqual(changed.filter,layer.filter,'preserve road level and access conditions');
@@ -22,12 +22,26 @@ test('road presentation preserves provider geometry, access filters and bridge d
         }
         for(const layer of detail){
             assert.ok(layer.minzoom>=17,'distant and overview maps avoid dense markings');
-            const id=layer.id.replace(/^road-detail-(edge|divider)-/,'');
-            const road=original.layers.find(l=>l.id===id);
+            const road=original.layers.filter(l=>layer.id.endsWith('-'+l.id)).sort((a,b)=>b.id.length-a.id.length)[0];
+            const id=road.id;
             assert.equal(layer['source-layer'],road['source-layer']);
             assert.deepEqual(layer.filter,road.filter);
             const index=styled.layers.findIndex(l=>l.id===id);
-            assert.ok(styled.layers.indexOf(layer)<=index+2,'details stay with their road, below later bridge levels');
+            assert.ok(styled.layers.indexOf(layer)<=index+5,'details stay with their road, below later bridge levels');
+        }
+    }
+});
+test('close roads keep a consistent ground scale and buildings reuse the saved primary tiles',()=>{
+    assert.equal(appearance.widthAt(['interpolate',['linear'],['zoom'],16,4,18,16],19),32);
+    for(const name of ['day','night']) {
+        const original=context.window.NavigationStyles[name];
+        const styled=appearance.decorate(JSON.parse(JSON.stringify(original)),name==='night');
+        const buildings=styled.layers.filter(l=>l.id.startsWith('scene-building-'));
+        assert.ok(buildings.length>=5);
+        for(const layer of buildings){assert.equal(layer.source,'vectorTiles');assert.equal(layer.type,'fill-extrusion');}
+        for(const layer of styled.layers.filter(l=>l.id.startsWith('road-detail-lane-'))){
+            assert.match(JSON.stringify(layer.paint['line-opacity']),/"lanes"/,'unknown lane counts stay hidden');
+            assert.match(JSON.stringify(layer.paint['line-opacity']),/oneway|direction/,'extra separators require one-way data');
         }
     }
 });

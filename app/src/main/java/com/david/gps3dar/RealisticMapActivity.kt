@@ -273,7 +273,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private var is3D = true
     private var terrainEnabled = false
-    private var buildingsEnabled = false
+    private var buildingsEnabled = true
     private var satelliteEnabled = false
     private var voiceEnabled = true
     private var autoZoomEnabled = false
@@ -2647,7 +2647,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         const val SEARCH_DEBOUNCE_MS = 150L
         const val DEFAULT_FOLLOW_RESUME_MS = 8000L
         const val VR_MAX_SPEED_KMH = 20f
-        const val DEFAULT_ZOOM_PRESET_INDEX = 2
+        const val DEFAULT_ZOOM_PRESET_INDEX = 4
         val ZOOM_PRESETS = doubleArrayOf(16.20, 16.80, 17.40, 18.00, 18.65)
     }
 }

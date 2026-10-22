@@ -27,9 +27,13 @@
             const t = base === 1 ? (zoom - a) / (b - a) : (base ** (zoom - a) - 1) / (base ** (b - a) - 1);
             return step ? x : x + (y - x) * t;
         }
-        return stops.at(-1)[1];
+        // Legacy non-toll roads often stop at zoom 18, while the matching toll
+        // geometry continues doubling its width. Keep the close view at the same
+        // ground scale instead of freezing ordinary avenues into thin map strokes.
+        const last = stops.at(-1);
+        return last[1] * (last[0] >= 16 ? 2 ** Math.max(0, zoom - last[0]) : 1);
     }
-    function width(value, extra = 0) {
+    function width(value, extra = 0, fraction = 1) {
         const expression = ['interpolate', ['exponential', 1.3], ['zoom']];
         const originalStops = value?.stops?.map(s => s[0]) ||
             (Array.isArray(value) ? value.filter((v, i) => i >= 3 && i % 2 === 1 && typeof v === 'number') : []);
@@ -38,7 +42,8 @@
             const w = widthAt(value, zoom);
             if (w === null) return value;
             const scale = zoom <= 16 ? 1 : Math.min(1.65, 1 + (zoom - 16) * .26);
-            expression.push(zoom, Math.max(0, w * scale + extra));
+            const pixels = Math.max(0, w * scale + extra);
+            expression.push(zoom, typeof fraction === 'number' ? pixels * fraction : ['*', pixels, fraction]);
         }
         return expression;
     }
@@ -47,11 +52,23 @@
         for (const original of style.layers) {
             const layer = clone(original);
             layers.push(layer);
+            // Footprints and height come from the vector tiles already saved with
+            // the route. No second building provider is needed in the driving view.
+            if (layer.type === 'fill' && !/shadow/i.test(layer.id) &&
+                /^(?:Other|School|Factory|Hospital|Hotel) building$/.test(layer['source-layer'] || '')) {
+                layers.push({id:'scene-building-' + layer.id, type:'fill-extrusion', source:layer.source,
+                    'source-layer':layer['source-layer'], minzoom:16,
+                    ...(layer.filter ? {filter:clone(layer.filter)} : {}),
+                    paint:{'fill-extrusion-color':dark ? '#43546c' : '#b8cbd4',
+                        'fill-extrusion-height':['max',0,['min',160,['to-number',['get','height'],7]]],
+                        'fill-extrusion-base':0, 'fill-extrusion-opacity':.66,
+                        'fill-extrusion-vertical-gradient':true}});
+            }
             if (!roadLayer(layer) || /under construction/i.test(layer.id)) continue;
             const casing = /outline|casing| t$/.test(layer.id), paint = layer.paint || (layer.paint = {});
             paint['line-color'] = casing ? (dark ? '#71808a' : '#b8b7ad') : (dark ? '#424e5a' : '#505961');
             paint['line-width'] = width(original.paint?.['line-width'] ?? 1);
-            if (casing || /link|minor|local|street/.test(layer.id.toLowerCase())) continue;
+            if (casing || /link|minor/.test(layer.id.toLowerCase())) continue;
             // Detail appears only close to the road; the overview stays legible.
             const base = {type:'line', source:layer.source, 'source-layer':layer['source-layer'],
                 minzoom:Math.max(17, layer.minzoom || 0), layout:{'line-cap':'butt','line-join':'round'},
@@ -74,6 +91,24 @@
                 'line-width':['interpolate',['linear'],['zoom'],17,.5,19.3,1.1],
                 'line-dasharray':[7,6]
             }});
+            // Surveyed lane counts are optional. Never infer three/four lanes from
+            // a road class, and never turn these markings into a lane recommendation.
+            // Add them only at ground level, leaving bridge/tunnel ordering intact.
+            if (/- level|tunnel|bridge/.test(layer.id)) continue;
+            const count=['to-number',['get','lanes'],0];
+            const known=['all',oneWay,['>=',count,2],['<=',count,6],['==',['%',count,1],0]];
+            const ink=condition=>['case',['all',known,condition],.82,0];
+            layers.push({...base,id:'road-detail-lane-center-'+layer.id,paint:{
+                'line-color':'#f0f5f5','line-width':1.05,'line-dasharray':[7,6],
+                'line-opacity':ink(['==',['%',count,2],0])}});
+            for(let i=0;i<2;i++) {
+                const numerator=['case',['==',['%',count,2],0],2*(i+1),2*i+1];
+                const fraction=['/',numerator,['max',count,1]];
+                layers.push({...base,id:'road-detail-lane-pair-'+i+'-'+layer.id,paint:{
+                    'line-color':'#f0f5f5','line-width':1.05,'line-dasharray':[7,6],
+                    'line-gap-width':width(original.paint?.['line-width'] ?? 1,-3,fraction),
+                    'line-opacity':ink(['<',numerator,count])}});
+            }
         }
         style.layers = layers;
         return style;

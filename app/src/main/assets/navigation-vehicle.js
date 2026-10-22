@@ -24,15 +24,18 @@
         const outline=[[-.68,-2.13],[.68,-2.13],[.92,-1.76],[.92,1.62],[.66,2.13],[-.66,2.13],[-.92,1.62],[-.92,-1.76]];
         const lower=outline.map(([x,y])=>[x,y,.34]),upper=outline.map(([x,y])=>[x*.95,y*.98,.72]);
         for(let i=0;i<outline.length;i++)faces.push({points:[lower[i],lower[(i+1)%8],upper[(i+1)%8],upper[i]],
-            color:['#13834b','#179e57','#118747','#29bd68','#31c879','#1caa5d','#0e8349','#159450'][i]});
-        faces.push({points:upper,color:'#35d377'});
+            color:['#a8bac9','#e8eff4','#b4c3cf','#f8fbff','#e7eff7','#cedce7','#a9bbc9','#dbe6ef'][i]});
+        faces.push({points:upper,color:'#eff6fc'});
         // Sloping cabin, front windshield toward +Y; rear glass toward the camera.
         const low=[[-.8,-1.1,.73],[.8,-1.1,.73],[.77,1.2,.73],[-.77,1.2,.73]];
         const high=[[-.64,-.65,1.36],[.64,-.65,1.36],[.62,.55,1.36],[-.62,.55,1.36]];
         [[0,1,'#173b43'],[1,2,'#123b41'],[2,3,'#365d65'],[3,0,'#34666b']].forEach(([a,b,color])=>
             faces.push({points:[low[a],low[b],high[b],high[a]],color}));
-        faces.push({points:high,color:'#48dc87'});
-        box(-.84,-2.18,.46,.84,-2.12,.67,['#125f3b']);
+        faces.push({points:high,color:'#152a3c'});
+        // White roof rails and a small rear spoiler frame the panoramic glass.
+        for(const x of [-.67,.57])box(x,-.67,1.36,x+.1,.59,1.4,['#f3f8fd']);
+        box(-.67,-.76,1.32,.67,-.62,1.4,['#edf5fc']);
+        box(-.84,-2.18,.46,.84,-2.12,.67,['#acbfce']);
         for (const x of [-.81,.39]) box(x,-2.195,.54,x+.42,-2.18,.66,['#ff4e59']);
         box(-.32,-2.2,.43,.32,-2.19,.53,['#e3e6d3']);
         for (const x of [-.82,.45]) box(x,2.13,.54,x+.37,2.15,.65,['#ebf7ed']);
@@ -41,7 +44,7 @@
             box(x,-2.08,.72,x+.34,-1.98,.74,['#ff515e']);
             box(x,1.93,.72,x+.34,2.03,.74,['#e6fff4']);
         }
-        for(const x of [-1.05,.82])box(x,.35,.76,x+.23,.64,.87,['#148c50','#0c7644','#219f5b','#28b567','#4ddb84']);
+        for(const x of [-1.05,.82])box(x,.35,.76,x+.23,.64,.87,['#c9dae7','#96aebe','#deebf4','#f0f7fc','#fcfeff']);
         box(-.69,-2.22,.25,.69,-2.14,.36,['#142a27']);
         return faces;
     }
@@ -50,7 +53,7 @@
         const ca=Math.cos(a),sa=Math.sin(a),cp=Math.cos(p),sp=Math.sin(p);
         return point=>{
             const x=point[0]*ca+point[1]*sa,y=point[1]*ca-point[0]*sa;
-            return {x:40+x*12,y:48-(y*cp+point[2]*sp)*12,depth:y*sp-point[2]*cp};
+            return {x:40+x*16,y:48-(y*cp+point[2]*sp)*16,depth:y*sp-point[2]*cp};
         };
     }
     const project=(point,pitch,yaw)=>projector(pitch,yaw)(point);
@@ -66,7 +69,7 @@
             node.setAttribute('stroke-width','.35');return {...face,node};
         });
         const shadow=document.createElementNS(NS,'ellipse');
-        shadow.setAttribute('cx','40');shadow.setAttribute('cy','50');shadow.setAttribute('rx','15');
+        shadow.setAttribute('cx','40');shadow.setAttribute('cy','50');shadow.setAttribute('rx','20');
         shadow.setAttribute('fill','#081c22');shadow.setAttribute('opacity','.34');
         let lastPitch=NaN,lastYaw=NaN;
         function update(pitch,yaw) {

@@ -71,7 +71,7 @@ const {chromium} = require(process.env.GPS3D_QA_NODE_MODULES + '/playwright');
  await page.waitForFunction(()=>Math.abs(window.GPS3D.cameraState().pitch)<.01,null,{timeout:10000});
  assert.ok(Math.abs((await page.evaluate(()=>window.GPS3D.cameraState())).pitch)<.01,'third click restores default view');
  assert.deepEqual(errors,[]);
- console.log('Browser map QA passed: local green car, geographic anchor, overview lock and three camera modes; no JS errors.');
+ console.log('Browser map QA passed: local white car, geographic anchor, overview lock and three camera modes; no JS errors.');
  await browser.close();server.close();
 })().catch(e=>{console.error(e);process.exit(1)});
 
