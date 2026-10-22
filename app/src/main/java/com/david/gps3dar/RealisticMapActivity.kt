@@ -372,6 +372,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val viewportChanged = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncViewport() }
         findViewById<View>(R.id.bottomPanel).addOnLayoutChangeListener(viewportChanged)
         findViewById<View>(R.id.turnBanner).addOnLayoutChangeListener(viewportChanged)
+        findViewById<View>(R.id.mapControlButtons).addOnLayoutChangeListener(viewportChanged)
+        placePreview.addOnLayoutChangeListener(viewportChanged)
         webMapView.addOnLayoutChangeListener(viewportChanged)
         webMapView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> resizeSearchSuggestions() }
         handleNavigationIntent(intent)
@@ -2517,6 +2519,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun syncViewport() {
+        layoutMapControls()
         if (!mapReady || webMapView.height <= 0) return
         val mapPosition = IntArray(2); webMapView.getLocationInWindow(mapPosition)
         val topPosition = IntArray(2); val top = findViewById<View>(R.id.turnBanner); top.getLocationInWindow(topPosition)
@@ -2524,6 +2527,30 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val topFraction = ((topPosition[1] + top.height - mapPosition[1]).toDouble() / webMapView.height).coerceIn(0.0, 0.45)
         val bottomFraction = ((mapPosition[1] + webMapView.height - bottomPosition[1]).toDouble() / webMapView.height).coerceIn(0.0, 0.45)
         jsCall("setViewport(${num(topFraction)},${num(bottomFraction)})")
+    }
+
+    /** Keep every control reachable when the music footer leaves a short map viewport. */
+    private fun layoutMapControls() {
+        if (webMapView.height <= 0) return
+        val mapPosition = IntArray(2); webMapView.getLocationInWindow(mapPosition)
+        val footer = findViewById<View>(R.id.bottomPanel)
+        val footerPosition = IntArray(2); footer.getLocationInWindow(footerPosition)
+        if (footer.isShown) {
+            val previewParams = placePreview.layoutParams as android.widget.FrameLayout.LayoutParams
+            val margin = footer.height + (footer.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin + dp(8)
+            if (previewParams.bottomMargin != margin) { previewParams.bottomMargin = margin; placePreview.layoutParams = previewParams }
+        }
+        val controls = findViewById<View>(R.id.mapControls)
+        if (controls.visibility != View.VISIBLE) return
+        val banner = findViewById<View>(R.id.turnBanner)
+        val bannerPosition = IntArray(2); banner.getLocationInWindow(bannerPosition)
+        val top = if (banner.isShown) bannerPosition[1] + banner.height - mapPosition[1] + dp(8) else dp(8)
+        val bottom = if (footer.isShown) footerPosition[1] - mapPosition[1] - dp(8) else webMapView.height - dp(8)
+        val height = minOf(findViewById<View>(R.id.mapControlButtons).measuredHeight, (bottom - top).coerceAtLeast(1)).coerceAtLeast(1)
+        val params = controls.layoutParams as android.widget.FrameLayout.LayoutParams
+        if (params.topMargin != top || params.height != height) {
+            params.topMargin = top; params.height = height; controls.layoutParams = params
+        }
     }
 
     private fun distanceAlongRouteToIndex(targetIndex: Int): Double {

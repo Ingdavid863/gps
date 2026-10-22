@@ -9,6 +9,8 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.widget.ImageButton
 import android.widget.TextView
+import android.widget.ScrollView
+import android.view.View
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -30,8 +32,8 @@ class MusicPlaybackTest {
     private val context: Context = instrumentation.targetContext
     private val documents = mutableListOf<Uri>()
     private fun onMain(block: () -> Unit) = instrumentation.runOnMainSync(block)
-    private fun await(message: String, check: () -> Boolean) {
-        val deadline=SystemClock.elapsedRealtime()+12000
+    private fun await(message: String, timeoutMs: Long = 12000, check: () -> Boolean) {
+        val deadline=SystemClock.elapsedRealtime()+timeoutMs
         var okay=false
         while(!okay && SystemClock.elapsedRealtime()<deadline) {
             onMain { okay=check() }
@@ -96,6 +98,35 @@ class MusicPlaybackTest {
                     val map=activity.findViewById<android.view.View>(R.id.webMapView)
                     assertTrue("music remains inside the footer measured by the map",panel.top>map.height/2)
                 }
+                await("the map is ready for visual inspection",30000) {
+                    var ready=false
+                    scenario.onActivity { ready=RealisticMapActivity::class.java.getDeclaredField("mapReady").apply { isAccessible=true }.getBoolean(it) }
+                    ready
+                }
+                await("lateral controls never overlap the banner or music footer") {
+                    var okay=false
+                    scenario.onActivity { activity ->
+                        val controls=activity.findViewById<ScrollView>(R.id.mapControls)
+                        val banner=activity.findViewById<View>(R.id.turnBanner)
+                        val footer=activity.findViewById<View>(R.id.bottomPanel)
+                        val c=IntArray(2);val b=IntArray(2);val f=IntArray(2)
+                        controls.getLocationInWindow(c);banner.getLocationInWindow(b);footer.getLocationInWindow(f)
+                        okay=c[1]>=b[1]+banner.height && c[1]+controls.height<=f[1]
+                    }
+                    okay
+                }
+                scenario.onActivity { it.findViewById<ScrollView>(R.id.mapControls).fullScroll(View.FOCUS_DOWN) }
+                await("all lower controls can be reached on a short screen") {
+                    var okay=false
+                    scenario.onActivity {
+                        val report=it.findViewById<View>(R.id.reportButton)
+                        val rect=android.graphics.Rect()
+                        okay=report.getGlobalVisibleRect(rect) && rect.height()==report.height
+                    }
+                    okay
+                }
+                scenario.onActivity { it.findViewById<ScrollView>(R.id.mapControls).fullScroll(View.FOCUS_UP) }
+                instrumentation.waitForIdleSync()
                 val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
                 val values=ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME,"android-music-playing.png")

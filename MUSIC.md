@@ -10,6 +10,6 @@ Las indicaciones del mapa, la navegación peatonal AR y Android Auto reducen tem
 
 Spotify y YouTube Music tienen accesos directos, junto con un acceso al reproductor que Android tenga instalado. Se abren en su propia aplicación y se puede regresar al GPS mientras continúan sonando. Estos accesos no son una integración de catálogo/cuenta ni controles remotos de Spotify/YouTube dentro de GPS3D. Los botones del panel controlan únicamente los archivos elegidos en GPS3D; las apps externas conservan sus controles en Android. No se incluyen claves OAuth, SDKs de streaming ni acceso a notificaciones ajenas.
 
-La fila de música está dentro del panel inferior ya medido por setViewport: la cámara y el carro reservan el espacio real de todo el panel. Se mantiene el tema automático, los controles del mapa, las casetas y la ruta completa sin conexión.
+La fila de música está dentro del panel inferior ya medido por setViewport: la cámara y el carro reservan el espacio real de todo el panel. Los controles laterales quedan entre las indicaciones y el panel inferior; cuando no caben todos se pueden desplazar verticalmente. La ficha de un lugar reserva la altura real del panel inferior. Se mantiene el tema automático, las casetas y la ruta completa sin conexión.
 
 Fuentes técnicas: [MediaSessionService](https://developer.android.com/media/media3/session/background-playback), [audio focus](https://developer.android.com/media/optimize/audio-focus), [documentos seleccionados por el usuario](https://developer.android.com/training/data-storage/shared/documents-files).
