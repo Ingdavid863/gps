@@ -1,4 +1,4 @@
-# GPS3D 0.26 — ruta guardada y recálculo
+# GPS3D 0.30 — ruta guardada, mapa y recálculo
 
 Al activar una ruta, GPS3D guarda la polilínea completa, los giros, instrucciones, destino,
 duración y preferencias de casetas. La sesión se restaura al volver a abrir el mapa,
@@ -6,8 +6,8 @@ sin consultar nuevamente el servicio. «Detener» elimina la sesión activa.
 
 La descarga prepara todos los segmentos hasta el destino, incluyendo calles cercanas y
 todos los niveles 3–16. Ya no existe el recorte a 10 km/320 mosaicos. El detalle vectorial
-16 se amplía en las vistas cercanas sin conexión; al reconectar se recupera el detalle
-online 18. No cambia el zoom de la cámara, la posición del carro ni la geometría de la ruta.
+16 se amplía en las vistas cercanas durante la ruta, con o sin datos móviles.
+Fuera de una ruta activa, la exploración en línea usa hasta nivel 18. No cambia el zoom de la cámara, la posición del carro ni la geometría de la ruta.
 Se incluyen los iconos y fuentes latinas de los estilos de día/noche.
 
 `SafeWebView` conserva el interceptor de mapas junto al cargador de recursos seguros.
