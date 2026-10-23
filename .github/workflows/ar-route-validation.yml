@@ -113,6 +113,11 @@ jobs:
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-precision-qa.cjs
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-live-qa.cjs
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-offline-route-qa.cjs
+      - name: Require all WebGL map checks before creating a delivery
+        if: always() && steps.map_checks.outcome != 'success'
+        run: |
+          echo 'Map validation must pass before an APK can be delivered.'
+          exit 1
       - name: Compile app and exercise route geometry and continuity
         env:
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
@@ -150,11 +155,6 @@ jobs:
             adb shell pm list instrumentation
             adb shell am instrument -w -r -e class com.david.gps3dar.SharedDestinationIntentTest com.david.gps3dar.test/androidx.test.runner.AndroidJUnitRunner > build/ar-native-qa/release-share-intents.txt
             python3 -c "from pathlib import Path; text = Path('build/ar-native-qa/release-share-intents.txt').read_text(); print(text); assert 'OK (1 test)' in text and 'FAILURES' not in text"
-      - name: Require all WebGL map checks before creating a delivery
-        if: always() && steps.map_checks.outcome != 'success'
-        run: |
-          echo 'Map validation must pass before an APK can be delivered.'
-          exit 1
       - name: Verify APK identity and authorized test signing
         run: |
           python3 - <<'PY'

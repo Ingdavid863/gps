@@ -51,8 +51,10 @@ object MapTilePlanner {
             fun add(cx: Int, cy: Int) {
                 if (cx == lastX && cy == lastY) return
                 lastX = cx; lastY = cy
-                // Two neighbouring tiles cover the driving viewport and nearby side streets.
-                for (dx in -2..2) for (dy in -2..2) {
+                // The close pitched viewport exposes one extra row behind the car
+                // while zooming out. Keep that transition inside the saved corridor.
+                val radius = if (z == OFFLINE_MAX_ZOOM) 3 else 2
+                for (dx in -radius..radius) for (dy in -radius..radius) {
                     val yy = cy + dy
                     if (yy in 0 until n) result.add(Tile(z, ((cx + dx) % n + n) % n, yy))
                 }

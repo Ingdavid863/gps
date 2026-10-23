@@ -24,7 +24,8 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
  const urls=new Set(),tile=(lon,lat,z)=>[Math.floor((lon+180)/360*2**z),Math.floor((1-Math.asinh(Math.tan(lat*Math.PI/180))/Math.PI)/2*2**z)];
  for(let z=3;z<=16;z++)for(const point of points){
   const [x,y]=tile(...point,z),n=2**z;
-  for(let dx=-2;dx<=2;dx++)for(let dy=-2;dy<=2;dy++)if(y+dy>=0&&y+dy<n)
+  const radius=z===16?3:2;
+  for(let dx=-radius;dx<=radius;dx++)for(let dy=-radius;dy<=radius;dy++)if(y+dy>=0&&y+dy<n)
    urls.add(`https://a.api.tomtom.com/map/1/tile/basic/main/${z}/${(x+dx+n)%n}/${y+dy}.pbf?key=${encodeURIComponent(key)}`);
  }
  const style='https://api.tomtom.com/style/1',sprite=style+'/sprite/22.2.1-9/sprite';
