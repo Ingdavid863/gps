@@ -800,6 +800,7 @@
                 tilesLoaded:map.areTilesLoaded(),
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
                 roadData:includeRoad ? sourceRoads.nearby(lastLocation).length : undefined,
+                roadDetails:includeRoad ? sourceRoads.nearby(lastLocation).map(f=>({layer:f.sourceLayer,properties:f.properties,geometry:f.geometry})) : undefined,
                 roadGeometry:includeRoad ? features.filter(f=>f.layer.type==='line' && NavigationRoadPosition.isRoad(f))
                     .flatMap(f=>f.geometry?.type==='LineString' ? [f.geometry.coordinates] :
                         f.geometry?.type==='MultiLineString' ? f.geometry.coordinates : [])

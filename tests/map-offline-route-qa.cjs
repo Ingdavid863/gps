@@ -77,13 +77,21 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
    Math.abs(c.pitch-(zoom>16?65:0))<.02&&(s.roads>0||s.roadData>0)}, {point,zoom,dark,bearing:courseAt(point)},{timeout:10000});
   const state=await page.evaluate(()=>GPS3D.mapState(true));
   assert.ok(state.nativeCacheRequests>0,'vector workers must use the main-thread cache protocol');
-  const screenshot=await page.screenshot({path:path.join(output,name+'.png')}),png=PNG.sync.read(screenshot);
+  await page.screenshot({path:path.join(output,name+'.png')});
+  // A narrow road may be entirely covered by the route highlight. Measure the base map
+  // independently, while still requiring the navigation overlay to survive every stage.
+  const visible=await page.evaluate(()=>GPS3D.navigationState().remaining);
+  assert.ok(visible&&visible.geometry.coordinates.length>1,'saved route guidance remains available');
+  await page.evaluate(()=>GPS3D.setRoutes([],[],[]));
+  await page.waitForTimeout(180); // Allow the GeoJSON worker to remove the highlight before measuring asphalt.
+  const screenshot=await page.screenshot({path:path.join(output,name+'-basemap.png')}),png=PNG.sync.read(screenshot);
   const color=dark?[66,78,90]:[80,89,97];let pixels=0;
   for(let i=0;i<png.data.length;i+=4)if(color.every((c,k)=>Math.abs(c-png.data[i+k])<5))pixels++;
   fs.writeFileSync(path.join(output,'latest.json'),JSON.stringify({name,routeMetres:chosen.summary.lengthInMeters,point,camera:await page.evaluate(()=>GPS3D.cameraState()),state,pixels,requests:requests.slice(before)},null,2));
   assert.ok(pixels>100,'actual streets render offline at '+name+', pixels='+pixels);
   assert.ok(requests.slice(before).filter(r=>/\/map\/1\/tile\//.test(r.path)).every(r=>r.saved),'no uncached detailed map requests during offline travel');
   measurements.push({name,zoom,roads:state.roads,roadData:state.roadData,streetPixels:pixels});
+  await page.evaluate(points=>GPS3D.setRoutes(points,[],[]),points);
  }
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements},null,2));
  console.log('Whole-route offline WebGL passed: Los Cabos mobile-data loss and offline travel',JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements}));
