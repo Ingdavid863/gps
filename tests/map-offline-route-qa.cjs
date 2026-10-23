@@ -59,20 +59,28 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
  await page.waitForFunction(()=>window.mapReady&&GPS3D.mapState().sourceMaxZoom===16);
  await page.evaluate(points=>{GPS3D.setRoutes(points,[],[]);GPS3D.setViewport(.25,.16);},points);
  const measurements=[];
+ const courseAt=point=>{
+  const i=points.findIndex(p=>p[0]===point[0]&&p[1]===point[1]),j=Math.max(1,i),a=points[j-1],b=points[j];
+  return (Math.atan2((b[0]-a[0])*Math.cos(point[1]*Math.PI/180),b[1]-a[1])*180/Math.PI+360)%360;
+ };
  for(const [name,point,zoom,dark] of [['mobile-data',middle,18.65,false],['middle',middle,18.65,false],['destination',points.at(-1),18.65,true],['overview',points.at(-1),12,true]]){
   const online=name==='mobile-data';await context.setOffline(!online);
   await page.evaluate(online=>GPS3D.setNetworkAvailable(online),online);
   assert.equal(await page.evaluate(()=>navigator.onLine),online,'exercise both mobile-data and true offline states');
   phase=name;console.log('Offline route phase',phase);
   const before=requests.length;
-  await page.evaluate(({point,zoom,dark})=>{GPS3D.setDarkTheme(dark);GPS3D.setLocation(...point,0,0);GPS3D.follow(...point,0,zoom,zoom>16?65:0,1)}, {point,zoom,dark});
-  await page.waitForFunction(({zoom,dark})=>{const s=GPS3D.mapState(true);return s.tilesLoaded&&s.sourceMaxZoom===16&&s.dark===dark&&Math.abs(s.zoom-zoom)<.02&&(s.roads>0||s.roadData>0)}, {zoom,dark},{timeout:10000});
+  await page.evaluate(({point,zoom,dark,bearing})=>{GPS3D.setDarkTheme(dark);GPS3D.setLocation(...point,bearing,0);GPS3D.follow(...point,bearing,zoom,zoom>16?65:0,1)}, {point,zoom,dark,bearing:courseAt(point)});
+  // jumpTo-based camera animation does not set isMoving(). Wait for the actual destination
+  // centre as well as zoom, or a same-zoom trip can capture the next viewport before its tiles load.
+  await page.waitForFunction(({point,zoom,dark,bearing})=>{const s=GPS3D.mapState(true),c=GPS3D.cameraState(),b=GPS3D.navigationState().cameraBearing;return s.tilesLoaded&&s.sourceMaxZoom===16&&s.dark===dark&&Math.abs(s.zoom-zoom)<.02&&
+   Math.abs(c.center[0]-point[0])<1e-6&&Math.abs(c.center[1]-point[1])<1e-6&&Math.abs((b-bearing+540)%360-180)<.1&&
+   Math.abs(c.pitch-(zoom>16?65:0))<.02&&(s.roads>0||s.roadData>0)}, {point,zoom,dark,bearing:courseAt(point)},{timeout:10000});
   const state=await page.evaluate(()=>GPS3D.mapState(true));
   assert.ok(state.nativeCacheRequests>0,'vector workers must use the main-thread cache protocol');
   const screenshot=await page.screenshot({path:path.join(output,name+'.png')}),png=PNG.sync.read(screenshot);
   const color=dark?[66,78,90]:[80,89,97];let pixels=0;
   for(let i=0;i<png.data.length;i+=4)if(color.every((c,k)=>Math.abs(c-png.data[i+k])<5))pixels++;
-  fs.writeFileSync(path.join(output,'latest.json'),JSON.stringify({name,routeMetres:chosen.summary.lengthInMeters,point,state,pixels,requests:requests.slice(before)},null,2));
+  fs.writeFileSync(path.join(output,'latest.json'),JSON.stringify({name,routeMetres:chosen.summary.lengthInMeters,point,camera:await page.evaluate(()=>GPS3D.cameraState()),state,pixels,requests:requests.slice(before)},null,2));
   assert.ok(pixels>100,'actual streets render offline at '+name+', pixels='+pixels);
   assert.ok(requests.slice(before).filter(r=>/\/map\/1\/tile\//.test(r.path)).every(r=>r.saved),'no uncached detailed map requests during offline travel');
   measurements.push({name,zoom,roads:state.roads,roadData:state.roadData,streetPixels:pixels});
