@@ -5,7 +5,7 @@
     function roadLayer(layer) {
         if (layer.type !== 'line') return false;
         const source = layer['source-layer'] || '';
-        if (/(?:road|motorway)(?: tunnel)?$/i.test(source)) return !/ferry|walkway|pedestrian/i.test(source);
+        if (/(?:road|motorway)(?: tunnel)?$/i.test(source)) return !/ferry|walkway|pedestrian|non public/i.test(source);
         return source === 'transportation' && /^(road|bridge|tunnel)_/.test(layer.id) &&
             !/rail|path|pedestrian|service_track/.test(layer.id);
     }
@@ -64,14 +64,10 @@
                         'fill-extrusion-base':0, 'fill-extrusion-opacity':.66,
                         'fill-extrusion-vertical-gradient':true}});
             }
-            if (!roadLayer(layer) || /under construction|non public road dots/i.test(layer.id)) continue;
+            if (!roadLayer(layer) || /under construction/i.test(layer.id)) continue;
             const casing = /outline|casing| t$/.test(layer.id), paint = layer.paint || (layer.paint = {});
             paint['line-color'] = casing ? (dark ? '#71808a' : '#b8b7ad') : (dark ? '#424e5a' : '#505961');
             paint['line-width'] = width(original.paint?.['line-width'] ?? 1);
-            // Airport/terminal access roads can be marked non-public by the provider.
-            // Keep their actual asphalt visible while preserving the restriction dots,
-            // access filters and their exclusion from automatic GNSS road matching.
-            if (/non public/i.test(layer['source-layer'] || '')) continue;
             if (casing || /link|minor/.test(layer.id.toLowerCase())) continue;
             // Detail appears only close to the road; the overview stays legible.
             const base = {type:'line', source:layer.source, 'source-layer':layer['source-layer'],

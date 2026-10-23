@@ -4,7 +4,9 @@ const {chromium,request}=require(process.env.GPS3D_QA_NODE_MODULES+'/playwright'
 const {PNG}=require(process.env.GPS3D_QA_NODE_MODULES+'/pngjs');
 const key=process.env.TOMTOM_API_KEY;assert.ok(key,'service credential required');
 const base=path.resolve(__dirname,'../app/src/main/assets'),output=path.resolve('build/map-qa/offline-route');fs.mkdirSync(output,{recursive:true});
-const start=[-109.9124,22.8905],end=[-109.7211,23.1518],resources=new Map(),requests=[];
+// Use the actual vehicle access street. The airport centroid used previously
+// snaps to a provider Walkway road; even levels 17/18 have no drivable asphalt there.
+const start=[-109.9124,22.8905],end=[-109.71625,23.15763],resources=new Map(),requests=[];
 let server,browser,api,phase='route';
 const watchdog=setTimeout(()=>{console.error(JSON.stringify({phase,saved:resources.size,error:'Whole-route map QA exceeded six minutes'}));process.exit(1)},360000);
 const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'https://a.api.tomtom.com/map/');
