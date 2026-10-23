@@ -1169,7 +1169,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         if (match != null && moving > .6f) lastCameraBearing = match.segmentBearing
         else if (reliableNavigationCourse(raw)) {
             // WebView animates the fresh heading continuously; filtering it once per fix creates steps.
-            lastCameraBearing = raw.bearing.toDouble()
+            lastCameraBearing = raw!!.bearing.toDouble()
         }
 
         if (viewMode == 2 || SystemClock.elapsedRealtime() < manualCameraUntilMs) return
