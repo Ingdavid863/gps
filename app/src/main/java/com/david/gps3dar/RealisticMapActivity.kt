@@ -1152,7 +1152,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val raw = rawLocation
         val match = lastRouteMatch
         val onRoute = routeActive && match != null && distanceMeters(location.latitude,location.longitude,match.lat,match.lon) < .5
-        val bearing = if (onRoute) match!!.bearing else if (reliableNavigationCourse(raw)) raw!!.bearing.toDouble() else lastCameraBearing
+        val bearing = if (onRoute) match!!.segmentBearing else if (reliableNavigationCourse(raw)) raw!!.bearing.toDouble() else lastCameraBearing
         val accuracy = raw?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0
         val headingReliable = reliableNavigationCourse(raw)
         jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())},$onRoute,${num(accuracy)},$headingReliable)")
@@ -1166,10 +1166,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val moving = rawLocation?.speed ?: 0f
         val raw = rawLocation
         val match = lastRouteMatch?.takeIf { routeActive && distanceMeters(location.latitude,location.longitude,it.lat,it.lon) < .5 }
-        if (match != null && moving > .6f) lastCameraBearing = match.bearing
+        if (match != null && moving > .6f) lastCameraBearing = match.segmentBearing
         else if (reliableNavigationCourse(raw)) {
             // WebView animates the fresh heading continuously; filtering it once per fix creates steps.
-            lastCameraBearing = raw!!.bearing.toDouble()
+            lastCameraBearing = raw.bearing.toDouble()
         }
 
         if (viewMode == 2 || SystemClock.elapsedRealtime() < manualCameraUntilMs) return
