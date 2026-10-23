@@ -221,7 +221,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="end"
             android:layout_marginTop="3dp"
-            android:text="Preparando mapa próximo…"
+            android:text="Preparando mapa de toda la ruta…"
             android:textColor="#27313A"
             android:textSize="11sp"
             android:visibility="gone" />
@@ -286,13 +286,21 @@
             android:visibility="gone" />
     </LinearLayout>
 
-    <LinearLayout
+    <ScrollView
         android:id="@+id/mapControls"
-        android:layout_width="56dp"
+        android:layout_width="64dp"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|center_vertical"
+        android:layout_gravity="end|top"
         android:layout_marginEnd="12dp"
-        android:orientation="vertical">
+        android:overScrollMode="never"
+        android:fadeScrollbars="false"
+        android:scrollbars="vertical">
+        <LinearLayout
+            android:id="@+id/mapControlButtons"
+            android:layout_width="56dp"
+            android:layout_height="wrap_content"
+            android:paddingStart="4dp"
+            android:orientation="vertical">
 
         <androidx.appcompat.widget.AppCompatImageButton
             android:id="@+id/changeDestinationButton"
@@ -311,7 +319,7 @@
             android:layout_height="52dp"
             android:layout_marginTop="8dp"
             android:background="@drawable/floating_button"
-            android:contentDescription="Cambiar a vista isométrica"
+            android:contentDescription="Mostrar inicio y final de la ruta"
             android:elevation="8dp"
             android:padding="14dp"
             android:src="@drawable/ic_eye" />
@@ -390,7 +398,8 @@
             android:text="⚠"
             android:textColor="#D85319"
             android:textSize="23sp" />
-    </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
 
     <LinearLayout
         android:id="@+id/placePreview"
@@ -615,6 +624,71 @@
                 android:textColor="#202124"
                 android:textSize="12sp"
                 android:textStyle="bold" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/musicPanel"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <ImageButton
+                android:id="@+id/musicSourceButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_music"
+                android:contentDescription="Elegir música" />
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/musicTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Música"
+                    android:textColor="#27313A"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+                <TextView
+                    android:id="@+id/musicSubtitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Añadir canciones o abrir una app"
+                    android:textColor="#6A6D70"
+                    android:textSize="10sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+            </LinearLayout>
+            <ImageButton
+                android:id="@+id/musicPrevious"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_music_previous"
+                android:contentDescription="Canción anterior"
+                android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/musicPlayPause"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_music_play"
+                android:contentDescription="Reproducir música"
+                android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/musicNext"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_music_next"
+                android:contentDescription="Canción siguiente"
+                android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

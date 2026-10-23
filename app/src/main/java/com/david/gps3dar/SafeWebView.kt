@@ -14,6 +14,9 @@ class SafeWebView @JvmOverloads constructor(
     defStyleAttr: Int = android.R.attr.webViewStyle
 ) : WebView(context, attrs, defStyleAttr) {
 
+    // Keep map interception alongside secure local assets when loadUrl installs its client.
+    @Volatile var mapResourceInterceptor: ((String) -> WebResourceResponse?)? = null
+
     private val assetLoader = WebViewAssetLoader.Builder()
         .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
         .build()
@@ -24,6 +27,7 @@ class SafeWebView @JvmOverloads constructor(
             request: WebResourceRequest
         ): WebResourceResponse? {
             return assetLoader.shouldInterceptRequest(request.url)
+                ?: mapResourceInterceptor?.invoke(request.url.toString())
                 ?: super.shouldInterceptRequest(view, request)
         }
     }

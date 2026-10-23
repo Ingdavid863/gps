@@ -3,7 +3,7 @@ const { padding, overviewPoints } = require('../app/src/main/assets/navigation-v
 for (const [width, height, top, bottom] of [[390, 840, .25, .16], [360, 720, .28, .19], [430, 932, .22, .15]]) {
     const p = padding(width, height, top, bottom, false);
     const anchorY = (height + p.top - p.bottom) / 2;
-    assert.ok(Math.abs(anchorY - (height * (1 - bottom) - 48)) < 0.01);
+    assert.ok(Math.abs(anchorY - (height * (1 - bottom) - 60)) < 0.01);
     assert.ok(anchorY > height * top);
     assert.ok(p.top + p.bottom < height);
     const all = padding(width, height, top, bottom, true);

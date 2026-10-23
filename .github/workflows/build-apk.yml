@@ -25,23 +25,25 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Restore stable debug signing key
+          cache-read-only: false
+      - name: Restore the persistent precision test signing key
         uses: actions/cache/restore@v4
         with:
-          path: ~/.gps3d/debug.keystore
-          key: gps3d-debug-signing-v2
-      - name: Prepare explicit signing key
-        run: |
-          mkdir -p "$HOME/.gps3d"
-          if [ ! -s "$HOME/.gps3d/debug.keystore" ]; then
-            keytool -genkeypair -keystore "$HOME/.gps3d/debug.keystore" -storepass android -keypass android -alias androiddebugkey -dname "CN=GPS3D AR David, O=Android, C=MX" -keyalg RSA -keysize 2048 -validity 10000
-          fi
-          echo "GPS3D_DEBUG_KEYSTORE=$HOME/.gps3d/debug.keystore" >> "$GITHUB_ENV"
-      - name: Persist signing key for future updates
+          path: ~/.gps3d/precision-test.keystore
+          key: gps3d-precision-test-signing-v3
+      - name: Prepare authorized test signing and encrypted recovery copy
+        run: python3 scripts/prepare_test_signing.py
+      - name: Cache the test signing key for subsequent builds
         uses: actions/cache/save@v4
         with:
-          path: ~/.gps3d/debug.keystore
-          key: gps3d-debug-signing-v2
+          path: ~/.gps3d/precision-test.keystore
+          key: gps3d-precision-test-signing-v3
+      - name: Save encrypted signing recovery copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPS3D-0.30.0-encrypted-signing-backup
+          path: build/signing-backup/
+          retention-days: 30
       - name: Validate live service credentials
         env:
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
@@ -66,11 +68,12 @@ jobs:
           "$RUNNER_TEMP/gps3d-qa/node_modules/.bin/playwright" install --with-deps chromium
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-live-qa.cjs
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-offline-route-qa.cjs
           GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/traffic-live-qa.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.23.0-map-validation
+          name: GPS3D-0.30.0-map-validation
           path: |
             build/map-qa/
             build/traffic-qa/
@@ -97,7 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.23.0-android-validation
+          name: GPS3D-0.30.0-android-validation
           path: |
             build/native-map-qa/
             app/build/outputs/androidTest-results/connected/
@@ -109,16 +112,16 @@ jobs:
           sdk = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools' / '36.0.0'
           report = subprocess.check_output([str(sdk / 'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
           certificate = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', report).group(1)
-          expected = 'afefdcd54dc7194464ef8dd4860ca09566100a12bbbc29acc05a3a4d4c81f620'
-          assert certificate == expected, 'APK must preserve the installed 0.14 signing certificate'
+          expected = os.environ['GPS3D_EXPECTED_SIGNING_SHA256']
+          assert certificate == expected, 'APK must match the backed-up test certificate'
           badging = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'badging', str(apk)], text=True)
           package = badging.splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='29'" in package and "versionName='0.23.0-beta-car'" in package, package
+          assert "name='com.david.gps3dar'" in package and "versionCode='36'" in package and "versionName='0.30.0-beta-navigation-audio'" in package, package
           manifest = subprocess.check_output([str(sdk / 'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
-          assert not any(permission in manifest for permission in ['BIND_ACCESSIBILITY_SERVICE', 'BIND_NOTIFICATION_LISTENER_SERVICE', 'READ_SMS', 'RECEIVE_SMS', 'REQUEST_INSTALL_PACKAGES', 'SYSTEM_ALERT_WINDOW'])
+          assert not any(permission in manifest for permission in ['BIND_ACCESSIBILITY_SERVICE', 'BIND_NOTIFICATION_LISTENER_SERVICE', 'MEDIA_CONTENT_CONTROL', 'READ_SMS', 'RECEIVE_SMS', 'REQUEST_INSTALL_PACKAGES', 'SYSTEM_ALERT_WINDOW'])
           assert not re.search(r'android:debuggable[^\n]*0xffffffff', manifest)
           assert re.search(r"sdkVersion:'26'", badging), 'Android minimum version must remain compatible'
-          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.23.0-beta-car.apk')
+          destination = pathlib.Path('build/delivery/GPS3D-AR-David-0.30.0-beta-navigation-audio.apk')
           destination.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, destination)
           print(package)
@@ -128,8 +131,8 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.23.0-beta-car
-          path: build/delivery/GPS3D-AR-David-0.23.0-beta-car.apk
+          name: GPS3D-AR-David-0.30.0-beta-navigation-audio
+          path: build/delivery/GPS3D-AR-David-0.30.0-beta-navigation-audio.apk
 
 
   signal-health:
@@ -153,6 +156,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+          cache-read-only: false
       - name: Verify live signal data in Mexico
         env:
           GPS3D_SIGNAL_LIVE_QA: '1'
@@ -163,7 +167,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.23.0-signal-validation
+          name: GPS3D-0.30.0-signal-validation
           path: |
             app/build/signal-qa/
             app/build/test-results/testDebugUnitTest/

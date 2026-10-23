@@ -1,7 +1,7 @@
 name: Validate route traffic and navigation
 on:
   pull_request:
-    branches: [codex/gps3d-0.14.0]
+    branches: [codex/gps3d-0.14.0, codex/gps3d-0.19.0-ar-continuity]
     paths: ["app/**", "tests/**", "build.gradle.kts", "settings.gradle.kts", "gradle.properties", ".github/workflows/ar-route-validation.yml"]
   workflow_dispatch:
 
@@ -50,20 +50,74 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Restore the existing app signing key
+          cache-read-only: false
+      - name: Restore the persistent precision test signing key
         uses: actions/cache/restore@v4
         with:
-          path: ~/.gps3d/debug.keystore
-          key: gps3d-debug-signing-v2
-      - name: Require the update-compatible signing key
-        run: |
-          test -s "$HOME/.gps3d/debug.keystore"
-          echo "GPS3D_DEBUG_KEYSTORE=$HOME/.gps3d/debug.keystore" >> "$GITHUB_ENV"
+          path: ~/.gps3d/precision-test.keystore
+          key: gps3d-precision-test-signing-v3
+      - name: Prepare authorized test signing and encrypted recovery copy
+        run: python3 scripts/prepare_test_signing.py
+      - name: Cache the test signing key for subsequent builds
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.gps3d/precision-test.keystore
+          key: gps3d-precision-test-signing-v3
+      - name: Save encrypted signing recovery copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: GPS3D-0.30.0-encrypted-signing-backup
+          path: build/signing-backup/
+          retention-days: 30
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Check directional route traffic and map rendering helpers
         run: node --test tests/navigation-*.test.cjs
+      - name: Compile navigation and test offline route storage
+        env:
+          RUN_MUSIC_LIVE_QA: "1"
+          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          test -n "$ARCORE_API_KEY"
+          test -n "$TOMTOM_API_KEY"
+          gradle testDebugUnitTest compileDebugAndroidTestKotlin --stacktrace
+      - name: Verify WebGL marker alignment and preserve map controls
+        id: map_checks
+        continue-on-error: true
+        env:
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, urllib.request
+          version=re.search(r'val mapLibreVersion = "([^"]+)"',pathlib.Path('app/build.gradle.kts').read_text()).group(1)
+          vendor=pathlib.Path('app/src/main/assets/vendor'); vendor.mkdir(exist_ok=True)
+          for name in ('maplibre-gl.js','maplibre-gl.css'):
+              target=vendor/name
+              if target.exists() and target.stat().st_size>1024: continue
+              for host in ('https://cdn.jsdelivr.net/npm/','https://unpkg.com/'):
+                  try:
+                      with urllib.request.urlopen(f'{host}maplibre-gl@{version}/dist/{name}',timeout=30) as response:
+                          data=response.read()
+                      assert len(data)>1024
+                      target.write_bytes(data)
+                      break
+                  except Exception:
+                      continue
+              assert target.exists() and target.stat().st_size>1024, f'Missing bundled {name}'
+          PY
+          npm install --prefix "$RUNNER_TEMP/gps3d-qa" playwright@1.51.1 pngjs@7.0.0
+          "$RUNNER_TEMP/gps3d-qa/node_modules/.bin/playwright" install --with-deps chromium
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-browser-qa.cjs
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-precision-qa.cjs
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-live-qa.cjs
+          GPS3D_QA_NODE_MODULES="$RUNNER_TEMP/gps3d-qa/node_modules" node tests/map-offline-route-qa.cjs
+      - name: Require all WebGL map checks before creating a delivery
+        if: always() && steps.map_checks.outcome != 'success'
+        run: |
+          echo 'Map validation must pass before an APK can be delivered.'
+          exit 1
       - name: Compile app and exercise route geometry and continuity
         env:
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
@@ -71,37 +125,7 @@ jobs:
         run: |
           test -n "$ARCORE_API_KEY"
           test -n "$TOMTOM_API_KEY"
-          gradle testDebugUnitTest assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace
-      - name: Verify update identity
-        run: |
-          python3 - <<'PY'
-          import os, pathlib, re, shutil, subprocess, hashlib
-          apk = pathlib.Path('app/build/outputs/apk/release/app-release.apk')
-          tools = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
-          certificate = subprocess.check_output([str(tools/'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
-          digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', certificate).group(1)
-          assert digest == 'afefdcd54dc7194464ef8dd4860ca09566100a12bbbc29acc05a3a4d4c81f620'
-          package = subprocess.check_output([str(tools/'aapt'), 'dump', 'badging', str(apk)], text=True).splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='29'" in package and "versionName='0.23.0-beta-car'" in package
-          manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
-          forbidden = ['BIND_ACCESSIBILITY_SERVICE', 'accessibilityservice.AccessibilityService',
-                       'BIND_NOTIFICATION_LISTENER_SERVICE', 'READ_SMS', 'RECEIVE_SMS',
-                       'REQUEST_INSTALL_PACKAGES', 'SYSTEM_ALERT_WINDOW', 'AutoRouteShareService']
-          assert not any(item in manifest for item in forbidden), 'Delivered APK must not include privileged automation'
-          assert not re.search(r'android:debuggable[^\n]*0xffffffff', manifest), 'Delivered APK must not be debuggable'
-          assert 'android.permission.CAMERA' in manifest and 'android.permission.ACCESS_FINE_LOCATION' in manifest
-          permissions = subprocess.check_output([str(tools/'aapt'), 'dump', 'permissions', str(apk)], text=True)
-          pathlib.Path('build').mkdir(exist_ok=True)
-          pathlib.Path('build/release-permissions.txt').write_text(permissions)
-          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.23.0-beta-car.apk')
-          out.parent.mkdir(parents=True, exist_ok=True)
-          shutil.copyfile(apk, out)
-          print(package)
-          print('Signature matches installed app:', digest)
-          print('Release manifest checked: no privileged automation; not debuggable')
-          print(permissions)
-          print('APK SHA256:', hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest())
-          PY
+          gradle assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -121,7 +145,7 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell svc power stayon true
-            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest --stacktrace
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.MapControlsTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.LocationPrecisionTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest,com.david.gps3dar.OfflineRouteRecoveryTest,com.david.gps3dar.WholeRouteOfflineMapTest,com.david.gps3dar.MusicPlaybackTest,com.david.gps3dar.ExternalMusicControlTest,com.david.gps3dar.InAppAudioTest --stacktrace
             mkdir -p build/ar-native-qa
             adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
             adb pull /sdcard/Download/GPS3DQA build/ar-native-qa
@@ -131,18 +155,50 @@ jobs:
             adb shell pm list instrumentation
             adb shell am instrument -w -r -e class com.david.gps3dar.SharedDestinationIntentTest com.david.gps3dar.test/androidx.test.runner.AndroidJUnitRunner > build/ar-native-qa/release-share-intents.txt
             python3 -c "from pathlib import Path; text = Path('build/ar-native-qa/release-share-intents.txt').read_text(); print(text); assert 'OK (1 test)' in text and 'FAILURES' not in text"
+      - name: Verify APK identity and authorized test signing
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, shutil, subprocess, hashlib
+          apk = pathlib.Path('app/build/outputs/apk/release/app-release.apk')
+          tools = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools/36.0.0'
+          certificate = subprocess.check_output([str(tools/'apksigner'), 'verify', '--print-certs', str(apk)], text=True)
+          digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', certificate).group(1)
+          assert digest == os.environ['GPS3D_EXPECTED_SIGNING_SHA256'], 'APK must use the backed-up test certificate'
+          package = subprocess.check_output([str(tools/'aapt'), 'dump', 'badging', str(apk)], text=True).splitlines()[0]
+          assert "name='com.david.gps3dar'" in package and "versionCode='36'" in package and "versionName='0.30.0-beta-navigation-audio'" in package
+          manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
+          forbidden = ['BIND_ACCESSIBILITY_SERVICE', 'accessibilityservice.AccessibilityService',
+                       'BIND_NOTIFICATION_LISTENER_SERVICE', 'MEDIA_CONTENT_CONTROL', 'READ_SMS', 'RECEIVE_SMS',
+                       'REQUEST_INSTALL_PACKAGES', 'SYSTEM_ALERT_WINDOW', 'AutoRouteShareService']
+          assert 'MusicFixture' not in manifest, 'External audio fixture belongs only to the test APK'
+          assert not any(item in manifest for item in forbidden), 'Delivered APK must not include privileged automation'
+          assert not re.search(r'android:debuggable[^\n]*0xffffffff', manifest), 'Delivered APK must not be debuggable'
+          assert 'android.permission.CAMERA' in manifest and 'android.permission.ACCESS_FINE_LOCATION' in manifest
+          permissions = subprocess.check_output([str(tools/'aapt'), 'dump', 'permissions', str(apk)], text=True)
+          pathlib.Path('build').mkdir(exist_ok=True)
+          pathlib.Path('build/release-permissions.txt').write_text(permissions)
+          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.30.0-beta-navigation-audio.apk')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(apk, out)
+          print(package)
+          print('Signature matches backed-up test key:', digest)
+          print('Release manifest checked: no privileged automation; not debuggable')
+          print(permissions)
+          print('APK SHA256:', hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest())
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.23.0-validation
+          name: GPS3D-0.30.0-validation
           path: |
             app/build/test-results/testDebugUnitTest/
             app/build/outputs/androidTest-results/connected/
             app/build/reports/androidTests/connected/
             app/build/ar-qa/
+            build/map-qa/
             build/ar-native-qa/
             build/release-permissions.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.23.0-beta-car
-          path: build/delivery/GPS3D-AR-David-0.23.0-beta-car.apk
+          name: GPS3D-AR-David-0.30.0-beta-navigation-audio
+          path: build/delivery/GPS3D-AR-David-0.30.0-beta-navigation-audio.apk

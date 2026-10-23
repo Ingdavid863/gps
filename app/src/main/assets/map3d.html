@@ -9,13 +9,8 @@
         html, body { background: #d9e2e8; font-family: system-ui, -apple-system, sans-serif; }
         #map { background: #d9e2e8; }
         .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { bottom: 128px; }
-        .vehicle-wrap { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,.48)); }
-        .vehicle-arrow {
-            width: 31px; height: 35px;
-            background: #19b45b;
-            clip-path: polygon(50% 0%, 89% 100%, 50% 78%, 11% 100%);
-            border-radius: 3px;
-        }
+        .vehicle-wrap { width: 80px; height: 96px; pointer-events: none; }
+        .vehicle-car { width: 80px; height: 96px; overflow: visible; filter: drop-shadow(0 2px 2px #071a2144); }
         .destination-flag {
             width: 34px; height: 48px;
             display: flex; align-items: flex-start; justify-content: center;
@@ -67,9 +62,15 @@
 <script src="vendor/maplibre-gl.js"></script>
 <script src="navigation-route-progress.js"></script>
 <script src="navigation-motion.js"></script>
+<script src="navigation-road-position.js"></script>
+<script src="navigation-road-query.js"></script>
 <script src="navigation-view.js"></script>
+<script src="navigation-vehicle.js"></script>
+<script src="navigation-driving-scene.js"></script>
+<script src="navigation-road-appearance.js"></script>
 <script src="navigation-styles.js"></script>
 <script src="navigation-basemap.js"></script>
+<script src="navigation-map-cache.js"></script>
 <script src="navigation-maneuvers.js"></script>
 <script src="navigation-traffic.js"></script>
 <script src="navigation-route-traffic.js"></script>
@@ -91,14 +92,15 @@
     let ready = false;
     let setupFinished = false;
     let trafficEnabled = true;
-    let visuals = { is3D: false, terrain: false, buildings: false, satellite: false };
+    let visuals = { is3D: true, terrain: false, buildings: true, satellite: false };
     let lastLocation = [-99.133209, 19.432608];
     let lastBearing = 0;
     let activeRoutePoints = [];
-    let routeProgressStartIndex = 0;
+    let routeProgressStartIndex = 0, routeMapZoom = null;
     let routeTrafficFeatures = EMPTY, routeTrafficMatcher = NavigationRouteTraffic.create([]);
+    let routeTrafficFixture = false;
     let routeTrafficTimer = null, pedestrianRoute = false;
-    let viewMode = 0;
+    let viewMode = 1;
     let viewportTop = 0.25, viewportBottom = 0.16;
     let remainingRoutePoints = [];
     let routePath=NavigationRouteProgress.create([]), confirmedRouteAlong=0, renderedRouteAlong=0;
@@ -169,16 +171,18 @@
     // Local vector styles can start immediately, even when individual tiles are offline.
     const baseStyle = NavigationBasemap.themedStyle(NavigationStyles, provider, false, TRAFFIC_API_KEY);
 
+    const nativeMapCache = NavigationMapCache.install(maplibregl, window.AndroidBridge);
     let map;
     try {
         map = new maplibregl.Map({
             container: 'map',
+            transformRequest: nativeMapCache.transformRequest,
             style: baseStyle,
             center: lastLocation,
-            zoom: 17.4,
-            pitch: 0,
+            zoom: 19.3,
+            pitch: 65,
             bearing: 0,
-            maxPitch: 55,
+            maxPitch: 70,
             minZoom: 3,
             maxZoom: 19.3,
             attributionControl: false,
@@ -208,18 +212,42 @@
 
     const vehicle = document.createElement('div');
     vehicle.className = 'vehicle-wrap';
-    const arrow = document.createElement('div');
-    arrow.className = 'vehicle-arrow';
-    vehicle.appendChild(arrow);
+    const vehicleModel = NavigationVehicle.create(vehicle);
     const vehicleMarker = new maplibregl.Marker({
         element: vehicle,
-        rotationAlignment: 'map',
-        pitchAlignment: 'map'
+        rotationAlignment: 'viewport',
+        pitchAlignment: 'viewport'
     }).setLngLat(lastLocation).addTo(map);
 
     let displayedVehicle=lastLocation.slice(), displayedBearing=0;
     const vehicleMotion=NavigationMotion.createTracker();
+    const roadPosition=NavigationRoadPosition.create();
+    const sourceRoads=NavigationRoadQuery.create(map);
+    let roadMatch=null;
+    function nearbyRoads(point) {
+        if(!ready)return [];
+        // Pitched rendered-feature queries can omit lines that are visible on screen.
+        // Use the loaded vector geometry, cached locally; no extra network requests.
+        if(map.getPitch()>55) {
+            const loaded=sourceRoads.nearby(point);
+            if(loaded.length)return loaded;
+        }
+        // Bound the query geographically; ignore traffic strokes and their visual offsets.
+        const sx=111320*Math.max(.2,Math.cos(point[1]*Math.PI/180));
+        const corners=[[-60,-60],[-60,60],[60,-60],[60,60]].map(([x,y])=>
+            map.project([point[0]+x/sx,point[1]+y/110540]));
+        const box=[[Math.min(...corners.map(p=>p.x)),Math.min(...corners.map(p=>p.y))],
+            [Math.max(...corners.map(p=>p.x)),Math.max(...corners.map(p=>p.y))]];
+        const rendered=map.queryRenderedFeatures(box).filter(NavigationRoadPosition.isRoad);
+        return rendered.length?rendered:sourceRoads.nearby(point);
+    }
     let vehiclePose=null, vehicleOnRoute=false;
+    function renderRouteFloor() {
+        if(!ready)return;
+        map.getSource('gps-route-floor')?.setData(NavigationDrivingScene.routeFloor(remainingRoutePoints,pedestrianRoute));
+        for(const id of ['gps-route-floor-glow','gps-route-floor-ribbon','gps-route-floor-chevrons'])
+            setLayerVisible(id,viewMode===1&&!pedestrianRoute);
+    }
     let cameraMotion=null, cameraFrameAt=null;
     function renderRemainingRoute(force=false,now=performance.now()) {
         if(!ready||activeRoutePoints.length<2)return;
@@ -230,6 +258,7 @@
         remainingRoutePoints=routePath.remaining(renderedRouteAlong);
         renderedRoutePoints=remainingRoutePoints;
         map.getSource('gps-route-active')?.setData(lineData(renderedRoutePoints));
+        renderRouteFloor();
         // Alternatives are useful while choosing a route. Once moving,
         // their untravelled full polylines must not resemble a trail behind the vehicle.
         ['gps-route-alt-1-layer','gps-route-alt-2-layer'].forEach(id=>
@@ -241,7 +270,6 @@
         if(vehiclePose) {
             displayedVehicle=vehiclePose.point;displayedBearing=vehiclePose.bearing;
             vehicleMarker.setLngLat(displayedVehicle);
-            if(vehicleMarker.setRotation)vehicleMarker.setRotation(displayedBearing);
             renderRemainingRoute(false,now);
         }
         if(ready&&cameraMotion&&viewMode!==2) {
@@ -263,6 +291,7 @@
                 map.jumpTo({center,bearing:motion.bearing,zoom:motion.zoom,pitch:motion.pitch,padding});
             }
         } else cameraFrameAt=null;
+        vehicleModel.update(map.getPitch(),NavigationMotion.bearingDelta(map.getBearing(),displayedBearing));
         requestAnimationFrame(animateVehicleMarker);
     }
     requestAnimationFrame(animateVehicleMarker);
@@ -329,7 +358,9 @@
 
     function setLayerVisible(id, visible) {
         if (map.getLayer(id)) {
-            try { map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none'); } catch (_) {}
+            const value=visible?'visible':'none',current=map.getLayoutProperty(id,'visibility');
+            if(current===value||(visible&&current===undefined))return;
+            try { map.setLayoutProperty(id, 'visibility', value); } catch (_) {}
         }
     }
 
@@ -346,22 +377,34 @@
         } catch (_) {}
     }
 
-    function applyVisuals() {
+    function applyVisuals(adjustPitch=false) {
         if (!ready) return;
-        const terrainActive = visuals.is3D && visuals.terrain && !!map.getSource(TERRAIN_ID);
+        const preparedOffline = !networkAvailable && routeMapZoom !== null;
+        const satelliteActive=visuals.satellite&&!preparedOffline;
+        const terrainActive = visuals.is3D && visuals.terrain && !preparedOffline && !!map.getSource(TERRAIN_ID);
         try {
             map.setTerrain(terrainActive ? { source: TERRAIN_ID, exaggeration: 1.0 } : null);
         } catch (e) { console.warn('terrain', e); }
         setLayerVisible(HILLSHADE_ID, visuals.terrain);
-        setLayerVisible(BUILDINGS_ID, visuals.is3D && visuals.buildings);
-        setLayerVisible(SATELLITE_LAYER, visuals.satellite);
-        setLayerVisible(HYBRID_ROADS_ID, visuals.satellite);
+        // Use the primary map's cached footprints. Additional building downloads
+        // are reserved for the optional satellite overlay.
+        setLayerVisible(BUILDINGS_ID, viewMode===1 && visuals.is3D && visuals.buildings && satelliteActive);
+        for(const layer of map.getStyle()?.layers||[]) if(layer.id.startsWith('scene-building-')||layer.id==='building-3d')
+            setLayerVisible(layer.id,viewMode===1&&visuals.is3D&&visuals.buildings&&!satelliteActive);
+        for(const id of ['gps-route-floor-glow','gps-route-floor-ribbon','gps-route-floor-chevrons'])
+            setLayerVisible(id,viewMode===1&&!pedestrianRoute);
+        setLayerVisible(SATELLITE_LAYER, satelliteActive);
+        setLayerVisible(HYBRID_ROADS_ID, satelliteActive);
         setLayerVisible(ROUTE_TRAFFIC_LAYER_ID, trafficEnabled && TRAFFIC_API_KEY.length > 0);
         if (areaTraffic) { areaTraffic.setEnabled(trafficEnabled); areaTraffic.setRouteActive(activeRoutePoints.length>1); }
         applySky(visuals.is3D && !darkTheme);
-        if (viewMode !== 2) map.easeTo({ pitch: viewMode === 1 ? 45 : 0, duration: 180, essential: true });
+        if (adjustPitch && viewMode !== 2) map.easeTo({ pitch: viewMode === 1 ? 65 : 0, duration: 180, essential: true });
     }
 
+    function connectionStyle() {
+        return NavigationBasemap.forConnection(
+            NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY), networkAvailable, routeMapZoom);
+    }
     function applyTheme(dark) {
         darkTheme = !!dark;
         document.documentElement.style.background = darkTheme ? '#1c2430' : '#d9e2e8';
@@ -369,7 +412,7 @@
         if (!ready) return;
         if (appliedTheme !== darkTheme) {
             appliedTheme = darkTheme;
-            const themed = NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY);
+            const themed = connectionStyle();
             // Day and night have different layers, filters and label layouts. Painting
             // matching IDs alone leaves bright daytime land cover and missing night layers.
             // Apply the full style difference while retaining already prepared vector tiles.
@@ -380,13 +423,13 @@
 
     function prepareViewport() {
         if (!ready || !window.AndroidBridge || !AndroidBridge.prepareMapViewport) return;
-        const bounds = map.getBounds(), z = Math.min(18, Math.floor(map.getZoom()));
+        const bounds = map.getBounds(), z = Math.min(routeMapZoom ?? 18, Math.floor(map.getZoom()));
         const n = 2 ** z;
         const signature = [z, ...[bounds.getWest(), bounds.getEast()].map(l => Math.floor((l + 180) / 360 * n)),
             ...[bounds.getSouth(), bounds.getNorth()].map(l => Math.floor((1 - Math.asinh(Math.tan(l * Math.PI / 180)) / Math.PI) / 2 * n))].join(':');
         if (signature === viewportSignature) return;
         viewportSignature = signature;
-        AndroidBridge.prepareMapViewport(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(), map.getZoom());
+        AndroidBridge.prepareMapViewport(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(), z);
     }
     setInterval(prepareViewport, 2000);
     function renderManeuvers() {
@@ -450,6 +493,9 @@
         routeTrafficTimer=setTimeout(()=>{routeTrafficTimer=null;refreshRouteTraffic();},180);
     }
     function refreshRouteTraffic() {
+        // The explicit QA fixture hook must not race asynchronous live tile arrivals.
+        // Production never enables it, and every new route restores the live feed.
+        if(routeTrafficFixture) { renderRouteTraffic(); return; }
         routeTrafficFeatures=trafficEnabled && networkAvailable && !pedestrianRoute && areaTraffic && activeRoutePoints.length>1
             ? routeTrafficMatcher.match(areaTraffic.sourceFeatures()) : EMPTY;
         renderRouteTraffic();
@@ -541,6 +587,7 @@
         safeAddSource('gps-route-alt-1', { type: 'geojson', data: EMPTY });
         safeAddSource('gps-route-alt-2', { type: 'geojson', data: EMPTY });
         safeAddSource('gps-route-active', { type: 'geojson', data: EMPTY });
+        safeAddSource('gps-route-floor', { type:'geojson', data:EMPTY });
         safeAddSource(ROUTE_TRAFFIC_SOURCE_ID, { type: 'geojson', data: EMPTY });
         safeAddSource('gps-tolls', { type: 'geojson', data: EMPTY });
         safeAddSource('gps-signals', { type: 'geojson', data: EMPTY, attribution: '© OpenStreetMap contributors' });
@@ -578,11 +625,16 @@
             }
         });
 
+        // Ground polygons widen naturally toward the car in perspective. The
+        // original trimmed route and traffic strokes retain their exact geometry.
+        for(const [kind,color,opacity] of [['glow','#16edb0',.16],['ribbon','#21edac',.34]])
+            safeAddLayer({id:'gps-route-floor-'+kind,type:'fill',source:'gps-route-floor',minzoom:17,
+                filter:['==',['get','kind'],kind],paint:{'fill-color':color,'fill-opacity':opacity}});
         safeAddLayer({
             id: 'gps-route-shadow', type: 'line', source: 'gps-route-active',
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint: {
-                'line-color': '#0a315c',
+                'line-color': '#093f43',
                 'line-opacity': 0.42,
                 'line-blur': 1.4,
                 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 11, 18, 17, 20, 21]
@@ -592,8 +644,8 @@
             id: 'gps-route-outline', type: 'line', source: 'gps-route-active',
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint: {
-                'line-color': '#ffffff',
-                'line-opacity': 0.98,
+                'line-color': '#75ffd0',
+                'line-opacity': 0.82,
                 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 9, 18, 13, 20, 16]
             }
         });
@@ -601,8 +653,8 @@
             id: 'gps-route-active-layer', type: 'line', source: 'gps-route-active',
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint: {
-                'line-color': '#087cf0',
-                'line-opacity': 1.0,
+                'line-color': '#14e8a2',
+                'line-opacity': 0.94,
                 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5.5, 18, 8.5, 20, 10.5]
             }
         });
@@ -627,6 +679,8 @@
             minzoom:14,layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],14,2,18,4,19.3,5]}});
         safeAddLayer({id:'gps-maneuver-heads',type:'fill',source:'gps-maneuvers',filter:['==',['get','kind'],'head'],
             minzoom:14,paint:{'fill-color':'#ffffff'}});
+        safeAddLayer({id:'gps-route-floor-chevrons',type:'fill',source:'gps-route-floor',minzoom:17,
+            filter:['==',['get','kind'],'chevron'],paint:{'fill-color':'#e3fff7','fill-opacity':.85}});
     }
 
     map.on('style.load', () => {
@@ -637,6 +691,7 @@
             applyVisuals();
             const route = map.getSource('gps-route-active');
             if (route) route.setData(lineData(remainingRoutePoints));
+            renderRouteFloor(true);
             renderManeuvers(); renderRouteTraffic(); renderOrigin();
             return;
         }
@@ -664,7 +719,7 @@
         const msg = e && e.error && e.error.message ? e.error.message : String(e && e.error ? e.error : e);
         console.warn('GPS3D map:', msg);
         if (e && e.sourceId) resourceFailures[e.sourceId] = (resourceFailures[e.sourceId] || 0) + 1;
-        if (provider === 'tomtom' && e && e.sourceId === 'vectorTiles' && ++baseFailures >= 4 && networkAvailable &&
+        if (provider === 'tomtom' && routeMapZoom === null && e && e.sourceId === 'vectorTiles' && ++baseFailures >= 4 && networkAvailable &&
             map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles').length === 0) {
             provider = 'openfreemap';
             const fallback = NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, '');
@@ -696,16 +751,32 @@
             return credits ? credits.textContent.trim() : '© TomTom | © OpenStreetMap contributors';
         },
         setDarkTheme: applyTheme,
+        setRouteMapZoom(maxZoom) {
+            const next = typeof maxZoom === 'number' && Number.isFinite(maxZoom) ? maxZoom : null;
+            if (next === routeMapZoom) return;
+            routeMapZoom = next;
+            viewportSignature = '';
+            if (ready) map.setStyle(
+                NavigationBasemap.preserveNavigation(connectionStyle(), map.getStyle()), {diff:true});
+        },
         setNetworkAvailable(available) {
+            const wasOnline = networkAvailable;
             networkAvailable = !!available;
             if (areaTraffic) areaTraffic.setOnline(networkAvailable);
             refreshRouteTraffic();
-            if (!available || !ready) return;
+            if (!ready) return;
+            applyVisuals();
             if (TRAFFIC_API_KEY && provider !== 'tomtom') {
+                if (!available) return;
                 provider = 'tomtom'; baseFailures = 0;
                 map.setStyle(NavigationBasemap.preserveNavigation(
-                    NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, TRAFFIC_API_KEY), map.getStyle()), {diff:true});
+                    connectionStyle(), map.getStyle()), {diff:true});
+            } else if (wasOnline !== networkAvailable && routeMapZoom !== null) {
+                // Use the saved vector detail at every close zoom, rather than requesting
+                // uncached level-17/18 tiles and leaving the road underneath the car blank.
+                map.setStyle(NavigationBasemap.preserveNavigation(connectionStyle(), map.getStyle()), {diff:true});
             }
+            if (!available) return;
             viewportSignature = '';
             if (map.refreshTiles) {
                 const source = provider === 'tomtom' ? 'vectorTiles' : 'openmaptiles';
@@ -713,19 +784,35 @@
             }
             prepareViewport();
         },
-        mapState() {
+        mapState(includeRoad = false) {
             const snapshot=map.getStyle();
             if (!snapshot || !snapshot.layers) return {provider, dark:darkTheme, zoom:map.getZoom(),
                 tilesLoaded:false, layerIds:[], failures:{...resourceFailures}, rendered:0, roads:0, areas:0};
-            const features=map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
-            return {provider, dark:darkTheme, zoom:map.getZoom(), tilesLoaded:map.areTilesLoaded(),
+            // A query crossing the sky/horizon can miss ground lines at high pitch.
+            // Diagnostics use the visible foreground, as the road matcher already does.
+            const container=map.getContainer();
+            const region=map.getPitch()>55 ? [[0,container.clientHeight*.35],
+                [container.clientWidth,container.clientHeight]] : undefined;
+            const features=map.queryRenderedFeatures(region).filter(f=>f.source==='vectorTiles'||f.source==='openmaptiles');
+            return {provider, dark:darkTheme, zoom:map.getZoom(), sourceMaxZoom:snapshot.sources.vectorTiles?.maxzoom,
+                nativeCacheRequests:nativeMapCache.requestCount(),
+                sceneBuildings:snapshot.layers.filter(l=>(l.id.startsWith('scene-building-')||l.id==='building-3d')&&l.layout?.visibility!=='none').length,
+                tilesLoaded:map.areTilesLoaded(),
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
-                rendered:features.length, roads:features.filter(f=>f.layer.type==='line'&&/road/i.test(f.layer['source-layer']||'')).length,
+                roadData:includeRoad ? sourceRoads.nearby(lastLocation).length : undefined,
+                roadDetails:includeRoad ? sourceRoads.nearby(lastLocation).map(f=>({layer:f.sourceLayer,properties:f.properties,geometry:f.geometry})) : undefined,
+                renderedRoads:includeRoad ? [...new Set(features.filter(f=>f.layer.type==='line'&&/road|motorway/i.test(f.layer['source-layer']||'')).map(f=>f.layer.id))] : undefined,
+                roadGeometry:includeRoad ? features.filter(f=>f.layer.type==='line' && NavigationRoadPosition.isRoad(f))
+                    .flatMap(f=>f.geometry?.type==='LineString' ? [f.geometry.coordinates] :
+                        f.geometry?.type==='MultiLineString' ? f.geometry.coordinates : [])
+                    .find(line=>line.length>1) || null : null,
+                rendered:features.length, roads:features.filter(f=>f.layer.type==='line'&&/road|motorway/i.test(f.layer['source-layer']||'')).length,
                 areas:features.filter(f=>f.layer.type==='fill').length};
         },
         setManeuvers(steps) { maneuverSteps=Array.isArray(steps)?steps:[]; renderManeuvers(); },
         setTrafficIntervals(intervals) {
             // Deterministic screenshots only; production uses the loaded vector source.
+            routeTrafficFixture = true;
             routeTrafficFeatures={type:'FeatureCollection',features:(intervals||[]).filter(x=>x.end>x.start).map(x=>({
                 type:'Feature',properties:{severity:x.severity,color:NavigationTraffic.COLORS[x.severity]||'#087cf0',
                     startAlong:routeTrafficMatcher.progress(x.start),endAlong:routeTrafficMatcher.progress(x.end)},
@@ -750,11 +837,16 @@
         refreshTraffic() { if (areaTraffic) areaTraffic.refresh(); },
         trafficSourceFeatures() { return areaTraffic ? areaTraffic.sourceFeatures() : []; },
         setTrafficPaused(paused) { trafficPaused = !!paused; if (!trafficPaused && areaTraffic) areaTraffic.refresh(); },
-        setLocation(lon, lat, bearing, speedMps, matched=false) {
+        setLocation(lon, lat, bearing, speedMps, matched=false, accuracyM=0, headingReliable=true) {
             lastLocation=[Number(lon),Number(lat)];lastBearing=Number(bearing)||0;
             vehicleOnRoute=!!matched&&activeRoutePoints.length>1;
-            vehiclePose=vehicleMotion.fix({point:lastLocation,bearing:lastBearing,speed:speedMps,now:performance.now(),
-                path:vehicleOnRoute?routePath:null,along:routePath.project(routeProgressStartIndex,lastLocation)});
+            const now=performance.now();
+            roadMatch=activeRoutePoints.length<2 ? roadPosition.match({point:lastLocation,bearing:lastBearing,
+                speed:Number(speedMps),accuracy:Number(accuracyM),headingReliable,now},
+                Number(speedMps)>=2.5&&Number(accuracyM)>0&&Number(accuracyM)<=40?nearbyRoads(lastLocation):[]) : null;
+            vehiclePose=vehicleMotion.fix({point:roadMatch?.point||lastLocation,bearing:roadMatch?.bearing??lastBearing,
+                speed:speedMps,now,path:vehicleOnRoute?routePath:roadMatch?.path||null,
+                along:vehicleOnRoute?routePath.project(routeProgressStartIndex,lastLocation):roadMatch?.along||0});
             displayedVehicle=vehiclePose.point;displayedBearing=vehiclePose.bearing;
         },
         setRoutes(active, alt1, alt2, walking=false) {
@@ -763,6 +855,8 @@
             const same=pedestrianRoute===!!walking&&activeRoutePoints.length===next.length&&
                 next.every((p,i)=>p[0]===activeRoutePoints[i][0]&&p[1]===activeRoutePoints[i][1]);
             if(!same) {
+                roadPosition.reset();roadMatch=null;
+                routeTrafficFixture=false;
                 activeRoutePoints=next;pedestrianRoute=!!walking;
                 routePath=NavigationRouteProgress.create(activeRoutePoints);
                 routeTrafficMatcher=NavigationRouteTraffic.create(activeRoutePoints);
@@ -773,6 +867,7 @@
             remainingRoutePoints=routePath.remaining(renderedRouteAlong);
             renderedRoutePoints=remainingRoutePoints;
             map.getSource('gps-route-active')?.setData(lineData(renderedRoutePoints));
+            renderRouteFloor(true);
             map.getSource('gps-route-alt-1')?.setData(lineData(alt1));
             map.getSource('gps-route-alt-2')?.setData(lineData(alt2));
             ['gps-route-alt-1-layer','gps-route-alt-2-layer'].forEach(id=>
@@ -790,8 +885,10 @@
         },
         navigationState() {
             return {vehicle:displayedVehicle.slice(),bearing:displayedBearing,cameraBearing:map.getBearing(),
+                roadMatched:!!roadMatch,roadCorrectionMeters:roadMatch?.distance||0,
                 progress:renderedRouteAlong,remaining:map.getSource('gps-route-active')?.serialize().data,
-                traffic:map.getSource(ROUTE_TRAFFIC_SOURCE_ID)?.serialize().data};
+                traffic:map.getSource(ROUTE_TRAFFIC_SOURCE_ID)?.serialize().data,
+                groundRoute:map.getSource('gps-route-floor')?.serialize().data};
         },
         setTolls(points) {
             if (!ready) return;
@@ -839,7 +936,7 @@
             cameraMotion = null;
             map.stop();
             visuals.is3D = viewMode===1;
-            applyVisuals();
+            applyVisuals(true);
             renderRemainingRoute(true);
             if (viewMode === 2) showOverview();
             renderRouteTraffic();
@@ -855,8 +952,15 @@
         follow(lon, lat, bearing, zoom, pitch, duration) {
             if(!ready||viewMode===2)return;
             const center=map.getCenter();
-            if(!cameraMotion) cameraMotion={offset:[center.lng-displayedVehicle[0],center.lat-displayedVehicle[1]],
-                bearing:map.getBearing(),bearingVelocity:0,zoom:map.getZoom(),pitch:map.getPitch()};
+            if(!cameraMotion) {
+                // The first GNSS fix may be thousands of km from the startup camera.
+                // Recenter distant views atomically; animating that offset downloads
+                // unrelated tiles all along the camera's journey outside the saved route.
+                const distant=NavigationMotion.distance([center.lng,center.lat],displayedVehicle)>250;
+                cameraMotion={offset:distant?[0,0]:[center.lng-displayedVehicle[0],center.lat-displayedVehicle[1]],
+                    bearing:distant?Number(bearing)||0:map.getBearing(),bearingVelocity:0,
+                    zoom:distant?Number(zoom)||17:map.getZoom(),pitch:distant?Number(pitch)||0:map.getPitch()};
+            }
             Object.assign(cameraMotion,{targetOffset:[Number(lon)-lastLocation[0],Number(lat)-lastLocation[1]],
                 targetBearing:Number(bearing)||0,targetZoom:Number(zoom)||17,targetPitch:Number(pitch)||0});
         },

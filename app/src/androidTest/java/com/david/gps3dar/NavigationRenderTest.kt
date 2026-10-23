@@ -11,12 +11,16 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class NavigationRenderTest {
+    @Before fun startWithoutARestoredNavigationSession() {
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteFile("saved-navigation.json")
+    }
     private fun evaluate(scenario: ActivityScenario<RealisticMapActivity>,script: String): String {
         val latch=CountDownLatch(1);var result="null"
         scenario.onActivity { it.findViewById<WebView>(R.id.webMapView).evaluateJavascript(script) { value -> result=value;latch.countDown() } }
@@ -62,6 +66,11 @@ class NavigationRenderTest {
             assertEquals("true",evaluate(scenario,"""(() => {
                 const s=GPS3D.navigationState(),start=s.remaining.geometry.coordinates[0];
                 return NavigationMotion.distance(s.vehicle,start)<2.5 &&
+                    s.groundRoute.features.filter(f=>f.properties.kind==='ribbon').every(f=>{
+                        const ring=f.geometry.coordinates[0],left=ring[0],right=ring[ring.length-2];
+                        const center=left.map((v,i)=>(v+right[i])/2);
+                        return NavigationMotion.distance(start,center)<.15;
+                    }) &&
                     getComputedStyle(document.getElementById('traffic-status')).display==='none' &&
                     getComputedStyle(document.getElementById('signal-status')).display==='none' &&
                     getComputedStyle(document.querySelector('.maplibregl-ctrl-attrib')).display==='none' &&
@@ -103,6 +112,7 @@ class NavigationRenderTest {
             evaluate(scenario,"GPS3D.setRouteProgress(${target.getDouble(0)},${target.getDouble(1)},1);true")
             val arrived=JSONObject(evaluate(scenario,"GPS3D.navigationState()"))
             assertEquals("No route stroke after arrival",0,arrived.getJSONObject("remaining").getJSONArray("features").length())
+            assertEquals("No ground ribbon after arrival",0,arrived.getJSONObject("groundRoute").getJSONArray("features").length())
             assertEquals(0,arrived.getJSONObject("traffic").getJSONArray("features").length())
         }
     }

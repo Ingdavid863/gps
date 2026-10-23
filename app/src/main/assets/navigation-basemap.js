@@ -1,5 +1,13 @@
 (function (root) {
     const clone = value => JSON.parse(JSON.stringify(value));
+    function groundFilter(filter) {
+        if (!Array.isArray(filter)) return filter;
+        // TomTom v1 may encode ground level explicitly as zero. Legacy styles
+        // only admitted an absent tag, hiding otherwise valid roads at close zoom.
+        if (filter[0] === '!has' && filter[1] === 'z_level')
+            return ['any', ['!has','z_level'], ['==','z_level',0]];
+        return filter.map(value => Array.isArray(value) ? groundFilter(value) : value);
+    }
     function themedStyle(styles, provider, dark, key) {
         const source = provider === 'tomtom' ? (dark ? styles.night : styles.day) : styles.fallback;
         const style = JSON.parse(JSON.stringify(source).replaceAll('{{TOMTOM_API_KEY}}', encodeURIComponent(key || '')));
@@ -32,7 +40,11 @@
             style.sources.vectorTiles.tiles = ['a', 'b', 'c', 'd'].map(host =>
                 `https://${host}.api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.pbf?key=${encodeURIComponent(key || '')}`);
         }
-        return style;
+        for (const layer of style.layers) if (layer.type === 'line' && layer.source === 'vectorTiles' &&
+            /road|motorway/i.test(layer['source-layer'] || '') && layer.filter) layer.filter = groundFilter(layer.filter);
+        const appearance = root.NavigationRoadAppearance ||
+            (typeof require !== 'undefined' ? require('./navigation-road-appearance.js') : null);
+        return appearance ? appearance.decorate(style, dark) : style;
     }
     function preserveNavigation(base, current) {
         const style = clone(base);
@@ -40,7 +52,16 @@
         style.layers.push(...(current.layers || []).filter(layer => layer.id.startsWith('gps-')).map(clone));
         return style;
     }
-    const api = {themedStyle, preserveNavigation};
+    function forConnection(style, online, routeMaxZoom) {
+        const prepared = clone(style);
+        // A mobile-data icon does not guarantee that detailed tile requests succeed.
+        // Keep navigation on the same vector level as the protected whole-route pack,
+        // online too; otherwise partial level-18 failures hide already-saved roads.
+        if (Number.isFinite(routeMaxZoom) && prepared.sources.vectorTiles)
+            prepared.sources.vectorTiles.maxzoom = Math.min(prepared.sources.vectorTiles.maxzoom || 18, routeMaxZoom);
+        return prepared;
+    }
+    const api = {themedStyle, preserveNavigation, forConnection};
     if (typeof module !== 'undefined') module.exports = api;
     root.NavigationBasemap = api;
 })(typeof window === 'undefined' ? globalThis : window);
