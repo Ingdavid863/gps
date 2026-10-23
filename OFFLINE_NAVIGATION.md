@@ -63,6 +63,8 @@ offline. La navegación por la ruta guardada sí continúa con el GPS del teléf
 
 ## Corrección 0.30: datos móviles presentes con descargas fallidas
 
+El primer seguimiento o un recentrado a más de 250 m aplica posición, rumbo y zoom de inmediato. La cámara no recorre puntos intermedios entre el centro inicial y la posición GNSS, evitando descargas de lugares ajenos al corredor preparado. Los movimientos normales del vehículo mantienen la interpolación fluida.
+
 Mientras hay una ruta activa, la fuente vectorial usa el nivel 16 del mismo paquete protegido incluso si Android indica conexión. Antes, la vista en línea pedía niveles 17/18 que no estaban en ese paquete: un fallo parcial podía dejar calles vacías con el mensaje de mapa guardado. La navegación ya no cambia a un proveedor sin preparar cuando falla una tesela de la ruta. La preparación especulativa respeta el mismo nivel. La cámara, carreteras y edificios siguen siendo vectoriales, con su escala en metros; fuera de navegación se conserva el detalle en línea hasta nivel 18.
 
 La comprobación WebGL utiliza Cabo San Lucas–Aeropuerto de Los Cabos, simula datos móviles con sólo el nivel preparado disponible y luego recorre el mapa sin conexión. El GPS descarta una degradación aislada que desplazaría una posición reciente precisa, sin ampliar la tolerancia de ajuste a carretera. Permite recuperar lecturas menos precisas después de 2.5 segundos. El rumbo de la cámara sólo usa curso GNSS fiable o el tramo al que la posición ya está ajustada; al detenerse conserva orientación. La exactitud física sigue dependiendo de la señal GNSS y de la cartografía del proveedor.

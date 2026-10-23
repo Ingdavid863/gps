@@ -951,8 +951,15 @@
         follow(lon, lat, bearing, zoom, pitch, duration) {
             if(!ready||viewMode===2)return;
             const center=map.getCenter();
-            if(!cameraMotion) cameraMotion={offset:[center.lng-displayedVehicle[0],center.lat-displayedVehicle[1]],
-                bearing:map.getBearing(),bearingVelocity:0,zoom:map.getZoom(),pitch:map.getPitch()};
+            if(!cameraMotion) {
+                // The first GNSS fix may be thousands of km from the startup camera.
+                // Recenter distant views atomically; animating that offset downloads
+                // unrelated tiles all along the camera's journey outside the saved route.
+                const distant=NavigationMotion.distance([center.lng,center.lat],displayedVehicle)>250;
+                cameraMotion={offset:distant?[0,0]:[center.lng-displayedVehicle[0],center.lat-displayedVehicle[1]],
+                    bearing:distant?Number(bearing)||0:map.getBearing(),bearingVelocity:0,
+                    zoom:distant?Number(zoom)||17:map.getZoom(),pitch:distant?Number(pitch)||0:map.getPitch()};
+            }
             Object.assign(cameraMotion,{targetOffset:[Number(lon)-lastLocation[0],Number(lat)-lastLocation[1]],
                 targetBearing:Number(bearing)||0,targetZoom:Number(zoom)||17,targetPitch:Number(pitch)||0});
         },
