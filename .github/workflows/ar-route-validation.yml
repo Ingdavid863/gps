@@ -66,7 +66,7 @@ jobs:
       - name: Save encrypted signing recovery copy
         uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-0.29.0-encrypted-signing-backup
+          name: GPS3D-0.30.0-encrypted-signing-backup
           path: build/signing-backup/
           retention-days: 30
       - uses: actions/setup-node@v4
@@ -76,6 +76,7 @@ jobs:
         run: node --test tests/navigation-*.test.cjs
       - name: Compile navigation and test offline route storage
         env:
+          RUN_MUSIC_LIVE_QA: "1"
           ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
         run: |
@@ -137,7 +138,7 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell wm dismiss-keyguard
             adb shell svc power stayon true
-            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.MapControlsTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.LocationPrecisionTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest,com.david.gps3dar.OfflineRouteRecoveryTest,com.david.gps3dar.WholeRouteOfflineMapTest,com.david.gps3dar.MusicPlaybackTest,com.david.gps3dar.ExternalMusicControlTest --stacktrace
+            gradle connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.david.gps3dar.WalkingHandoffTest,com.david.gps3dar.ArHudTest,com.david.gps3dar.SharedDestinationIntentTest,com.david.gps3dar.NavigationStateTest,com.david.gps3dar.MapControlsTest,com.david.gps3dar.NavigationRenderTest,com.david.gps3dar.LocationPrecisionTest,com.david.gps3dar.RouteTrafficVisibilityTest,com.david.gps3dar.MapTrafficTest,com.david.gps3dar.TollRoutingTest,com.david.gps3dar.SearchClearTest,com.david.gps3dar.CarNavigationTest,com.david.gps3dar.OfflineRouteRecoveryTest,com.david.gps3dar.WholeRouteOfflineMapTest,com.david.gps3dar.MusicPlaybackTest,com.david.gps3dar.ExternalMusicControlTest,com.david.gps3dar.InAppAudioTest --stacktrace
             mkdir -p build/ar-native-qa
             adb pull /sdcard/Download/GPS3DARQA build/ar-native-qa
             adb pull /sdcard/Download/GPS3DQA build/ar-native-qa
@@ -157,7 +158,7 @@ jobs:
           digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]+)', certificate).group(1)
           assert digest == os.environ['GPS3D_EXPECTED_SIGNING_SHA256'], 'APK must use the backed-up test certificate'
           package = subprocess.check_output([str(tools/'aapt'), 'dump', 'badging', str(apk)], text=True).splitlines()[0]
-          assert "name='com.david.gps3dar'" in package and "versionCode='35'" in package and "versionName='0.29.0-beta-controls'" in package
+          assert "name='com.david.gps3dar'" in package and "versionCode='36'" in package and "versionName='0.30.0-beta-navigation-audio'" in package
           manifest = subprocess.check_output([str(tools/'aapt'), 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
           forbidden = ['BIND_ACCESSIBILITY_SERVICE', 'accessibilityservice.AccessibilityService',
                        'BIND_NOTIFICATION_LISTENER_SERVICE', 'MEDIA_CONTENT_CONTROL', 'READ_SMS', 'RECEIVE_SMS',
@@ -169,7 +170,7 @@ jobs:
           permissions = subprocess.check_output([str(tools/'aapt'), 'dump', 'permissions', str(apk)], text=True)
           pathlib.Path('build').mkdir(exist_ok=True)
           pathlib.Path('build/release-permissions.txt').write_text(permissions)
-          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.29.0-beta-controls.apk')
+          out = pathlib.Path('build/delivery/GPS3D-AR-David-0.30.0-beta-navigation-audio.apk')
           out.parent.mkdir(parents=True, exist_ok=True)
           shutil.copyfile(apk, out)
           print(package)
@@ -181,7 +182,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GPS3D-0.29.0-validation
+          name: GPS3D-0.30.0-validation
           path: |
             app/build/test-results/testDebugUnitTest/
             app/build/outputs/androidTest-results/connected/
@@ -192,5 +193,5 @@ jobs:
             build/release-permissions.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: GPS3D-AR-David-0.29.0-beta-controls
-          path: build/delivery/GPS3D-AR-David-0.29.0-beta-controls.apk
+          name: GPS3D-AR-David-0.30.0-beta-navigation-audio
+          path: build/delivery/GPS3D-AR-David-0.30.0-beta-navigation-audio.apk

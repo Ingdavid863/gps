@@ -1033,20 +1033,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun processLocation(location: Location) {
         val accepted = lastAcceptedLocation
-        if (accepted != null && location.elapsedRealtimeNanos <= accepted.elapsedRealtimeNanos) return
-        if (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos !in 0L..3_000_000_000L) return
-
-        if (location.hasAccuracy() && location.accuracy > 65f) {
-            gpsStatus.text = "GPS débil · ±${location.accuracy.toInt()} m"
-            return
-        }
-
-        val previous = lastAcceptedLocation
-        if (previous != null) {
-            val dt = max(0.25, (location.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000_000.0)
-            val jumpSpeed = previous.distanceTo(location) / dt
-            if (jumpSpeed > 85.0) return
-        }
+        fun quality(fix: Location) = NavigationFixQuality.Fix(
+            RouteGeometry.Point(fix.latitude, fix.longitude), if (fix.hasAccuracy()) fix.accuracy.toDouble() else 0.0,
+            if (fix.hasSpeed()) fix.speed.toDouble() else 0.0, fix.elapsedRealtimeNanos)
+        if (!NavigationFixQuality.accept(accepted?.let(::quality), quality(location), SystemClock.elapsedRealtimeNanos())) return
         rawLocation = Location(location)
         lastAcceptedLocation = Location(location)
         com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
@@ -1121,7 +1111,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun predictLocation(filtered: Location, raw: Location): Location {
-        if (!raw.hasSpeed() || !raw.hasBearing() || raw.speed < 1.2f) return Location(filtered)
+        if (!reliableNavigationCourse(raw)) return Location(filtered)
 
         // Compensate actual fix age only; continuous rendering handles time between fixes.
         val ageSeconds = ((SystemClock.elapsedRealtimeNanos() - raw.elapsedRealtimeNanos) /
@@ -1160,16 +1150,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun updateLocationMarker(location: Location) {
         val raw = rawLocation
-        val bearing = if (raw?.hasBearing() == true && raw.speed > 0.8f) {
-            raw.bearing.toDouble()
-        } else {
-            lastCameraBearing
-        }
         val match = lastRouteMatch
         val onRoute = routeActive && match != null && distanceMeters(location.latitude,location.longitude,match.lat,match.lon) < .5
+        val bearing = if (onRoute) match!!.bearing else if (reliableNavigationCourse(raw)) raw!!.bearing.toDouble() else lastCameraBearing
         val accuracy = raw?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0
-        val headingReliable = raw?.hasBearing() == true && raw.speed >= 2.5f &&
-            (!raw.hasBearingAccuracy() || raw.bearingAccuracyDegrees <= 35f)
+        val headingReliable = reliableNavigationCourse(raw)
         jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())},$onRoute,${num(accuracy)},$headingReliable)")
     }
 
@@ -1180,7 +1165,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun updateCamera(location: Location) {
         val moving = rawLocation?.speed ?: 0f
         val raw = rawLocation
-        if (raw?.hasBearing() == true && moving > 1.0f) {
+        val match = lastRouteMatch?.takeIf { routeActive && distanceMeters(location.latitude,location.longitude,it.lat,it.lon) < .5 }
+        if (match != null && moving > .6f) lastCameraBearing = match.bearing
+        else if (reliableNavigationCourse(raw)) {
             // WebView animates the fresh heading continuously; filtering it once per fix creates steps.
             lastCameraBearing = raw.bearing.toDouble()
         }
@@ -1194,6 +1181,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},110)"
         )
     }
+
+    private fun reliableNavigationCourse(location: Location?) = location != null && NavigationFixQuality.reliableCourse(
+        location.hasBearing(), location.speed.toDouble(),
+        if (location.hasBearingAccuracy()) location.bearingAccuracyDegrees.toDouble() else null)
 
     private fun desiredZoom(speedMps: Float): Double {
         val base = if (!autoZoomEnabled) ZOOM_PRESETS[zoomPresetIndex] else when {
@@ -2318,8 +2309,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val now = SystemClock.elapsedRealtimeNanos()
         val elapsed = if (lastMatchAtNanos == 0L) 0.0 else (now-lastMatchAtNanos)/1_000_000_000.0
         val previous = lastRouteMatch?.takeIf { it.distanceMeters <= 25.0 && elapsed < 8.0 }
-        val heading = location.bearing.toDouble().takeIf { location.hasBearing() && location.speed > 1.0f &&
-            (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees < 45f) }
+        val heading = location.bearing.toDouble().takeIf { reliableNavigationCourse(location) }
         val match = geometry.match(RouteGeometry.Point(location.latitude,location.longitude), heading,
             previous?.alongMeters, location.speed.toDouble(), elapsed, location.accuracy.toDouble()) ?: return null
         lastMatchAtNanos = now

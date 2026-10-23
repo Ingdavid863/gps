@@ -4,7 +4,7 @@ const {chromium,request}=require(process.env.GPS3D_QA_NODE_MODULES+'/playwright'
 const {PNG}=require(process.env.GPS3D_QA_NODE_MODULES+'/pngjs');
 const key=process.env.TOMTOM_API_KEY;assert.ok(key,'service credential required');
 const base=path.resolve(__dirname,'../app/src/main/assets'),output=path.resolve('build/map-qa/offline-route');fs.mkdirSync(output,{recursive:true});
-const start=[-99.133209,19.432608],end=[start[0],start[1]+.20],resources=new Map(),requests=[];
+const start=[-109.9124,22.8905],end=[-109.7211,23.1518],resources=new Map(),requests=[];
 let server,browser,api,phase='route';
 const watchdog=setTimeout(()=>{console.error(JSON.stringify({phase,saved:resources.size,error:'Whole-route map QA exceeded six minutes'}));process.exit(1)},360000);
 const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'https://a.api.tomtom.com/map/');
@@ -50,15 +50,19 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
   if(saved)return route.fulfill(saved);return route.abort();
  });
  // No browser HTTP or in-memory map tile cache from the preparation stage survives here.
- await context.setOffline(true);
+ // Reproduce a phone showing mobile data while only the prepared tile level works.
+ await context.setOffline(false);
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{window.AndroidBridge={prepareMapViewport(){},onMapReady(){window.mapReady=true;GPS3D.setTrafficEnabled(false);
-  GPS3D.setRouteMapZoom(16);GPS3D.setNetworkAvailable(false);}}});
+  GPS3D.setRouteMapZoom(16);GPS3D.setNetworkAvailable(true);}}});
  await page.goto('http://127.0.0.1:'+server.address().port+'/map3d.html');
  await page.waitForFunction(()=>window.mapReady&&GPS3D.mapState().sourceMaxZoom===16);
  await page.evaluate(points=>{GPS3D.setRoutes(points,[],[]);GPS3D.setViewport(.25,.16);},points);
  const measurements=[];
- for(const [name,point,zoom,dark] of [['middle',middle,18.65,false],['destination',points.at(-1),18.65,true],['overview',points.at(-1),12,true]]){
+ for(const [name,point,zoom,dark] of [['mobile-data',middle,18.65,false],['middle',middle,18.65,false],['destination',points.at(-1),18.65,true],['overview',points.at(-1),12,true]]){
+  const online=name==='mobile-data';await context.setOffline(!online);
+  await page.evaluate(online=>GPS3D.setNetworkAvailable(online),online);
+  assert.equal(await page.evaluate(()=>navigator.onLine),online,'exercise both mobile-data and true offline states');
   phase=name;console.log('Offline route phase',phase);
   const before=requests.length;
   await page.evaluate(({point,zoom,dark})=>{GPS3D.setDarkTheme(dark);GPS3D.setLocation(...point,0,0);GPS3D.follow(...point,0,zoom,zoom>16?65:0,1)}, {point,zoom,dark});
@@ -74,6 +78,6 @@ const canonical=url=>url.replace(/https:\/\/[abcd]\.api\.tomtom\.com\/map\//,'ht
   measurements.push({name,zoom,roads:state.roads,roadData:state.roadData,streetPixels:pixels});
  }
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements},null,2));
- console.log('Whole-route offline WebGL passed',JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements}));
+ console.log('Whole-route offline WebGL passed: Los Cabos mobile-data loss and offline travel',JSON.stringify({routeMetres:chosen.summary.lengthInMeters,resources:resources.size,measurements}));
 })().catch(e=>{console.error(String(e).replaceAll(key,'[credential]').replace(/https?:\/\/\S+/g,'[resource]'));process.exitCode=1;})
  .finally(async()=>{if(browser)await browser.close();if(api)await api.dispose();if(server)await new Promise(r=>server.close(r));clearTimeout(watchdog)});

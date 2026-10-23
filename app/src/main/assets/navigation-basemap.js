@@ -54,7 +54,10 @@
     }
     function forConnection(style, online, routeMaxZoom) {
         const prepared = clone(style);
-        if (!online && Number.isFinite(routeMaxZoom) && prepared.sources.vectorTiles)
+        // A mobile-data icon does not guarantee that detailed tile requests succeed.
+        // Keep navigation on the same vector level as the protected whole-route pack,
+        // online too; otherwise partial level-18 failures hide already-saved roads.
+        if (Number.isFinite(routeMaxZoom) && prepared.sources.vectorTiles)
             prepared.sources.vectorTiles.maxzoom = Math.min(prepared.sources.vectorTiles.maxzoom || 18, routeMaxZoom);
         return prepared;
     }

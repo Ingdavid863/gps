@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MusicQueueTest {
+    @Test fun selectedHttpsSourcesAndLiveFlagsSurviveWithoutAcceptingServiceWebPages() {
+        val queue=MusicQueue(listOf(MusicTrack("content://music/one","Mi canción"),
+            MusicTrack("https://stream.radioparadise.com/mp3-128","Radio",true,true)),1,0)
+        assertEquals(queue,MusicQueue.decode(queue.encode()))
+        for (url in listOf("http://example.com/song.mp3","file:///song.mp3","https://music.youtube.com/watch?v=abc","https://open.spotify.com/track/abc","https://user:password@example.com/song.mp3"))
+            assertFalse(url,MusicTrack.directAudio(url))
+        assertTrue(MusicTrack.directAudio("https://example.com/music/stream.m3u8"))
+    }
     @Test fun remembersSelectedDocumentsAndPlaybackPosition() {
         val queue=MusicQueue(listOf(MusicTrack("content://music/one", "Canción ñ"),MusicTrack("content://music/two", "Otra")),1,85123)
         assertEquals(queue,MusicQueue.decode(queue.encode()))

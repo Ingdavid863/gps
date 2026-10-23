@@ -423,13 +423,13 @@
 
     function prepareViewport() {
         if (!ready || !window.AndroidBridge || !AndroidBridge.prepareMapViewport) return;
-        const bounds = map.getBounds(), z = Math.min(18, Math.floor(map.getZoom()));
+        const bounds = map.getBounds(), z = Math.min(routeMapZoom ?? 18, Math.floor(map.getZoom()));
         const n = 2 ** z;
         const signature = [z, ...[bounds.getWest(), bounds.getEast()].map(l => Math.floor((l + 180) / 360 * n)),
             ...[bounds.getSouth(), bounds.getNorth()].map(l => Math.floor((1 - Math.asinh(Math.tan(l * Math.PI / 180)) / Math.PI) / 2 * n))].join(':');
         if (signature === viewportSignature) return;
         viewportSignature = signature;
-        AndroidBridge.prepareMapViewport(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(), map.getZoom());
+        AndroidBridge.prepareMapViewport(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(), z);
     }
     setInterval(prepareViewport, 2000);
     function renderManeuvers() {
@@ -719,7 +719,7 @@
         const msg = e && e.error && e.error.message ? e.error.message : String(e && e.error ? e.error : e);
         console.warn('GPS3D map:', msg);
         if (e && e.sourceId) resourceFailures[e.sourceId] = (resourceFailures[e.sourceId] || 0) + 1;
-        if (provider === 'tomtom' && e && e.sourceId === 'vectorTiles' && ++baseFailures >= 4 && networkAvailable &&
+        if (provider === 'tomtom' && routeMapZoom === null && e && e.sourceId === 'vectorTiles' && ++baseFailures >= 4 && networkAvailable &&
             map.queryRenderedFeatures().filter(f=>f.source==='vectorTiles').length === 0) {
             provider = 'openfreemap';
             const fallback = NavigationBasemap.themedStyle(NavigationStyles, provider, darkTheme, '');
@@ -755,7 +755,8 @@
             const next = typeof maxZoom === 'number' && Number.isFinite(maxZoom) ? maxZoom : null;
             if (next === routeMapZoom) return;
             routeMapZoom = next;
-            if (ready && !networkAvailable) map.setStyle(
+            viewportSignature = '';
+            if (ready) map.setStyle(
                 NavigationBasemap.preserveNavigation(connectionStyle(), map.getStyle()), {diff:true});
         },
         setNetworkAvailable(available) {

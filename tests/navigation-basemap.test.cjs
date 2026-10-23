@@ -11,7 +11,8 @@ test('offline route overscales prepared vectors and preserves all guidance on th
  const offline=basemap.forConnection(day,false,16);
  assert.equal(offline.sources.vectorTiles.maxzoom,16);
  assert.equal(day.sources.vectorTiles.maxzoom,18,'online detail remains intact');
- assert.equal(basemap.forConnection(day,true,16).sources.vectorTiles.maxzoom,18);
+ assert.equal(basemap.forConnection(day,true,16).sources.vectorTiles.maxzoom,16,'weak mobile data uses the protected route detail too');
+ assert.equal(basemap.forConnection(day,true,null).sources.vectorTiles.maxzoom,18,'browsing outside navigation retains online detail');
  assert.equal(basemap.forConnection(day,false,null).sources.vectorTiles.maxzoom,18,'browsing cache still supports its prepared zooms');
  const night=basemap.forConnection(basemap.themedStyle(styles,'tomtom',true,'test'),false,16);
  assert.equal(night.sources.vectorTiles.maxzoom,16);

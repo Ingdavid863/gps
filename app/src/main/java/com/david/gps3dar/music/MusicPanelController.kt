@@ -33,8 +33,8 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
     private var closed = false
     private var importing = false
     private val preferences = activity.getSharedPreferences(MusicPlaybackService.PREFS, android.content.Context.MODE_PRIVATE)
-    private var external = preferences.getString(SOURCE, null)?.let { it == EXTERNAL }
-        ?: MusicQueue.decode(preferences.getString(MusicPlaybackService.QUEUE, "").orEmpty()).tracks.isEmpty()
+    private var external = if (preferences.getBoolean(NATIVE_DEFAULT, false)) preferences.getString(SOURCE, LOCAL) == EXTERNAL
+        else false.also { preferences.edit().putBoolean(NATIVE_DEFAULT,true).putString(SOURCE,LOCAL).apply() }
     private val remote = ExternalMusicControls(activity)
     private var controller: MediaController? = null
     private val files = activity.registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -43,7 +43,7 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = render()
         override fun onPlayerError(error: PlaybackException) {
-            toast("No se pudo reproducir esta canción. Elige otra o vuelve a añadir el archivo.")
+            toast("No se pudo reproducir. Revisa la conexión para audio en línea o vuelve a elegir el archivo.")
             render()
         }
     }
@@ -58,6 +58,7 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         next.setOnClickListener { skip(forward = true) }
         play.setOnClickListener {
             if (external) { sendExternal(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE); return@setOnClickListener }
+            if (controller == null || controller?.mediaItemCount == 0) { showInAppMusic(); return@setOnClickListener }
             controller?.let { player ->
                 if (player.playWhenReady) player.pause() else {
                     if (player.playbackState == Player.STATE_IDLE || player.playerError != null) player.prepare()
@@ -116,34 +117,40 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         if (closed) return
         val player = controller
         val hasMusic = !external && (player?.mediaItemCount ?: 0) > 0
-        title.text = if (external) "Tu app de música" else if (hasMusic) player?.mediaMetadata?.title ?: "Canción" else "Tus canciones"
+        val online = player?.mediaMetadata?.extras?.getBoolean("online") == true
+        title.text = if (external) "Tu app de música" else if (hasMusic) player?.mediaMetadata?.title ?: "Canción" else "Escuchar en GPS3D"
         subtitle.text = when {
             external -> "Controla aquí el reproductor activo"
             importing -> "Añadiendo canciones…"
-            player?.playerError != null -> "Archivo no disponible · elige otra canción"
-            !hasMusic -> "Añadir canciones o abrir una app"
+            player?.playerError != null -> "Audio no disponible · toca ♫ para elegir otro"
+            !hasMusic -> "Toca ▶ para elegir música aquí"
             player?.playbackState == Player.STATE_BUFFERING -> "Cargando canción…"
-            player?.isPlaying == true -> "Canciones del teléfono · ${player.currentMediaItemIndex + 1}/${player.mediaItemCount}"
-            else -> "En pausa · canciones del teléfono"
+            player?.isPlaying == true -> "${if (online) "Audio en línea" else "Canciones del teléfono"} · ${player.currentMediaItemIndex + 1}/${player.mediaItemCount}"
+            else -> "En pausa · ${if (online) "audio en línea" else "canciones del teléfono"}"
         }
         for (button in listOf(previous, play, next)) { button.visibility = View.VISIBLE; button.isEnabled = external || hasMusic }
         previous.isEnabled = external || (hasMusic && (player?.mediaItemCount ?: 0) > 1)
         next.isEnabled = previous.isEnabled
+        play.isEnabled = true
         val playing = player?.playWhenReady == true
         play.setImageResource(if (external) R.drawable.ic_music_toggle else if (playing) R.drawable.ic_music_pause else R.drawable.ic_music_play)
         play.contentDescription = if (external) "Reproducir o pausar tu app de música" else if (playing) "Pausar música" else "Reproducir música"
     }
     private fun showSources() {
-        val items = arrayOf("Controlar otra app de música", "Abrir Spotify", "Abrir YouTube Music", "Abrir otra aplicación de música", "Añadir canciones del teléfono", "Mi lista de canciones", "Vaciar mi lista")
+        val items = arrayOf("Escuchar dentro de GPS3D", "Añadir enlace de audio", "Añadir canciones del teléfono", "Mi lista de canciones",
+            "Bloqueo de anuncios en audio", "Controlar otra app de música", "Abrir Spotify", "Abrir YouTube Music", "Abrir otra aplicación de música", "Vaciar mi lista")
         AlertDialog.Builder(activity).setTitle("Música para tu viaje")
             .setItems(items) { _, which -> when (which) {
-                0 -> { useExternal(); toast("Usa los botones del mapa. La primera vez, elige una canción en tu app de música.") }
-                1 -> openMusicApp("com.spotify.music", "Spotify")
-                2 -> openMusicApp("com.google.android.apps.youtube.music", "YouTube Music")
-                3 -> openOtherApps()
-                4 -> useLocal { files.launch(arrayOf("audio/*")) }
-                5 -> useLocal { showQueue() }
-                6 -> useLocal { player -> if (player.mediaItemCount > 0) AlertDialog.Builder(activity)
+                0 -> showInAppMusic()
+                1 -> showAudioLink()
+                2 -> useLocal { files.launch(arrayOf("audio/*")) }
+                3 -> useLocal { showQueue() }
+                4 -> showAdFilter()
+                5 -> { useExternal(); toast("La otra app debe permitir música en segundo plano. Para reproducir aquí, elige Escuchar dentro de GPS3D.") }
+                6 -> openMusicApp("com.spotify.music", "Spotify")
+                7 -> openMusicApp("com.google.android.apps.youtube.music", "YouTube Music")
+                8 -> openOtherApps()
+                9 -> useLocal { player -> if (player.mediaItemCount > 0) AlertDialog.Builder(activity)
                     .setTitle("¿Vaciar tu lista?").setMessage("Los archivos del teléfono se conservan.")
                     .setNegativeButton("Cancelar", null).setPositiveButton("Vaciar") { _, _ ->
                         val uris = (0 until player.mediaItemCount).map { Uri.parse(player.getMediaItemAt(it).mediaId) }
@@ -152,9 +159,64 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
                     }.show() }
             } }.setNegativeButton("Cerrar", null).show()
     }
+    private fun showInAppMusic() {
+        AlertDialog.Builder(activity).setTitle("Escuchar dentro de GPS3D")
+            .setItems(arrayOf("Radio Paradise · mezcla general", "Radio Paradise · rock", "Radio Paradise · relajante",
+                "Mis canciones guardadas", "Añadir canciones del teléfono", "Añadir enlace de audio")) { _, which ->
+                when (which) {
+                    in 0..2 -> {
+                        val streams = arrayOf("mp3-128", "rock-128", "mellow-128")
+                        val labels = arrayOf("Radio Paradise · mezcla general", "Radio Paradise · rock", "Radio Paradise · relajante")
+                        val queue = streams.indices.map { MusicTrack("https://stream.radioparadise.com/${streams[it]}",labels[it],true,true) }
+                        useLocal { player ->
+                            // Add the station set once, preserving the user's selected files and links.
+                            val existing = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
+                            val additions = queue.filter { it.uri !in existing }.take((MusicQueue.MAX_TRACKS-player.mediaItemCount).coerceAtLeast(0))
+                            player.addMediaItems(additions.map(MusicPlaybackService::mediaItem))
+                            val index=(0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == queue[which].uri }
+                            if (index == null) toast("La lista está llena. Vacía espacio para añadir emisoras.")
+                            else { player.seekToDefaultPosition(index); player.prepare(); player.play() }
+                        }
+                    }
+                    3 -> useLocal { showQueue() }
+                    4 -> useLocal { files.launch(arrayOf("audio/*")) }
+                    5 -> showAudioLink()
+                }
+            }.setNeutralButton("Acerca de la radio") { _, _ -> AlertDialog.Builder(activity)
+                .setTitle("Radio Paradise").setMessage("Emisoras en vivo sostenidas por sus oyentes. Requieren internet. Anterior y siguiente cambian de emisora; no eligen la canción emitida.")
+                .setPositiveButton("Cerrar",null).setNeutralButton("Sitio de la emisora") { _, _ -> activity.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://radioparadise.com"))) }.show()
+            }.setNegativeButton("Cerrar",null).show()
+    }
+    private fun showAudioLink() {
+        val box=android.widget.LinearLayout(activity).apply { orientation=android.widget.LinearLayout.VERTICAL;setPadding(28,12,28,0) }
+        val name=android.widget.EditText(activity).apply { hint="Nombre de la canción o emisora";isSingleLine=true }
+        val link=android.widget.EditText(activity).apply { hint="https://… (audio o emisora)";isSingleLine=true;inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI }
+        box.addView(name);box.addView(link)
+        val dialog=AlertDialog.Builder(activity).setTitle("Añadir enlace de audio")
+            .setMessage("Usa un enlace directo de audio o radio HTTPS. Las páginas de YouTube Music y Spotify se escuchan con sus propias apps y requisitos de cuenta.")
+            .setView(box).setPositiveButton("Reproducir",null).setNegativeButton("Cancelar",null).create()
+        dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val url=link.text.toString().trim()
+            if (!MusicTrack.directAudio(url)) { link.error="Introduce un enlace directo de audio HTTPS";return@setOnClickListener }
+            val track=MusicTrack(url,name.text.toString().trim().ifBlank { "Audio en línea" }.take(200),true)
+            useLocal { player ->
+                val existing=(0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId==url }
+                if (existing == null && player.mediaItemCount >= MusicQueue.MAX_TRACKS) toast("Tu lista alcanzó las 100 entradas.")
+                else { val index=existing ?: player.mediaItemCount.also { player.addMediaItem(MusicPlaybackService.mediaItem(track)) }
+                    player.seekToDefaultPosition(index);player.prepare();player.play();dialog.dismiss() }
+            }
+        } };dialog.show()
+    }
+    private fun showAdFilter() {
+        val enabled=preferences.getBoolean(MusicNetwork.FILTER,true)
+        AlertDialog.Builder(activity).setTitle("Bloqueo de anuncios en audio")
+            .setMessage("${if (enabled) "Activado" else "Desactivado"} · AdGuard DNS\n\nFiltra dominios de anuncios y rastreadores de los enlaces que reproduce GPS3D. Se aplica al iniciar o volver a preparar un audio. No filtra el mapa ni otras apps. No elimina anuncios insertados dentro de una emisión o de YouTube Music. Los dominios de audio se consultan al proveedor DNS.")
+            .setPositiveButton(if (enabled) "Desactivar" else "Activar") { _, _ -> preferences.edit().putBoolean(MusicNetwork.FILTER,!enabled).apply();toast("Filtro ${if (enabled) "desactivado" else "activado"} para las nuevas conexiones de audio.") }
+            .setNegativeButton("Cerrar",null).show()
+    }
     private fun showQueue() {
         val player = controller ?: return
-        if (player.mediaItemCount == 0) { toast("Añade canciones del teléfono para crear tu lista."); return }
+        if (player.mediaItemCount == 0) { showInAppMusic(); return }
         val names = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaMetadata.title?.toString() ?: "Canción" }.toTypedArray()
         AlertDialog.Builder(activity).setTitle("Mis canciones")
             .setSingleChoiceItems(names, player.currentMediaItemIndex) { dialog, index ->
@@ -218,5 +280,6 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         const val SOURCE = "control_source"
         const val LOCAL = "local"
         const val EXTERNAL = "external"
+        const val NATIVE_DEFAULT = "native_player_030"
     }
 }

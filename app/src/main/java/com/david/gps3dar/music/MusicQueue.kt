@@ -3,25 +3,38 @@ package com.david.gps3dar.music
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Only user-selected documents are remembered; no scan of the phone's storage. */
-data class MusicTrack(val uri: String, val title: String)
+/** Sources are selected inside the player; no scan of the phone or extraction from other apps. */
+data class MusicTrack(val uri: String, val title: String, val online: Boolean = false, val live: Boolean = false) {
+    fun valid(): Boolean = if (!online) uri.startsWith("content://") && uri.length in 11..4096
+        else directAudio(uri)
+    companion object {
+        fun directAudio(uri: String): Boolean = runCatching {
+            val url = java.net.URI(uri)
+            val host = url.host?.lowercase() ?: return false
+            val pages = listOf("youtube.com", "youtu.be", "spotify.com")
+            uri.length <= 4096 && url.scheme == "https" && url.userInfo == null &&
+                pages.none { host == it || host.endsWith(".$it") }
+        }.getOrDefault(false)
+    }
+}
 data class MusicQueue(val tracks: List<MusicTrack>, val index: Int = 0, val positionMs: Long = 0) {
-    fun encode(): String = JSONObject().put("version", 1).put("index", index).put("positionMs", positionMs)
+    fun encode(): String = JSONObject().put("version", 2).put("index", index).put("positionMs", positionMs)
         .put("tracks", JSONArray(tracks.take(MAX_TRACKS).map {
-            JSONObject().put("uri", it.uri).put("title", it.title.take(200))
+            JSONObject().put("uri", it.uri).put("title", it.title.take(200)).put("online", it.online).put("live", it.live)
         })).toString()
 
     companion object {
         const val MAX_TRACKS = 100
         fun decode(json: String): MusicQueue = runCatching {
             val root = JSONObject(json)
-            require(root.getInt("version") == 1)
+            val version = root.getInt("version"); require(version in 1..2)
             val list = root.getJSONArray("tracks")
             val tracks = (0 until minOf(list.length(), MAX_TRACKS)).mapNotNull { i ->
                 val item = list.optJSONObject(i) ?: return@mapNotNull null
                 val uri = item.optString("uri")
-                if (!uri.startsWith("content://") || uri.length !in 11..4096) null
-                else MusicTrack(uri, item.optString("title", "Canción").take(200).ifBlank { "Canción" })
+                val track = MusicTrack(uri, item.optString("title", "Canción").take(200).ifBlank { "Canción" },
+                    version >= 2 && item.optBoolean("online"), version >= 2 && item.optBoolean("live"))
+                track.takeIf { it.valid() }
             }.distinctBy { it.uri }
             MusicQueue(tracks, root.optInt("index").coerceIn(0, (tracks.size - 1).coerceAtLeast(0)),
                 root.optLong("positionMs").coerceIn(0, 7 * 24 * 60 * 60 * 1000L))

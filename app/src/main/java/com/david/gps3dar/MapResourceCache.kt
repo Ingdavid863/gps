@@ -27,6 +27,7 @@ class MapResourceCache(directory: File, transport: OkHttpClient = OkHttpClient()
     private val inFlight = ConcurrentHashMap<String, CompletableFuture<Pair<ByteArray, String>?>>()
     private val visibleRequests = AtomicInteger()
     @Volatile private var online = true
+    @Volatile private var routeDetail: Int? = null
     private val routePack = OfflineRoutePack(File(directory.parentFile, "saved-route-map")) { url ->
         while (visibleRequests.get() >= 4 && online && !Thread.currentThread().isInterrupted) Thread.sleep(40)
         bytes(url)
@@ -92,7 +93,9 @@ class MapResourceCache(directory: File, transport: OkHttpClient = OkHttpClient()
     fun prepareViewport(west: Double, south: Double, east: Double, north: Double, zoom: Double) {
         if (key.isBlank() || !online) return
         val id = viewportGeneration.incrementAndGet()
-        val tiles = MapTilePlanner.viewport(west, south, east, north, zoom)
+        val detail = routeDetail
+        val tiles = MapTilePlanner.viewport(west, south, east, north, minOf(zoom, (detail ?: 18).toDouble()))
+            .filter { detail == null || it.z <= detail }
         viewportWorker.execute {
             runCatching {
             for (tile in tiles) {
@@ -118,12 +121,13 @@ class MapResourceCache(directory: File, transport: OkHttpClient = OkHttpClient()
     }
     fun prepare(route: List<RouteGeometry.Point>, done: (OfflineRoutePack.Progress) -> Unit) {
         if (key.isBlank() || route.size < 2) { done(OfflineRoutePack.Progress(0, 0, "error")); return }
+        routeDetail = MapTilePlanner.OFFLINE_MAX_ZOOM
         val id = MessageDigest.getInstance("SHA-256").digest(route.joinToString(";") { "${it.lat},${it.lon}" }.toByteArray())
             .joinToString("") { "%02x".format(it) }
         routePack.prepare(id, { styleResources() + MapTilePlanner.plan(route).map(::tileUrl) }, done)
     }
     fun retryPreparation() = routePack.retry()
     fun preparationState() = routePack.current()
-    fun cancel() { routePack.cancel(); viewportGeneration.incrementAndGet() }
+    fun cancel() { routeDetail = null; routePack.cancel(); viewportGeneration.incrementAndGet() }
     fun close() { cancel(); routePack.close(); viewportWorker.shutdownNow(); client.dispatcher.cancelAll(); cache.close() }
 }

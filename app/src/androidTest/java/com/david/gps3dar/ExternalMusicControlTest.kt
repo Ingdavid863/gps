@@ -74,7 +74,8 @@ class ExternalMusicControlTest {
         context.contentResolver.call(fixture,"stop",null,null)
         val old=connect();main { old.stop();old.clearMediaItems();old.release() }
         context.stopService(Intent(context,MusicPlaybackService::class.java))
-        prefs.edit().clear().commit()
+        prefs.edit().clear().putBoolean(MusicPanelController.NATIVE_DEFAULT,true)
+            .putString(MusicPanelController.SOURCE,MusicPanelController.EXTERNAL).commit()
     }
     @After fun cleanup() {
         context.contentResolver.call(fixture,"stop",null,null)
