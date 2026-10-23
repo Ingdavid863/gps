@@ -66,6 +66,10 @@ class InAppAudioTest {
                 scenario.moveToState(Lifecycle.State.RESUMED)
                 val saved=MusicQueue.decode(prefs.getString(MusicPlaybackService.QUEUE,"").orEmpty())
                 assertTrue(saved.tracks.any { it.online && it.live });assertEquals(0L,saved.positionMs)
+                // Releasing live TLS audio must also be safe from the service's main thread.
+                main { MusicPlaybackService.handoffToExternal() }
+                await("The live session releases without crashing the map") { var closed=false;main { closed=!player.isConnected };closed }
+                scenario.onActivity { assertEquals(Lifecycle.State.RESUMED,it.lifecycle.currentState) }
             } finally { main { player.stop();player.clearMediaItems();player.release() } }
         }
         context.stopService(Intent(context,MusicPlaybackService::class.java));prefs.edit().clear().commit()

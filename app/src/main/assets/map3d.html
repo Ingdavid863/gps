@@ -801,6 +801,7 @@
                 layerIds:snapshot.layers.map(l=>l.id), failures:{...resourceFailures},
                 roadData:includeRoad ? sourceRoads.nearby(lastLocation).length : undefined,
                 roadDetails:includeRoad ? sourceRoads.nearby(lastLocation).map(f=>({layer:f.sourceLayer,properties:f.properties,geometry:f.geometry})) : undefined,
+                renderedRoads:includeRoad ? [...new Set(features.filter(f=>f.layer.type==='line'&&/road|motorway/i.test(f.layer['source-layer']||'')).map(f=>f.layer.id))] : undefined,
                 roadGeometry:includeRoad ? features.filter(f=>f.layer.type==='line' && NavigationRoadPosition.isRoad(f))
                     .flatMap(f=>f.geometry?.type==='LineString' ? [f.geometry.coordinates] :
                         f.geometry?.type==='MultiLineString' ? f.geometry.coordinates : [])

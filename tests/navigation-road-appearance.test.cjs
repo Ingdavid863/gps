@@ -45,6 +45,19 @@ test('close roads keep a consistent ground scale and buildings reuse the saved p
         }
     }
 });
+test('restricted terminal access keeps visible asphalt and original access markings',()=>{
+    const position=require('../app/src/main/assets/navigation-road-position');
+    for(const name of ['day','night']) {
+        const original=context.window.NavigationStyles[name],styled=appearance.decorate(original,name==='night');
+        const id='Non public road - level0',road=styled.layers.find(l=>l.id===id);
+        assert.equal(road.paint['line-color'],name==='night'?'#424e5a':'#505961');
+        assert.deepEqual(road.filter,original.layers.find(l=>l.id===id).filter);
+        for(const dots of original.layers.filter(l=>/Non public road dots/.test(l.id)))
+            assert.deepEqual(styled.layers.find(l=>l.id===dots.id),dots);
+        assert.ok(!styled.layers.some(l=>l.id.startsWith('road-detail-')&&/Non public/.test(l.id)));
+        assert.equal(position.isRoad({source:'vectorTiles',sourceLayer:'Non public road'}),false);
+    }
+});
 test('local car projection keeps ground position fixed as camera and bearing change',()=>{
     assert.ok(vehicle.mesh().length>30);
     for(const pitch of [0,45,65])for(const yaw of [0,90,180,359]) {

@@ -21,3 +21,5 @@ Siguen disponibles como opciones externas y conservan los controles multimedia d
 La validación incluye reproducción HTTPS real dentro del servicio de GPS3D, botones del mapa, persistencia de fuentes/listas, continuidad tras recrear la actividad y en segundo plano. Se comprueba el DNS filtrado con emisoras accesibles y un dominio publicitario bloqueado. También se mantienen las pruebas de archivos locales, prioridad de voz y control de un reproductor Android independiente. Las pruebas no sustituyen comprobar la recepción GNSS y la red en el teléfono de David.
 
 Fuentes: [Media3](https://developer.android.com/media/media3/session/background-playback), [Radio Paradise: enlaces para reproductores](https://radioparadise.com/listen/stream-links), [AdGuard DNS público](https://adguard-dns.io/es/public-dns.html), [YouTube Music en segundo plano](https://support.google.com/youtubemusic/answer/6313552), [límites de RethinkDNS](https://rethinkdns.com/faq).
+
+La liberación de conexiones TLS se realiza fuera del hilo principal de Android, una sola vez por reproductor, incluso al cambiar a una aplicación externa. Esto evita un cierre de la app al terminar una transmisión.
