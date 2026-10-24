@@ -7,7 +7,7 @@ const watchdog=setTimeout(()=>{console.error('Catalogue probe exceeded three min
 const nativeFetch=globalThis.fetch;
 const fetcher=(input,init={})=>nativeFetch(input,{...init,signal:AbortSignal.timeout(20000)});
 try{
- const yt=await YT.Innertube.create({lang:'en',location:'US',generate_session_locally:true,fetch:fetcher});
+ const yt=await YT.Innertube.create({lang:'en',location:'US',generate_session_locally:false,fetch:fetcher});
  console.log('Catalogue session created');
  let songs=[];
  try{
@@ -22,9 +22,12 @@ try{
  }
  if(!songs.length)throw Error('No actual catalogue results');
  let success=false;
- for(const client of ['ANDROID_VR','IOS','WEB']){
+ for(const [videoId,client] of [[songs[0].id,'ANDROID_VR'],[songs[0].id,'IOS'],[songs[0].id,'WEB'],['jNQXAC9IVRw','ANDROID_VR']]){
   try{
-   const format=await yt.getStreamingData(songs[0].id,{type:'audio',quality:'best',client});
+   const info=await yt.getBasicInfo(videoId,{client});
+   console.log('Playability',JSON.stringify({client,videoId,status:info.playability_status?.status,reason:info.playability_status?.reason,formats:info.streaming_data?.adaptive_formats?.length||0}));
+   const format=info.chooseFormat({type:'audio',quality:'best'});
+   format.url=await format.decipher(yt.session.player);
    if(!format.url)throw Error('No audio URL');
    const controller=new AbortController();
    const response=await nativeFetch(format.url,{headers:{Range:'bytes=0-1023'},signal:AbortSignal.any([controller.signal,AbortSignal.timeout(20000)])});
