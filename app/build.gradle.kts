@@ -40,8 +40,8 @@ android {
         applicationId = "com.david.gps3dar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 37
-        versionName = "0.31.0-beta-music-player"
+        versionCode = 38
+        versionName = "0.32.0-beta-music-close"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["arcoreApiKey"] = arcoreApiKey
         manifestPlaceholders["tomTomApiKey"] = tomTomApiKey
