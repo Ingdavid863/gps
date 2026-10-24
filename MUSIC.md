@@ -1,31 +1,34 @@
-# GPS3D 0.31 — minirreproductor en el mapa
+# GPS3D 0.31 — reproductor propio y minirreproductor
 
-La barra enlaza una sesión multimedia real de Spotify, YouTube Music u otro reproductor instalado. Presenta canción, artista, carátula si la app la publica, estado de reproducción, posición y duración. Anterior, reproducir/pausar, siguiente y búsqueda en la canción se envían al controlador elegido, respetando los comandos que esa app ofrece. Los controles deshabilitados no se simulan.
+Al tocar el título o la carátula del área de música se abre **GPS3D Música**, una pantalla de la misma aplicación. El reproductor Media3 pertenece a un servicio independiente de la pantalla: **Atrás** y **Volver al mapa** cierran la pantalla ampliada y mantienen la canción, la posición y la lista. El mapa conserva sus controles de reproducción.
 
-## Conexión inicial
+## Escuchar directamente en GPS3D
 
-1. Toca ♫ en el panel para ver las apps de audio instaladas con sus iconos.
-2. Elige Spotify, YouTube Music u otro reproductor y activa **Controles de música GPS3D** cuando Android abra Acceso a notificaciones.
-3. Elige una canción en el reproductor si todavía no tiene sesión y vuelve al GPS. La información y los controles aparecen en el mapa. La selección se conserva al reabrir GPS3D.
+1. Toca el área de música del mapa.
+2. En **Buscar**, elige **Audius** o **SoundCloud**, escribe una canción o artista y toca un resultado público.
+3. Consulta título, artista, carátula cuando esté disponible, tiempo y duración; utiliza reproducir/pausar, anterior, siguiente y la barra de posición.
+4. Pulsa **Atrás** para minimizar al mapa. **Mi lista** conserva hasta 100 pistas elegidas; **Teléfono** permite añadir archivos y **Radio** ofrece tres emisoras en vivo.
 
-El catálogo se selecciona en la aplicación musical. GPS3D muestra y controla su sesión; no incrusta la ventana completa de otra app ni copia su catálogo. Al tocar la información del tema puede abrirse su reproductor. El modo automático elige la sesión activa; elegir una app concreta impide controlar accidentalmente otra.
+Los catálogos pertenecen a Audius y SoundCloud y requieren internet. Sólo se ofrecen pistas con reproducción pública disponible. Su contenido y disponibilidad dependen del proveedor y del país; no equivalen a las bibliotecas privadas de Spotify o YouTube Music. No se solicitan credenciales, no se descargan canciones y no se eluden pistas privadas, de pago o protegidas. Los archivos elegidos del teléfono sí se pueden escuchar sin internet. La lista se conserva; una URL temporal de SoundCloud se resuelve de nuevo desde su identificador cuando hace falta.
 
-Android exige habilitar un NotificationListenerService para consultar las sesiones de otras apps mediante MediaSessionManager. GPS3D no solicita el permiso de firma MEDIA_CONTENT_CONTROL, no automatiza la concesión y no usa accesibilidad. Su servicio no procesa ni guarda contenido de notificaciones. En Android 12+ declara una lista de categorías vacía; sólo se usan los datos multimedia que el reproductor publica. El usuario puede revocar el acceso desde Ajustes; el panel borra entonces título, carátula y controles obsoletos.
+El sonido baja durante las indicaciones de navegación y recupera su volumen al terminarlas. El servicio mantiene la reproducción al volver al mapa o cambiar de pantalla. Los botones de una emisora cambian de emisora; no eligen la canción emitida.
 
-Algunas versiones de Android restringen este acceso para APK instalados fuera de la tienda. Puede ser necesario permitir ajustes restringidos desde Información de la app antes de activarlo. Android 10 o anteriores en dispositivos declarados de poca RAM pueden impedir los listeners; los perfiles de trabajo también tienen restricciones del sistema.
+## Otra app musical, opcional
 
-## Condiciones del reproductor
+El botón ♫ permite elegir una app instalada, como Spotify o YouTube Music. Para esta opción Android pide activar **Controles de música GPS3D** en **Acceso a notificaciones**. Selecciona una canción en esa app y vuelve al mapa. GPS3D muestra la información y controla su sesión real, con los comandos que publique: título, artista, carátula, estado, posición y duración. La elección se conserva; una app elegida que no tiene sesión nunca redirige órdenes a otra.
 
-Spotify y YouTube Music mantienen sus propias cuentas, suscripciones, anuncios, conexión y permisos de reproducción en segundo plano. YouTube Music normalmente requiere Premium para escuchar canciones mientras se utiliza otra app; la integración no elimina esa condición ni sus anuncios. No se pide la contraseña en GPS3D. Si una app no publica metadatos, carátula, duración o un comando, GPS3D indica lo disponible sin inventarlo.
+Las cuentas, suscripciones, anuncios, conexión y condiciones de segundo plano siguen perteneciendo al proveedor. No se pide su contraseña en GPS3D. Algunas funciones de YouTube Music requieren Premium. Esta modalidad controla la sesión; el catálogo propio de GPS3D es el descrito arriba.
 
-## Música propia conservada
+Android exige un NotificationListenerService habilitado por el usuario para consultar sesiones mediante MediaSessionManager. GPS3D no solicita MEDIA_CONTENT_CONTROL, no automatiza el acceso y no utiliza accesibilidad. El servicio no procesa ni guarda contenido de notificaciones; en Android 12+ declara una lista vacía de categorías. Se puede revocar el acceso en Ajustes y el panel elimina los datos de sesión obsoletos. Algunas versiones de Android requieren permitir ajustes restringidos en Información de la app al instalar un APK fuera de la tienda. El reproductor propio funciona sin este acceso.
 
-El menú conserva archivos del teléfono, enlaces directos HTTPS MP3/AAC/HLS y Radio Paradise. Se reproducen en Media3 dentro de GPS3D, con hasta 100 entradas, reproducción en segundo plano y atenuación durante indicaciones. La radio requiere internet y anterior/siguiente cambian de emisora. La lista se conserva al cambiar entre el reproductor propio y otra app.
+## Filtro y recursos
 
-AdGuard DNS por HTTPS se aplica sólo al audio del reproductor propio. No modifica DNS del sistema, mapas, búsquedas, tráfico ni otras aplicaciones y no elimina publicidad integrada en emisiones o de YouTube Music externo. Se puede desactivar desde el menú.
+El filtro AdGuard DNS por HTTPS se limita a las conexiones del reproductor propio. No modifica mapas, búsquedas, tráfico, el DNS del sistema ni otras aplicaciones. No elimina publicidad insertada dentro del audio o en una app externa. Se puede desactivar desde ♫. Las carátulas se cargan fuera del hilo de interfaz, tienen un tamaño limitado y comparten una caché pequeña. Las búsquedas y la resolución de audio tampoco bloquean el mapa.
 
 ## Verificación
 
-El reproductor de pruebas independiente usa otro UID, reproduce PCM real y publica título, artista, carátula, duración y progreso. Las pruebas comprueban controles, búsqueda real en el decodificador, cambios de canción, reapertura, revocación/reconexión y que una app seleccionada no envíe órdenes a otra sesión. No se utilizan cuentas reales de Spotify o YouTube Music. El reproductor de pruebas no se incluye en el APK entregado.
+Las pruebas Android ejercitan búsquedas públicas reales y la decodificación de audio de cada catálogo, la pantalla ampliada, pausa/reanudación y el regreso al mapa sin reiniciar la canción. Las pruebas de archivos locales y radio comprueban cambios de pista, segundo plano, restauración de lista y atenuación durante indicaciones. Un reproductor de pruebas con otro UID publica metadatos y PCM real para comprobar controles externos, posición, carátula, revocación y selección exacta de una sesión. Ese reproductor no se incluye en el APK. No se usan cuentas reales de Spotify o YouTube Music.
 
-Referencias: https://developer.android.com/reference/android/media/session/MediaSessionManager y https://developer.android.com/reference/android/service/notification/NotificationListenerService ; condiciones de YouTube Music: https://support.google.com/youtubemusic/answer/6313552
+La misma compilación ejecuta las pruebas existentes de GNSS, cámara, navegación, casetas, tráfico, Android Auto y mapa de ruta completa sin conexión.
+
+Referencias: https://docs.audius.org/api/ ; https://github.com/patrickkfkan/soundcloud-fetch ; https://developer.android.com/reference/android/media/session/MediaSessionManager ; https://developer.android.com/reference/android/service/notification/NotificationListenerService ; https://support.google.com/youtubemusic/answer/6313552

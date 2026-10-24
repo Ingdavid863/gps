@@ -42,6 +42,9 @@ class MusicPlayerActivity : AppCompatActivity() {
             override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View = super.getView(position,convertView,parent).also {
                 (it as? TextView)?.setTextColor(Color.rgb(237,242,247))
             }
+            override fun getDropDownView(position:Int,convertView:View?,parent:android.view.ViewGroup):View = super.getDropDownView(position,convertView,parent).also {
+                (it as? TextView)?.setTextColor(Color.rgb(16,25,35))
+            }
         }
         query.setText(savedInstanceState?.getString("query").orEmpty())
         source.setSelection(savedInstanceState?.getInt("source") ?: 0)
