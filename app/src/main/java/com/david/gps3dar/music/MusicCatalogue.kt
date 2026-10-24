@@ -37,7 +37,7 @@ class MusicCatalogue(private val network: Call.Factory) {
                 val data=JSONObject(get(address.toString())).optJSONArray("collection") ?: JSONArray()
                 (0 until data.length()).mapNotNull { i ->
                     val item=data.optJSONObject(i) ?: return@mapNotNull null
-                    if(!item.optBoolean("streamable") || item.optString("policy")!="ALLOW") return@mapNotNull null
+                    if(!item.optBoolean("streamable") || item.optString("policy") !in PUBLIC_POLICIES) return@mapNotNull null
                     val id=item.optLong("id");if(id<=0)return@mapNotNull null
                     MusicTrack("gps3d-music://soundcloud/$id/audio.m3u8",item.optString("title").take(200),true,
                         artist=item.optJSONObject("publisher_metadata")?.optString("artist")?.takeIf { it.isNotBlank() }
@@ -53,7 +53,7 @@ class MusicCatalogue(private val network: Call.Factory) {
         streams[id]?.takeIf { System.currentTimeMillis()-it.first < 240000 }?.let { return it.second }
         val key=soundCloudKey()
         val item=JSONObject(get("https://api-v2.soundcloud.com/tracks/$id?client_id=$key"))
-        if(!item.optBoolean("streamable") || item.optString("policy")!="ALLOW") throw IOException("La pista no ofrece reproducción pública")
+        if(!item.optBoolean("streamable") || item.optString("policy") !in PUBLIC_POLICIES) throw IOException("La pista no ofrece reproducción pública")
         val list=item.optJSONObject("media")?.optJSONArray("transcodings") ?: throw IOException("Audio no disponible")
         val choices=(0 until list.length()).map { list.getJSONObject(it) }.filter {
             val format=it.optJSONObject("format")
@@ -108,6 +108,7 @@ class MusicCatalogue(private val network: Call.Factory) {
         }
     }
     companion object {
+        private val PUBLIC_POLICIES=setOf("ALLOW","MONETIZE")
         @Volatile private var clientId = ""
         const val AGENT="Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0"
         private const val MOBILE_AGENT="Mozilla/5.0 (iPhone; CPU iPhone OS 16_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/99.0.4844.47 Mobile/15E148 Safari/604.1"
