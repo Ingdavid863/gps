@@ -60,7 +60,12 @@ class MusicPlayerScreenTest {
                     screen!!.findViewById<EditText>(R.id.musicSearch).setText(term)
                     screen!!.findViewById<View>(R.id.musicSearchGo).performClick()
                 }
-                await("The real $origin catalogue must return selectable music") { screen!!.findViewById<LinearLayout>(R.id.musicResults).childCount>0 }
+                await("The real $origin catalogue must return selectable music") {
+                    val found=screen!!.findViewById<LinearLayout>(R.id.musicResults).childCount>0
+                    if(!found && screen!!.findViewById<View>(R.id.musicSearchGo).isEnabled)
+                        fail("$origin search: ${screen!!.findViewById<TextView>(R.id.musicCatalogueStatus).text}")
+                    found
+                }
                 var expectedTitle="";var expectedArtist=""
                 main {
                     val row=screen!!.findViewById<LinearLayout>(R.id.musicResults).getChildAt(0) as LinearLayout

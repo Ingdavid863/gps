@@ -61,7 +61,7 @@ class ExternalMusicControlTest {
             // otherwise a fast accessibility click can reopen the source menu instead of selecting a track.
             if(root?.findAccessibilityNodeInfosByText(dialogTitle).orEmpty().none { it.text?.toString()==dialogTitle }) false
             else {
-                val node=root?.findAccessibilityNodeInfosByText(text).orEmpty().firstOrNull { it.text?.toString()==text }
+                val node=root?.findAccessibilityNodeInfosByText(text).orEmpty().firstOrNull { it.text?.toString().equals(text,ignoreCase=true) }
                 node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true ||
                     node?.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
             }

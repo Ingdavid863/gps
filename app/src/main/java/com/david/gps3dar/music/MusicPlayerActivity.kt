@@ -80,7 +80,10 @@ class MusicPlayerActivity : AppCompatActivity() {
                 found.onSuccess { tracks ->
                     status.text=if(tracks.isEmpty())"No hay pistas públicas reproducibles para esta búsqueda en ${provider.label}." else "${tracks.size} canciones · ${provider.label} · toca una para reproducir"
                     tracks.forEach { track -> row(track.title,track.artist.ifBlank{provider.label}) { panel.playTrack(track) } }
-                }.onFailure { status.text="No se pudo consultar ${provider.label}. Revisa la conexión e inténtalo de nuevo." }
+                }.onFailure { error ->
+                    android.util.Log.w("GPS3DMusic","Catalogue ${provider.label}: ${error.javaClass.simpleName}: ${error.message?.replace(Regex("https?://\\S+"),"[resource]")}")
+                    status.text="No se pudo consultar ${provider.label}. Revisa la conexión e inténtalo de nuevo."
+                }
             }
         }
     }

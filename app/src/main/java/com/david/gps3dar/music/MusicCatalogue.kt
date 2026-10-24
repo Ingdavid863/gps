@@ -12,7 +12,6 @@ import java.util.concurrent.TimeUnit
 /** Public, ungated catalogues. No account credentials or installed music app are used. */
 class MusicCatalogue(private val network: Call.Factory) {
     enum class Source(val label: String) { AUDIUS("Audius"), SOUNDCLOUD("SoundCloud") }
-    @Volatile private var clientId = ""
     private val streams = mutableMapOf<String, Pair<Long,String>>()
     fun search(query: String, source: Source): List<MusicTrack> {
         require(query.trim().length in 1..160)
@@ -83,13 +82,14 @@ class MusicCatalogue(private val network: Call.Factory) {
         val web=get("https://soundcloud.com")
         val files=Regex("https://[A-Za-z0-9.-]*sndcdn\\.com/[^\"'<>\\s]+\\.js").findAll(web).map { it.value }.distinct().take(16)
         for(file in files) {
-            val script=get(file)
+            val script=runCatching { get(file) }.getOrNull() ?: continue
             Regex("client_id\\s*:\\s*\"([A-Za-z0-9]{20,64})\"").find(script)?.groupValues?.get(1)?.let { clientId=it;return it }
         }
         throw IOException("No se pudo conectar con el catálogo")
     }
     fun get(url: String): String {
-        val builder=Request.Builder().url(url).header("User-Agent",AGENT)
+        val host=url.toHttpUrl().host
+        val builder=Request.Builder().url(url).header("User-Agent",if(host=="m.soundcloud.com")MOBILE_AGENT else AGENT)
         if(url.toHttpUrl().host.endsWith("soundcloud.com"))builder.header("Origin","https://soundcloud.com").header("Referer","https://soundcloud.com/")
         val request=builder.build()
         val call=network.newCall(request);call.timeout().timeout(12,TimeUnit.SECONDS)
@@ -107,5 +107,9 @@ class MusicCatalogue(private val network: Call.Factory) {
             return out.toString(Charsets.UTF_8.name())
         }
     }
-    companion object { const val AGENT="Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0" }
+    companion object {
+        @Volatile private var clientId = ""
+        const val AGENT="Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0"
+        private const val MOBILE_AGENT="Mozilla/5.0 (iPhone; CPU iPhone OS 16_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/99.0.4844.47 Mobile/15E148 Safari/604.1"
+    }
 }
