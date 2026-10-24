@@ -1,0 +1,43 @@
+name: GPS3D 0.32 APK
+on:
+  push:
+    branches:
+      - codex/gps3d-0.32-music-close
+  workflow_dispatch:
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore signing certificate
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.gps3d/precision-test.keystore
+          key: gps3d-precision-test-signing-v3
+      - name: Prepare signing
+        run: python3 scripts/prepare_test_signing.py
+      - name: Assemble APK
+        env:
+          ARCORE_API_KEY: ${{ secrets.ARCORE_API_KEY }}
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+        run: gradle assembleRelease --stacktrace
+      - name: Package GPS3D
+        run: |
+          mkdir -p build/delivery
+          cp app/build/outputs/apk/release/app-release.apk build/delivery/GPS3D_0.32_Reproductor_Cerrar.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GPS3D_0.32_Reproductor_Cerrar
+          path: build/delivery/GPS3D_0.32_Reproductor_Cerrar.apk
