@@ -49,6 +49,10 @@ class MusicPlayerActivity : AppCompatActivity() {
         query.setText(savedInstanceState?.getString("query").orEmpty())
         source.setSelection(savedInstanceState?.getInt("source") ?: 0)
         findViewById<View>(R.id.musicMinimize).setOnClickListener { finish() }
+        findViewById<View>(R.id.musicClose).setOnClickListener {
+            panel.stopAndClearLocalPlayback()
+            finish()
+        }
         findViewById<View>(R.id.musicSearchGo).setOnClickListener { search() }
         query.setOnEditorActionListener { _,action,_ -> if(action==EditorInfo.IME_ACTION_SEARCH){search();true}else false }
         findViewById<View>(R.id.musicBrowse).setOnClickListener { mode="search";showSearch(true);results.removeAllViews();status.text="Busca canciones del catálogo público de Audius o SoundCloud. Requiere internet." }
