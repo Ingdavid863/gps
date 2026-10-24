@@ -28,7 +28,9 @@ class SharedDestinationIntentTest {
         assertTrue("Merged APK must not request screen access, SMS or package installation",
             info.requestedPermissions.orEmpty().none { it in forbidden })
         assertTrue("Merged APK must not contain a screen-reading service",
-            info.services.orEmpty().none { it.permission in forbidden })
+            info.services.orEmpty().none { it.permission in forbidden &&
+                !(it.name == "com.david.gps3dar.music.MusicSessionAccessService" &&
+                    it.permission == "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" && !it.exported) })
         val first = Intent(context, RealisticMapActivity::class.java)
             .setAction(Intent.ACTION_SEND).setType("text/plain")
             .putExtra(Intent.EXTRA_TEXT, "https://www.google.com/maps/dir/?api=1&destination=19.7356,-99.2060&travelmode=walking")

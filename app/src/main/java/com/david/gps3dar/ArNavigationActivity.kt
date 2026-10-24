@@ -37,6 +37,11 @@ import java.io.File
 import java.io.IOException
 import java.util.Locale
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import com.david.gps3dar.music.NavigationAudioDucker
 import android.content.Intent
 import kotlin.math.*
 
@@ -52,6 +57,13 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
     private var lastSpokenStep = -1
+    private val speechOwner = "walking:${System.identityHashCode(this)}"
+    private var speechToken = ""
+    private val audio by lazy { getSystemService(AudioManager::class.java) }
+    private val speechAttributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+    private val focus by lazy { AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        .setAudioAttributes(speechAttributes).setOnAudioFocusChangeListener {}.build() }
     private var sceneStarted = false
     private var updatesStarted = false
     private var routeCall: Call? = null
@@ -361,8 +373,13 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (!arrived) " · ${estimatedMinutes.coerceAtLeast(1)} min" else ""
         val index = next?.index ?: walking.steps.size
         if (voiceEnabled && ttsReady && index != lastSpokenStep && (stepDistance < 25 || arrived)) {
-            tts.speak(directionInstruction, TextToSpeech.QUEUE_FLUSH, null, "walking:$index")
-            lastSpokenStep = index
+            if (audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                speechToken = "walking:$index"
+                NavigationAudioDucker.begin(speechOwner, speechToken)
+                if (tts.speak(directionInstruction, TextToSpeech.QUEUE_FLUSH, null, speechToken) == TextToSpeech.SUCCESS)
+                    lastSpokenStep = index
+                else stopSpeech()
+            }
         }
         if (arrived && groundState.visible) groundState = groundState.copy(visible = false)
     }
@@ -399,13 +416,32 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun toggleVoice() {
         voiceEnabled = !voiceEnabled
-        if (!voiceEnabled && ::tts.isInitialized) tts.stop()
+        if (!voiceEnabled) stopSpeech()
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("voice_enabled", voiceEnabled).apply()
         route?.let { updateResult(it) }
     }
     override fun onInit(status: Int) {
         ttsReady = status == TextToSpeech.SUCCESS
-        if (ttsReady) tts.language = Locale("es", "MX")
+        if (ttsReady) {
+            tts.language = Locale("es", "MX")
+            tts.setAudioAttributes(speechAttributes)
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) = Unit
+                override fun onDone(id: String?) = finishSpeech(id)
+                override fun onStop(id: String?, interrupted: Boolean) = finishSpeech(id)
+                @Deprecated("Framework callback") override fun onError(id: String?) = finishSpeech(id)
+            })
+        }
+    }
+    private fun finishSpeech(id: String?) { main.post {
+        if (id == speechToken) audio.abandonAudioFocusRequest(focus)
+        if (id != null) NavigationAudioDucker.end(speechOwner, id)
+    } }
+    private fun stopSpeech() {
+        if (::tts.isInitialized) tts.stop()
+        speechToken = ""
+        audio.abandonAudioFocusRequest(focus)
+        NavigationAudioDucker.end(speechOwner)
     }
     private fun hasPermission(permission: String) =
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
@@ -419,12 +455,13 @@ class ArNavigationActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
     override fun onPause() {
         if (::fusedLocation.isInitialized && updatesStarted) { fusedLocation.removeLocationUpdates(locationCallback); updatesStarted = false }
-        if (::tts.isInitialized) tts.stop()
+        stopSpeech()
         super.onPause()
     }
     override fun onDestroy() {
         requestEpoch++; routeCall?.cancel(); main.removeCallbacksAndMessages(null); ground.clear()
-        if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
+        stopSpeech()
+        if (::tts.isInitialized) tts.shutdown()
         super.onDestroy()
     }
 }

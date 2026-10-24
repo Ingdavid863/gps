@@ -45,6 +45,13 @@ class MapBufferTest {
         restarted.close()
     }
 
+    @Test fun airportArrivalIncludesTheCloseTilesExposedWhenZoomingOut() {
+        val route = listOf(RouteGeometry.Point(23.16, -109.71625), RouteGeometry.Point(23.15763, -109.71625))
+        val prepared = MapTilePlanner.plan(route).toSet()
+        // Actual MapLibre requests from the pitched driving view -> overview transition.
+        assertTrue(prepared.contains(MapTilePlanner.Tile(16, 12794, 28435)))
+        assertTrue(prepared.contains(MapTilePlanner.Tile(16, 12795, 28435)))
+    }
     @Test fun zoomOutPreparesEveryParentAndVisibleTilesWithABoundedBudget() {
         val planned = MapTilePlanner.viewport(-99.132, 19.428, -99.128, 19.432, 17.4)
         assertTrue(planned.size <= 96)

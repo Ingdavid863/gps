@@ -17,6 +17,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -24,6 +25,9 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 29)
 class MapTrafficTest {
+    @Before fun startWithoutARestoredNavigationSession() {
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteFile("saved-navigation.json")
+    }
     private fun captureCommittedWindow(scenario: ActivityScenario<RealisticMapActivity>): Bitmap {
         val copied = CountDownLatch(1)
         var bitmap: Bitmap? = null

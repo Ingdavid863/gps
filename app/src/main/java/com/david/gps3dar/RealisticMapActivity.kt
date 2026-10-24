@@ -41,9 +41,6 @@ import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.ImageButton
@@ -78,6 +75,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.Calendar
 import java.util.WeakHashMap
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -86,6 +84,9 @@ import kotlin.math.min
 import kotlin.math.sin
 
 class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, SensorEventListener {
+
+    private lateinit var musicPanel: com.david.gps3dar.music.MusicPanelController
+    private val speechOwner = "phone:${System.identityHashCode(this)}"
 
     private lateinit var webMapView: WebView
     private lateinit var signalRepository: SignalRepository
@@ -138,6 +139,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 if (snapshot.source == "car" || (com.david.gps3dar.car.CarNavigation.connected && !routeActive && snapshot.route != null)) {
                     applyingCarRoute = true
                     routeCall?.cancel();routeGeneration++;rerouting=false;pendingAvoidTolls=null
+                    automaticRerouteInFlight=false;pendingAutoReroute=false
                     val option=snapshot.route;val destination=snapshot.destination
                     if(option==null) stopNavigation()
                     else if(destination!=null) {
@@ -162,7 +164,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private val enteredTollPlazas = mutableListOf<Long>()
     private val passedTollPlazas = mutableSetOf<Long>()
     private var avoidTolls = false
-    private var viewMode = 0
+    private var viewMode = 1
     private var externalLinkCall: Call? = null
     private var routeGeneration = 0
     private var lastCatalogRevision = 0L
@@ -180,16 +182,20 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private lateinit var audioManager: AudioManager
     private lateinit var audioFocus: AudioFocusRequest
     private lateinit var mapCache: MapResourceCache
+    private lateinit var sessionStore: NavigationSessionStore
+    private var routeSessionSaved = false
+    private var routeSessionSaveFailed = false
     private lateinit var connectivity: ConnectivityManager
     private var networkAvailable = true
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
             setMapNetworkAvailable(capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
         }
-        override fun onLost(network: Network) { setMapNetworkAvailable(false) }
+        override fun onLost(network: Network) {
+            setMapNetworkAvailable(connectivity.getNetworkCapabilities(connectivity.activeNetwork)
+                ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true)
+        }
     }
-    private var lastPreparedAt = 0L
-    private var lastPreparedIndex = -1
     private lateinit var sensorManager: SensorManager
     private val darkPolicy = AutoDarkMode()
     private var ambientLux: Double? = null
@@ -215,6 +221,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         if (previous != null && routeDestination == launchedDestination) {
             // AR calculates its walking route separately. It must never overwrite car navigation.
             routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+            automaticRerouteInFlight = false; pendingAutoReroute = false
             routeDestination = previous.destination; routeAlternatives = previous.options
             activateRoute(previous.index, recenterMap = false)
             setViewMode(previous.view)
@@ -225,6 +232,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             if (walking != null && RouteGeometry.distance(walking.destination, RouteGeometry.Point(lat, lon)) < 3.0) {
                 voiceEnabled = result.data?.getBooleanExtra("walking_voice", voiceEnabled) ?: voiceEnabled
                 routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+                automaticRerouteInFlight = false; pendingAutoReroute = false
                 val points = walking.points.map { GeoPoint(it.lat, it.lon) }
                 routeDestination = GeoPoint(walking.destination.lat, walking.destination.lon)
                 routeAlternatives = listOf(RouteOption(points, walking.steps.map { step ->
@@ -249,8 +257,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private var lastProgressRenderAtMs = 0L
     private var routeRemainingFromIndex = DoubleArray(0)
     private var lastRouteMatch: RouteMatch? = null
-    private var offRouteSinceMs = 0L
-    private var lastRerouteAtMs = 0L
+    private val reroutePolicy = ReroutePolicy()
+    private var pendingAutoReroute = false
+    private var automaticRerouteInFlight = false
     private var rerouting = false
     private var pendingAvoidTolls: Boolean? = null
     private var pendingExternalDestination: GeoPoint? = null
@@ -265,9 +274,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private var selectedMapPoint: SearchResult? = null
 
 
-    private var is3D = false
+    private var is3D = true
     private var terrainEnabled = false
-    private var buildingsEnabled = false
+    private var buildingsEnabled = true
     private var satelliteEnabled = false
     private var voiceEnabled = true
     private var autoZoomEnabled = false
@@ -319,9 +328,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 if (change == AudioManager.AUDIOFOCUS_GAIN) ui.post { updateNavigationStep(displayLocation) }
             }.build()
         mapCache = MapResourceCache(this).also { it.configure(tomTomApiKey()) }
+        sessionStore = NavigationSessionStore(java.io.File(filesDir, "saved-navigation.json"))
         tts = TextToSpeech(this, this)
 
         bindViews()
+        musicPanel = com.david.gps3dar.music.MusicPanelController(this)
         val recentPrefs = getSharedPreferences("destinations", MODE_PRIVATE)
         recentDestinations = RecentDestinations({ recentPrefs.getString("recent", "[]") ?: "[]" },
             { recentPrefs.edit().putString("recent", it).apply() })
@@ -349,6 +360,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         setupSearchUi()
         setupSettingsUi()
         setupButtons()
+        findViewById<View>(R.id.mapCacheStatus).setOnClickListener {
+            if (routeSessionSaveFailed) routeAlternatives.getOrNull(activeRouteIndex)?.let { saveActiveRoute(it) }
+            mapCache.retryPreparation()
+        }
         com.david.gps3dar.car.CarNavigation.observe(carObserver)
         setupBackNavigation()
         refreshSettingsLabels()
@@ -357,9 +372,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val viewportChanged = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncViewport() }
         findViewById<View>(R.id.bottomPanel).addOnLayoutChangeListener(viewportChanged)
         findViewById<View>(R.id.turnBanner).addOnLayoutChangeListener(viewportChanged)
+        findViewById<View>(R.id.mapControlButtons).addOnLayoutChangeListener(viewportChanged)
+        placePreview.addOnLayoutChangeListener(viewportChanged)
         webMapView.addOnLayoutChangeListener(viewportChanged)
         webMapView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> resizeSearchSuggestions() }
         handleNavigationIntent(intent)
+        restoreSavedNavigation()
         requestLocationPermission()
         ui.post(ticker)
     }
@@ -412,11 +430,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         webMapView.settings.builtInZoomControls = false
         webMapView.settings.displayZoomControls = false
         webMapView.webChromeClient = WebChromeClient()
-        webMapView.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                return request?.url?.toString()?.let { mapCache.intercept(it) }
-            }
-        }
+        (webMapView as SafeWebView).mapResourceInterceptor = { url -> mapCache.intercept(url) }
         webMapView.addJavascriptInterface(WebMapBridge(), "AndroidBridge")
         webMapView.setOnTouchListener { _, event ->
             if (event.actionMasked == MotionEvent.ACTION_DOWN ||
@@ -470,8 +484,27 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             val restored = !networkAvailable && available
             networkAvailable = available
             jsCall("setNetworkAvailable($available)")
-            if (restored) { lastPreparedAt = 0; prepareMapAhead(true) }
+            if (!available && automaticRerouteInFlight) {
+                routeCall?.cancel(); routeGeneration++; rerouting = false
+                automaticRerouteInFlight = false; pendingAutoReroute = true
+                updateNavigationStep(displayLocation); updateTollPanel()
+            }
+            if (restored && pendingAutoReroute) rawLocation?.let { maybeReroute(it, null) }
         }
+    }
+
+    private fun restoreSavedNavigation() {
+        if (intent?.data != null || intent?.hasExtra(WalkingRoute.EXTRA_LAT) == true) return
+        val generation = routeGeneration
+        sessionStore.load { saved -> ui.post {
+            if (saved == null || isDestroyed || routeGeneration != generation || routeActive ||
+                routeDestination != null || pendingExternalDestination != null || pendingExternalQuery != null) return@post
+            routeDestination = saved.destination; routeAlternatives = listOf(saved.route)
+            suppressSearchWatcher = true; searchInput.setText(saved.label); suppressSearchWatcher = false
+            viewMode = saved.view; is3D = viewMode == 1
+            activateRoute(0, false)
+            syncVisualSettings()
+        } }
     }
 
     private fun setupSearchUi() {
@@ -548,6 +581,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
         settingsVoice.setOnClickListener {
             voiceEnabled = !voiceEnabled
+            if (!voiceEnabled) stopNavigationSpeech()
             refreshSettingsLabels()
         }
         settingsAutoZoom.setOnClickListener {
@@ -583,6 +617,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         pendingExternalQuery = null
         if (rerouting) {
             routeCall?.cancel(); routeGeneration++; rerouting = false; pendingAvoidTolls = null
+            automaticRerouteInFlight = false; pendingAutoReroute = false
             updateTollPanel()
         }
         if (!routeActive) {
@@ -637,7 +672,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             showRecentDestinations()
             (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
         }
-        findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(0); recenter(true) }
+        findViewById<TextView>(R.id.recenterButton).setOnClickListener { setViewMode(1); recenter(true) }
         viewModeButton.setOnClickListener { setViewMode((viewMode + 1) % 3) }
         avoidTollsButton.setOnClickListener {
             if (pedestrianRoute || rerouting) return@setOnClickListener
@@ -664,6 +699,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         modeButton.setOnClickListener { openVrMode() }
         voiceButton.setOnClickListener {
             voiceEnabled = !voiceEnabled
+            if (!voiceEnabled) stopNavigationSpeech()
             refreshSettingsLabels()
             Toast.makeText(
                 this,
@@ -828,9 +864,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) {
-                    if (utteranceId == spokenUtterance) audioManager.abandonAudioFocusRequest(audioFocus)
-                }
+                override fun onDone(utteranceId: String?) = finishSpeech(utteranceId)
+                override fun onStop(utteranceId: String?, interrupted: Boolean) = finishSpeech(utteranceId)
                 @Deprecated("Legacy engine callback")
                 override fun onError(utteranceId: String?) {
                     ui.post {
@@ -838,12 +873,26 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                         if (parts.size == 3 && parts[0] == voiceRouteId.toString()) {
                             announcements.failed(parts.take(2).joinToString(":"), parts[2].toIntOrNull() ?: 0)
                         }
-                        audioManager.abandonAudioFocusRequest(audioFocus)
+                        finishSpeech(utteranceId)
                     }
                 }
             })
             ui.post { if (::instruction.isInitialized) updateNavigationStep(displayLocation) }
         }
+    }
+
+    private fun finishSpeech(utteranceId: String?) {
+        ui.post {
+            if (utteranceId == spokenUtterance) audioManager.abandonAudioFocusRequest(audioFocus)
+            if (utteranceId != null) com.david.gps3dar.music.NavigationAudioDucker.end(speechOwner, utteranceId)
+        }
+    }
+
+    private fun stopNavigationSpeech() {
+        tts.stop()
+        spokenUtterance = ""
+        audioManager.abandonAudioFocusRequest(audioFocus)
+        com.david.gps3dar.music.NavigationAudioDucker.end(speechOwner)
     }
 
     private fun updateEtaColor() {
@@ -906,19 +955,46 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun prepareMapAhead(force: Boolean = false) {
-        if (!routeActive || routePoints.size < 2) return
-        val now = SystemClock.elapsedRealtime()
-        val advanced = lastPreparedIndex < 0 || distanceAlongRouteToIndex(lastPreparedIndex) <= 0.0 && routeProgressIndex - lastPreparedIndex > 10
-        if (!force && (!advanced || now - lastPreparedAt < 60000)) return
-        lastPreparedAt = now; lastPreparedIndex = routeProgressIndex
-        mapCache.prepare(routePoints.map { RouteGeometry.Point(it.lat, it.lon) }, routeProgressIndex) { prepared, total ->
+        if (!force || !routeActive || routePoints.size < 2) return
+        val snapshot = routePoints
+        mapCache.prepare(snapshot.map { RouteGeometry.Point(it.lat, it.lon) }) { progress ->
             ui.post {
-                if (!isDestroyed) findViewById<TextView>(R.id.mapCacheStatus).apply {
-                    visibility = View.GONE
-                    text = if (prepared == total) "Mapa próximo preparado" else "Mapa próximo guardado: ${prepared * 100 / total.coerceAtLeast(1)}%"
+                if (!isDestroyed && routeActive && routePoints === snapshot) showMapPreparation(progress)
+            }
+        }
+    }
+
+    private fun showMapPreparation(progress: OfflineRoutePack.Progress) {
+        findViewById<TextView>(R.id.mapCacheStatus).apply {
+            visibility = View.VISIBLE
+            val percent = progress.saved * 100 / progress.total.coerceAtLeast(1)
+            text = when {
+                routeSessionSaveFailed -> "No se pudo guardar la ruta · revisa el espacio disponible"
+                !routeSessionSaved -> "Guardando ruta e instrucciones…"
+                else -> when (progress.state) {
+                    "ready" -> "Ruta y mapa disponibles sin conexión ✓"
+                    "planning" -> "Ruta guardada · preparando mapa completo…"
+                    "offline" -> "Sin internet · mapa guardado: $percent%"
+                    "storage" -> "Mapa incompleto · falta espacio en el teléfono"
+                    "retrying", "error" -> "Mapa al $percent% · toca para reintentar"
+                    else -> "Guardando mapa de toda la ruta: $percent%"
                 }
             }
         }
+    }
+
+    private fun saveActiveRoute(option: RouteOption) {
+        routeSessionSaved = false; routeSessionSaveFailed = false
+        val snapshot = routePoints
+        routeDestination?.let { destination -> sessionStore.save(NavigationSessionStore.Session(
+            option.copy(steps = navSteps), destination, searchInput.text.toString().ifBlank { "Destino" }, viewMode)) { saved ->
+            ui.post {
+                if (!isDestroyed && routeActive && routePoints === snapshot) {
+                    routeSessionSaved = saved; routeSessionSaveFailed = !saved
+                    showMapPreparation(mapCache.preparationState())
+                }
+            }
+        } }
     }
 
     private fun requestLocationPermission() {
@@ -940,7 +1016,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun startHighAccuracyLocation() {
         // Use the last fresh fix immediately so the map does not sit waiting for a new GNSS cycle.
         fusedLocation.lastLocation.addOnSuccessListener { last ->
-            if (last != null && System.currentTimeMillis() - last.time < 20_000L) {
+            if (last != null && SystemClock.elapsedRealtimeNanos() - last.elapsedRealtimeNanos in 0L..3_000_000_000L) {
                 processLocation(last)
             }
         }
@@ -957,21 +1033,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun processLocation(location: Location) {
         val accepted = lastAcceptedLocation
-        if (accepted != null && location.elapsedRealtimeNanos <= accepted.elapsedRealtimeNanos) return
-        if (accepted != null && SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos > 3_000_000_000L) return
-        rawLocation = location
-
-        if (location.hasAccuracy() && location.accuracy > 65f) {
-            gpsStatus.text = "GPS débil · ±${location.accuracy.toInt()} m"
-            return
-        }
-
-        val previous = lastAcceptedLocation
-        if (previous != null) {
-            val dt = max(0.25, (location.elapsedRealtimeNanos - previous.elapsedRealtimeNanos) / 1_000_000_000.0)
-            val jumpSpeed = previous.distanceTo(location) / dt
-            if (jumpSpeed > 85.0 && location.accuracy > 12f) return
-        }
+        fun quality(fix: Location) = NavigationFixQuality.Fix(
+            RouteGeometry.Point(fix.latitude, fix.longitude), if (fix.hasAccuracy()) fix.accuracy.toDouble() else 0.0,
+            if (fix.hasSpeed()) fix.speed.toDouble() else 0.0, fix.elapsedRealtimeNanos)
+        if (!NavigationFixQuality.accept(accepted?.let(::quality), quality(location), SystemClock.elapsedRealtimeNanos())) return
+        rawLocation = Location(location)
         lastAcceptedLocation = Location(location)
         com.david.gps3dar.car.CarNavigation.voiceEnabled=voiceEnabled
         com.david.gps3dar.car.CarNavigation.fix(location)
@@ -984,7 +1050,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
         val match = if (routeActive) findRouteMatch(predicted) else null
         lastRouteMatch = match
-        if (routeActive) maybeReroute(predicted, match)
+        if (routeActive) maybeReroute(location, match)
 
         val shown = if (routeActive) snapToRoute(predicted, match) else predicted
         displayLocation = shown
@@ -1045,7 +1111,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun predictLocation(filtered: Location, raw: Location): Location {
-        if (!raw.hasSpeed() || !raw.hasBearing() || raw.speed < 1.2f) return Location(filtered)
+        if (!reliableNavigationCourse(raw)) return Location(filtered)
 
         // Compensate actual fix age only; continuous rendering handles time between fixes.
         val ageSeconds = ((SystemClock.elapsedRealtimeNanos() - raw.elapsedRealtimeNanos) /
@@ -1084,14 +1150,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun updateLocationMarker(location: Location) {
         val raw = rawLocation
-        val bearing = if (raw?.hasBearing() == true && raw.speed > 0.8f) {
-            raw.bearing.toDouble()
-        } else {
-            lastCameraBearing
-        }
         val match = lastRouteMatch
         val onRoute = routeActive && match != null && distanceMeters(location.latitude,location.longitude,match.lat,match.lon) < .5
-        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())},$onRoute)")
+        val bearing = if (onRoute) match!!.segmentBearing else if (reliableNavigationCourse(raw)) raw!!.bearing.toDouble() else lastCameraBearing
+        val accuracy = raw?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0
+        val headingReliable = reliableNavigationCourse(raw)
+        jsCall("setLocation(${num(location.longitude)},${num(location.latitude)},${num(bearing)},${num((raw?.speed ?: 0f).toDouble())},$onRoute,${num(accuracy)},$headingReliable)")
     }
 
     private fun pauseCameraFollow() {
@@ -1101,30 +1165,36 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     private fun updateCamera(location: Location) {
         val moving = rawLocation?.speed ?: 0f
         val raw = rawLocation
-        if (raw?.hasBearing() == true && moving > 1.0f) {
+        val match = lastRouteMatch?.takeIf { routeActive && distanceMeters(location.latitude,location.longitude,it.lat,it.lon) < .5 }
+        if (match != null && moving > .6f) lastCameraBearing = match.segmentBearing
+        else if (reliableNavigationCourse(raw)) {
             // WebView animates the fresh heading continuously; filtering it once per fix creates steps.
-            lastCameraBearing = raw.bearing.toDouble()
+            lastCameraBearing = raw!!.bearing.toDouble()
         }
 
         if (viewMode == 2 || SystemClock.elapsedRealtime() < manualCameraUntilMs) return
 
         val target = GeoPoint(location.latitude, location.longitude)
         val zoom = desiredZoom(moving)
-        val pitch = if (viewMode == 1) 45.0 else 0.0
+        val pitch = if (viewMode == 1) 65.0 else 0.0
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(zoom)},${num(pitch)},110)"
         )
     }
 
+    private fun reliableNavigationCourse(location: Location?) = location != null && NavigationFixQuality.reliableCourse(
+        location.hasBearing(), location.speed.toDouble(),
+        if (location.hasBearingAccuracy()) location.bearingAccuracyDegrees.toDouble() else null)
+
     private fun desiredZoom(speedMps: Float): Double {
-        if (!autoZoomEnabled) return ZOOM_PRESETS[zoomPresetIndex]
-        return when {
+        val base = if (!autoZoomEnabled) ZOOM_PRESETS[zoomPresetIndex] else when {
             speedMps >= 30f -> ZOOM_PRESETS[0]
             speedMps >= 20f -> ZOOM_PRESETS[1]
             speedMps >= 12f -> ZOOM_PRESETS[2]
             speedMps >= 6f -> ZOOM_PRESETS[3]
             else -> ZOOM_PRESETS[4]
         }
+        return (base + if (viewMode == 1) 0.9 else 0.0).coerceAtMost(19.3)
     }
     private fun lookAheadTarget(location: Location, bearing: Double, speedMps: Float): GeoPoint {
         if (!routeActive || speedMps < 1.8f) return GeoPoint(location.latitude, location.longitude)
@@ -1142,7 +1212,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val moving = rawLocation?.speed ?: 0f
         if (viewMode == 2) { jsCall("showOverview()"); return }
         val target = GeoPoint(here.latitude, here.longitude)
-        val pitch = if (viewMode == 1) 45 else 0
+        val pitch = if (viewMode == 1) 65 else 0
         jsCall(
             "follow(${num(target.lon)},${num(target.lat)},${num(lastCameraBearing)},${num(desiredZoom(moving))},$pitch,${if (animated) 180 else 1})"
         )
@@ -1673,6 +1743,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val generation = ++routeGeneration
         val requestedPedestrian = pedestrianRoute
         val requestedAvoid = (avoidOverride ?: avoidTolls) && !requestedPedestrian
+        val automatic = isReroute && avoidOverride == null && routeActive
+        automaticRerouteInFlight = automatic
+        pendingAutoReroute = false
         pendingAvoidTolls = avoidOverride
         rerouting = true
         instruction.text = if (requestedPedestrian) "Calculando ruta para caminar…" else if (requestedAvoid) "Calculando ruta sin casetas…" else if (isReroute) "Recalculando ruta…" else "Calculando ruta con tráfico…"
@@ -1685,8 +1758,15 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             ui.post {
                 if (isDestroyed || generation != routeGeneration) return@post
                 rerouting = false
+                automaticRerouteInFlight = false
                 pendingAvoidTolls = null
                 updateTollPanel()
+                if (automatic) {
+                    pendingAutoReroute = true
+                    reroutePolicy.failed(SystemClock.elapsedRealtime())
+                    updateNavigationStep(displayLocation)
+                    return@post
+                }
                 instruction.text = message
                 turnIcon.text = "!"
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -1695,6 +1775,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
         val key = tomTomApiKey()
         if (key.isBlank()) { fail("El servicio de rutas no está configurado"); return }
+        if (!networkAvailable) { fail("Sin internet. La ruta guardada sigue disponible."); return }
         val builder = HttpUrl.Builder().scheme("https").host("api.tomtom.com")
             .addPathSegment("routing").addPathSegment("1").addPathSegment("calculateRoute")
             .addPathSegment("$fromLat,$fromLon:$toLat,$toLon").addPathSegment("json")
@@ -1727,7 +1808,11 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                 request.post(JSONObject().put("avoidAreas", JSONObject().put("rectangles", rectangles))
                     .toString().toRequestBody("application/json".toMediaType()))
             }
-            routeCall = http.newCall(request.build())
+            // A stalled cellular request must not hold navigation for the default TCP timeout.
+            val transport = if (automatic) http.newBuilder().connectTimeout(2, TimeUnit.SECONDS)
+                .readTimeout(4, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(false).build() else http
+            routeCall = transport.newCall(request.build())
             routeCall?.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     if (!call.isCanceled()) fail("No se pudo consultar la ruta. Revisa la conexión.")
@@ -1784,10 +1869,21 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
                     }
                     ui.post {
                         if (isDestroyed || generation != routeGeneration) return@post
+                        val current = rawLocation
+                        if (automatic && current != null && SystemClock.elapsedRealtimeNanos() - current.elapsedRealtimeNanos in 0L..3_000_000_000L) {
+                            val distance = RouteGeometry.project(acceptable.first().points.map { RouteGeometry.Point(it.lat, it.lon) },
+                                RouteGeometry.Point(current.latitude, current.longitude))?.distance ?: Double.MAX_VALUE
+                            if (distance > max(35.0, current.accuracy * 2.0)) {
+                                // The driver took another turn while the service was responding.
+                                requestRoute(current.latitude, current.longitude, toLat, toLon, true)
+                                return@post
+                            }
+                        }
                         routeDestination = GeoPoint(toLat, toLon)
                         routeAlternatives = acceptable
                         activeRouteIndex = 0
-                        rerouting = false; pendingAvoidTolls = null; offRouteSinceMs = 0L
+                        rerouting = false; pendingAvoidTolls = null
+                        automaticRerouteInFlight = false; pendingAutoReroute = false; reroutePolicy.reset()
                         activateRoute(0, recenterMap = !isReroute)
                         if (isReroute) runCatching { rerouteTone.startTone(ToneGenerator.TONE_PROP_BEEP, 180) }
                     }
@@ -1903,7 +1999,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         lastRenderedProgressIndex = -1
         lastProgressRenderAtMs = 0L
         lastRouteMatch = null
-        offRouteSinceMs = 0L
+        reroutePolicy.reset(); pendingAutoReroute = false; automaticRerouteInFlight = false
         rebuildRouteDistanceCache()
         lastMatchAtNanos = 0L
         (rawLocation ?: displayLocation)?.let { location ->
@@ -1915,6 +2011,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         }
 
         syncRoutes()
+        saveActiveRoute(option)
         prepareMapAhead(true)
         syncRouteProgress(force = true)
         stopButton.visibility = if (routeActive) View.VISIBLE else View.GONE
@@ -1932,6 +2029,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun syncRoutes() {
+        jsCall("setRouteMapZoom(${if (routeActive) MapTilePlanner.OFFLINE_MAX_ZOOM.toString() else "null"})")
         val others = routeAlternatives.indices.filter { it != activeRouteIndex }.take(2)
         val alt1 = others.getOrNull(0)?.let { routeAlternatives[it].points } ?: emptyList()
         val alt2 = others.getOrNull(1)?.let { routeAlternatives[it].points } ?: emptyList()
@@ -2056,6 +2154,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
 
     private fun updateNavigationStep(location: Location?) {
         if (rerouting) return
+        if (routeActive && pendingAutoReroute) {
+            instruction.text = if (networkAvailable) "Reintentando recálculo…" else "Sin internet · conservando la ruta guardada"
+            turnIcon.text = "!"
+            turnDistance.text = if (networkAvailable) "Esperando respuesta del servicio de rutas" else "El recálculo continuará al volver la conexión"
+            return
+        }
         if (!routeActive || navSteps.isEmpty() || location == null) {
             if (!routeActive) {
                 instruction.text = "Busca un destino o mantén pulsado el mapa"
@@ -2096,7 +2200,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
             if (phase > 0 && audioManager.requestAudioFocus(audioFocus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
                 val phrase = if (phase == 3 && !arriving) "Ahora, $message" else "En ${formatDistance(distance)}, $message"
                 spokenUtterance = "$id:$phase"
+                com.david.gps3dar.music.NavigationAudioDucker.begin(speechOwner, spokenUtterance)
                 if (tts.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, spokenUtterance) == TextToSpeech.SUCCESS) announcements.accepted(id, phase)
+                else stopNavigationSpeech()
             }
         }
     }
@@ -2143,8 +2249,8 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         pendingExternalQuery = null
         externalLinkCall?.cancel()
         destinationSearch.cancel()
-        viewMode = 0
-        is3D = false
+        viewMode = 1
+        is3D = true
         routeDestination = null
         routeCall?.cancel()
         rerouting = false
@@ -2160,12 +2266,12 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         lastRenderedProgressIndex = -1
         routeRemainingFromIndex = DoubleArray(0)
         lastRouteMatch = null
-        offRouteSinceMs = 0L
+        reroutePolicy.reset(); pendingAutoReroute = false; automaticRerouteInFlight = false
         announcements.reset(); voiceRouteId++
         mapCache.cancel()
+        sessionStore.clear()
         findViewById<View>(R.id.mapCacheStatus).visibility = View.GONE
-        tts.stop()
-        audioManager.abandonAudioFocusRequest(audioFocus)
+        stopNavigationSpeech()
 
         syncRoutes()
         routeChoices.visibility = View.GONE
@@ -2203,56 +2309,37 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val now = SystemClock.elapsedRealtimeNanos()
         val elapsed = if (lastMatchAtNanos == 0L) 0.0 else (now-lastMatchAtNanos)/1_000_000_000.0
         val previous = lastRouteMatch?.takeIf { it.distanceMeters <= 25.0 && elapsed < 8.0 }
-        val heading = location.bearing.toDouble().takeIf { location.hasBearing() && location.speed > 1.0f &&
-            (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees < 45f) }
+        val heading = location.bearing.toDouble().takeIf { reliableNavigationCourse(location) }
         val match = geometry.match(RouteGeometry.Point(location.latitude,location.longitude), heading,
             previous?.alongMeters, location.speed.toDouble(), elapsed, location.accuracy.toDouble()) ?: return null
         lastMatchAtNanos = now
         return RouteMatch(match.segment,match.point.lat,match.point.lon,match.distance,match.bearing,match.along)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun maybeReroute(location: Location, match: RouteMatch?) {
         val destination = routeDestination ?: return
         if (rerouting || !routeActive) return
-
-        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 18.0
-        if (accuracy > 40.0) {
-            offRouteSinceMs = 0L
-            return
-        }
-
-        val speed = rawLocation?.speed ?: 0f
-        val distanceThreshold = max(22.0, min(45.0, accuracy * 1.8))
-        val bearingMismatch = if (
-            match != null &&
-            rawLocation?.hasBearing() == true &&
-            speed > 4.5f
-        ) {
-            angularDifference(rawLocation!!.bearing.toDouble(), match.segmentBearing)
-        } else {
-            0.0
-        }
-
-        val clearlyOffRoute = match == null ||
-            match.distanceMeters > distanceThreshold ||
-            (speed > 4.5f && match.distanceMeters > 13.0 && bearingMismatch > 72.0)
-
+        if (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos !in 0L..3_000_000_000L) return
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else Double.NaN
+        val speed = location.speed.toDouble()
+        val heading = location.bearing.toDouble().takeIf { location.hasBearing() && speed > 3.0 &&
+            (!location.hasBearingAccuracy() || location.bearingAccuracyDegrees < 35f) }
+        // A fresh, unrestricted match detects an actual departure, including wrong-way driving.
+        // Predicted marker motion and a constrained progress window cannot trigger a new route.
+        val current = navigationGeometry?.match(RouteGeometry.Point(location.latitude, location.longitude), heading) ?: return
+        val mismatch = heading?.let { angularDifference(it, current.bearing) }
         val now = SystemClock.elapsedRealtime()
-        if (!clearlyOffRoute) {
-            offRouteSinceMs = 0L
+        if (!reroutePolicy.offRoute(current.distance, accuracy, speed, mismatch) && pendingAutoReroute && accuracy in 0.1..35.0) {
+            pendingAutoReroute = false
+            updateNavigationStep(displayLocation)
+        }
+        if (!reroutePolicy.shouldRequest(now, location.elapsedRealtimeNanos, current.distance, accuracy, speed, mismatch, pendingAutoReroute)) return
+        if (!networkAvailable) {
+            pendingAutoReroute = true
+            updateNavigationStep(displayLocation)
             return
         }
-
-        if (offRouteSinceMs == 0L) {
-            offRouteSinceMs = now
-            return
-        }
-
-        val confirmationMs = if (speed > 8f) 1_600L else 2_400L
-        if (now - offRouteSinceMs < confirmationMs || now - lastRerouteAtMs < 6_500L) return
-
-        lastRerouteAtMs = now
-        offRouteSinceMs = 0L
         requestRoute(
             location.latitude,
             location.longitude,
@@ -2412,9 +2499,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         is3D = viewMode == 1
         manualCameraUntilMs = 0L
         viewModeButton.contentDescription = when (viewMode) {
-            0 -> "Cambiar a vista isométrica"
+            0 -> "Cambiar a vista de conducción 3D"
             1 -> "Mostrar inicio y final de la ruta"
-            else -> "Volver a vista de navegación"
+            else -> "Cambiar a mapa 2D"
         }
         syncVisualSettings()
         syncViewport()
@@ -2422,6 +2509,10 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun syncViewport() {
+        // Hidden activity views report isShown=false even for visible children. Wait for the map
+        // window to return before measuring its banner/footer and changing control positions.
+        if (!webMapView.isShown) return
+        layoutMapControls()
         if (!mapReady || webMapView.height <= 0) return
         val mapPosition = IntArray(2); webMapView.getLocationInWindow(mapPosition)
         val topPosition = IntArray(2); val top = findViewById<View>(R.id.turnBanner); top.getLocationInWindow(topPosition)
@@ -2429,6 +2520,30 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         val topFraction = ((topPosition[1] + top.height - mapPosition[1]).toDouble() / webMapView.height).coerceIn(0.0, 0.45)
         val bottomFraction = ((mapPosition[1] + webMapView.height - bottomPosition[1]).toDouble() / webMapView.height).coerceIn(0.0, 0.45)
         jsCall("setViewport(${num(topFraction)},${num(bottomFraction)})")
+    }
+
+    /** Keep every control reachable when the music footer leaves a short map viewport. */
+    private fun layoutMapControls() {
+        if (webMapView.height <= 0) return
+        val mapPosition = IntArray(2); webMapView.getLocationInWindow(mapPosition)
+        val footer = findViewById<View>(R.id.bottomPanel)
+        val footerPosition = IntArray(2); footer.getLocationInWindow(footerPosition)
+        if (footer.isShown) {
+            val previewParams = placePreview.layoutParams as android.widget.FrameLayout.LayoutParams
+            val margin = footer.height + (footer.layoutParams as android.widget.FrameLayout.LayoutParams).bottomMargin + dp(8)
+            if (previewParams.bottomMargin != margin) { previewParams.bottomMargin = margin; placePreview.layoutParams = previewParams }
+        }
+        val controls = findViewById<View>(R.id.mapControls)
+        if (controls.visibility != View.VISIBLE) return
+        val banner = findViewById<View>(R.id.turnBanner)
+        val bannerPosition = IntArray(2); banner.getLocationInWindow(bannerPosition)
+        val top = if (banner.isShown) bannerPosition[1] + banner.height - mapPosition[1] + dp(8) else dp(8)
+        val bottom = if (footer.isShown) footerPosition[1] - mapPosition[1] - dp(8) else webMapView.height - dp(8)
+        val height = minOf(findViewById<View>(R.id.mapControlButtons).measuredHeight, (bottom - top).coerceAtLeast(1)).coerceAtLeast(1)
+        val params = controls.layoutParams as android.widget.FrameLayout.LayoutParams
+        if (params.topMargin != top || params.height != height) {
+            params.topMargin = top; params.height = height; controls.layoutParams = params
+        }
     }
 
     private fun distanceAlongRouteToIndex(targetIndex: Int): Double {
@@ -2484,6 +2599,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         is3D = viewMode == 1
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
+        webMapView.post { syncViewport() }
         if (mapReady) jsCall("setTrafficPaused(false)")
         sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         updateAutoTheme()
@@ -2497,8 +2613,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         sensorManager.unregisterListener(this)
         webMapView.onPause()
         if (mapReady) jsCall("setTrafficPaused(true)")
-        tts.stop()
-        audioManager.abandonAudioFocusRequest(audioFocus)
+        stopNavigationSpeech()
         super.onPause()
     }
 
@@ -2516,11 +2631,13 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         placeImageCall?.cancel()
         routeCall?.cancel()
         fusedLocation.removeLocationUpdates(locationCallback)
-        tts.stop()
+        stopNavigationSpeech()
         tts.shutdown()
-        audioManager.abandonAudioFocusRequest(audioFocus)
+        musicPanel.close()
         if (::connectivity.isInitialized) runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
+        (webMapView as SafeWebView).mapResourceInterceptor = null
         mapCache.close()
+        sessionStore.close()
         rerouteTone.release()
         webMapView.removeJavascriptInterface("AndroidBridge")
         webMapView.loadUrl("about:blank")
@@ -2570,7 +2687,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         const val SEARCH_DEBOUNCE_MS = 150L
         const val DEFAULT_FOLLOW_RESUME_MS = 8000L
         const val VR_MAX_SPEED_KMH = 20f
-        const val DEFAULT_ZOOM_PRESET_INDEX = 2
+        const val DEFAULT_ZOOM_PRESET_INDEX = 4
         val ZOOM_PRESETS = doubleArrayOf(16.20, 16.80, 17.40, 18.00, 18.65)
     }
 }

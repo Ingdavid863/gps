@@ -3,8 +3,8 @@
         const top = Math.max(0, Math.min(height * 0.45, topFraction * height));
         const bottom = Math.max(0, Math.min(height * 0.45, bottomFraction * height));
         if (overview) return { top: top + 20, bottom: bottom + 30, left: 30, right: Math.min(82, width * 0.22) };
-        // Place the geographical camera target 48 CSS px above the actual native bottom panel.
-        const anchor = Math.max(top + 36, height - bottom - 48);
+        // Move the geographical camera anchor up 12 CSS px, keeping marker and map aligned.
+        const anchor = Math.max(top + 36, height - bottom - 60);
         const paddedTop = Math.max(0, Math.min(height - bottom - 28, 2 * anchor - height + bottom));
         return { top: paddedTop, bottom, left: 0, right: 0 };
     }

@@ -3,6 +3,8 @@ package com.david.gps3dar
 import kotlin.math.*
 
 object MapTilePlanner {
+    // Vector geometry at this level is overscaled for close offline driving views.
+    const val OFFLINE_MAX_ZOOM = 16
     data class Tile(val z: Int, val x: Int, val y: Int)
     fun tile(lon: Double, lat: Double, z: Int): Tile {
         val n = 1 shl z
@@ -32,42 +34,49 @@ object MapTilePlanner {
         }
         return result.toList()
     }
-    /** Prepare an overview and a 10 km driving corridor, with a fixed data budget. */
-    fun plan(route: List<RouteGeometry.Point>, from: Int, budget: Int = 320): List<Tile> {
-        if (route.size < 2) return emptyList()
-        val tiles = linkedSetOf<Tile>()
-        fun add(p: RouteGeometry.Point, z: Int, margin: Int) {
+    /** Every segment, every overview level and a surrounding corridor. Never truncate a trip. */
+    @Suppress("UNUSED_PARAMETER")
+    fun plan(route: List<RouteGeometry.Point>, from: Int = 0): List<Tile> {
+        if (route.size < 2 || route.any { !it.lat.isFinite() || !it.lon.isFinite() ||
+                it.lat !in -85.051128..85.051128 || it.lon !in -180.0..180.0 }) return emptyList()
+        val result = linkedSetOf<Tile>()
+        for (z in 3..OFFLINE_MAX_ZOOM) {
             val n = 1 shl z
-            val x = floor((p.lon + 180) / 360 * n).toInt()
-            val lat = Math.toRadians(p.lat.coerceIn(-85.0, 85.0))
-            val y = floor((1 - ln(tan(lat) + 1 / cos(lat)) / PI) / 2 * n).toInt()
-            for (dx in -margin..margin) for (dy in -margin..margin)
-                if (tiles.size < budget) tiles.add(Tile(z, ((x + dx) % n + n) % n, (y + dy).coerceIn(0, n - 1)))
-        }
-        val ahead = mutableListOf<RouteGeometry.Point>()
-        var covered = 0.0
-        val start = from.coerceIn(0, route.lastIndex - 1)
-        ahead.add(route[start])
-        for (i in start until route.lastIndex) {
-            val a = route[i]; val b = route[i + 1]; val d = RouteGeometry.distance(a, b)
-            val pieces = max(1, ceil(d / 100).toInt())
-            for (j in 1..pieces) {
-                if (covered >= 10000) break
-                val t = j.toDouble() / pieces
-                ahead.add(RouteGeometry.Point(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t))
-                covered += d / pieces
+            fun x(p: RouteGeometry.Point) = (p.lon + 180) / 360 * n
+            fun y(p: RouteGeometry.Point): Double {
+                val r = Math.toRadians(p.lat)
+                return (1 - ln(tan(r) + 1 / cos(r)) / PI) / 2 * n
             }
-            if (covered >= 10000) break
+            var lastX = Int.MIN_VALUE; var lastY = Int.MIN_VALUE
+            fun add(cx: Int, cy: Int) {
+                if (cx == lastX && cy == lastY) return
+                lastX = cx; lastY = cy
+                // The close pitched viewport exposes one extra row behind the car
+                // while zooming out. Keep that transition inside the saved corridor.
+                val radius = if (z == OFFLINE_MAX_ZOOM) 3 else 2
+                for (dx in -radius..radius) for (dy in -radius..radius) {
+                    val yy = cy + dy
+                    if (yy in 0 until n) result.add(Tile(z, ((cx + dx) % n + n) % n, yy))
+                }
+            }
+            for (i in 0 until route.lastIndex) {
+                val ax = x(route[i]); val ay = y(route[i])
+                var dx = x(route[i + 1]) - ax
+                if (dx > n / 2.0) dx -= n
+                if (dx < -n / 2.0) dx += n
+                val dy = y(route[i + 1]) - ay
+                val pieces = max(1, ceil(max(abs(dx), abs(dy)) * 2).toInt())
+                for (j in 0..pieces) {
+                    val t = j.toDouble() / pieces
+                    add(floor(ax + dx * t).toInt(), floor(ay + dy * t).toInt())
+                }
+            }
+            // Also fill the low-zoom overview rectangle, including its corners away from the line.
+            val xs = route.map { tile(it.lon, it.lat, z).x }; val ys = route.map { tile(it.lon, it.lat, z).y }
+            val west = xs.min(); val east = xs.max(); val north = ys.min(); val south = ys.max()
+            if ((east - west + 1).toLong() * (south - north + 1) <= 64)
+                for (xx in west..east) for (yy in north..south) add(xx, yy)
         }
-        // Reserve every overview zoom before the detailed corridor exhausts the budget.
-        // Previously only 8/10/12/14 were prepared, leaving gaps at intermediate zooms.
-        for (z in 3..15) {
-            val step = max(1, route.size / 16)
-            for (i in route.indices step step) add(route[i], z, 0)
-            add(route.last(), z, 0)
-            if (tiles.size >= min(budget / 3, 90)) break
-        }
-        for (p in ahead) for (z in listOf(16, 17, 18)) add(p, z, if (z == 16) 1 else 0)
-        return tiles.toList()
+        return result.toList()
     }
 }
