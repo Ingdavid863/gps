@@ -134,6 +134,13 @@ class MusicPanelController(private val activity: AppCompatActivity, private val 
         render()
     }
     private fun expand() { activity.startActivity(Intent(activity, MusicPlayerActivity::class.java)) }
+    /** X closes GPS3D audio; unlike minimizing, it stops playback and clears the local queue. */
+    fun stopAndClearLocalPlayback() {
+        useLocal { player ->
+            player.stop()
+            player.clearMediaItems()
+        }
+    }
     fun importFiles() { useLocal { files.launch(arrayOf("audio/*")) } }
     fun radio() = showInAppMusic()
     fun library(ready: (List<androidx.media3.common.MediaItem>) -> Unit) {
