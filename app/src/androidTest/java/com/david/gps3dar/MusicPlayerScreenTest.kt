@@ -103,6 +103,17 @@ class MusicPlayerScreenTest {
                     assertEquals(expectedTitle,it.findViewById<TextView>(R.id.musicTitle).text.toString())
                     assertTrue(it.findViewById<View>(R.id.avoidTollsButton).isShown)
                 }
+                await("Returning from music must keep map controls between the instruction and footer",5000) {
+                    val map=ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).filterIsInstance<RealisticMapActivity>().firstOrNull()
+                    if(map==null)false else {
+                        val controls=map.findViewById<View>(R.id.mapControls)
+                        val banner=map.findViewById<View>(R.id.turnBanner)
+                        val footer=map.findViewById<View>(R.id.bottomPanel)
+                        val c=IntArray(2);val b=IntArray(2);val f=IntArray(2)
+                        controls.getLocationInWindow(c);banner.getLocationInWindow(b);footer.getLocationInWindow(f)
+                        c[1]>=b[1]+banner.height && c[1]+controls.height<=f[1]
+                    }
+                }
                 val saved=MusicQueue.decode(preferences.getString(MusicPlaybackService.QUEUE,"").orEmpty())
                 assertEquals(origin,saved.tracks.single().source)
                 assertEquals(expectedArtist,saved.tracks.single().artist)

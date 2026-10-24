@@ -180,7 +180,9 @@ jobs:
           assert listener.get(ns+'name') == '.music.MusicSessionAccessService'
           assert listener.get(ns+'exported') == 'false'
           assert listener.get(ns+'permission') == 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE'
-          assert manifest.count('android.permission.BIND_NOTIFICATION_LISTENER_SERVICE') == 1
+          # aapt repeats string values in its Raw annotation; count attributes, not text occurrences.
+          bindings = re.findall(r'^\s*A: android:permission[^\n]*="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"', manifest, re.M)
+          assert len(bindings) == 1, 'Exactly one compiled listener binding is allowed'
           assert 'MusicSessionAccessService' in manifest
           assert not any(item.get(ns+'name') in ('android.permission.MEDIA_CONTENT_CONTROL',
               'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE') for item in root.findall('uses-permission'))

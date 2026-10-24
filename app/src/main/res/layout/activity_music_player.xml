@@ -44,14 +44,16 @@
                 android:tint="#EDF2F7" android:contentDescription="Canción siguiente" />
         </LinearLayout>
     </LinearLayout>
-    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="52dp" android:scrollbars="none">
-        <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent">
-            <Button android:id="@+id/musicBrowse" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Buscar" android:textAllCaps="false" />
-            <Button android:id="@+id/musicLibrary" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Mi lista" android:textAllCaps="false" />
-            <Button android:id="@+id/musicPhone" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Teléfono" android:textAllCaps="false" />
-            <Button android:id="@+id/musicRadio" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Radio" android:textAllCaps="false" />
-        </LinearLayout>
-    </HorizontalScrollView>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="52dp">
+        <Button android:id="@+id/musicBrowse" android:layout_width="0dp" android:layout_weight="1" android:minWidth="0dp"
+            android:layout_height="48dp" android:text="Buscar" android:textSize="12sp" android:paddingLeft="4dp" android:paddingRight="4dp" android:textAllCaps="false" />
+        <Button android:id="@+id/musicLibrary" android:layout_width="0dp" android:layout_weight="1" android:minWidth="0dp"
+            android:layout_height="48dp" android:text="Mi lista" android:textSize="12sp" android:paddingLeft="4dp" android:paddingRight="4dp" android:textAllCaps="false" />
+        <Button android:id="@+id/musicPhone" android:layout_width="0dp" android:layout_weight="1" android:minWidth="0dp"
+            android:layout_height="48dp" android:text="Teléfono" android:textSize="12sp" android:paddingLeft="4dp" android:paddingRight="4dp" android:textAllCaps="false" />
+        <Button android:id="@+id/musicRadio" android:layout_width="0dp" android:layout_weight="1" android:minWidth="0dp"
+            android:layout_height="48dp" android:text="Radio" android:textSize="12sp" android:paddingLeft="4dp" android:paddingRight="4dp" android:textAllCaps="false" />
+    </LinearLayout>
     <Spinner android:id="@+id/musicCatalogueSource" android:layout_width="match_parent" android:layout_height="48dp"
         android:backgroundTint="#BAC8D6" android:popupBackground="#FFFFFF" android:contentDescription="Catálogo de música" />
     <LinearLayout android:id="@+id/musicSearchRow" android:layout_width="match_parent" android:layout_height="56dp" android:gravity="center_vertical">

@@ -2509,6 +2509,9 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
     }
 
     private fun syncViewport() {
+        // Hidden activity views report isShown=false even for visible children. Wait for the map
+        // window to return before measuring its banner/footer and changing control positions.
+        if (!webMapView.isShown) return
         layoutMapControls()
         if (!mapReady || webMapView.height <= 0) return
         val mapPosition = IntArray(2); webMapView.getLocationInWindow(mapPosition)
@@ -2596,6 +2599,7 @@ class RealisticMapActivity : AppCompatActivity(), TextToSpeech.OnInitListener, S
         is3D = viewMode == 1
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         webMapView.onResume()
+        webMapView.post { syncViewport() }
         if (mapReady) jsCall("setTrafficPaused(false)")
         sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         updateAutoTheme()
