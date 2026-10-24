@@ -12,6 +12,15 @@ class MusicQueueTest {
             assertFalse(url,MusicTrack.directAudio(url))
         assertTrue(MusicTrack.directAudio("https://example.com/music/stream.m3u8"))
     }
+    @Test fun catalogueMetadataAndStableSoundCloudIdsSurviveWithoutAcceptingArbitrarySchemes() {
+        val track=MusicTrack("gps3d-music://soundcloud/103101877/audio.m3u8","Pista",true,
+            artist="Artista",artwork="https://example.com/cover.jpg",durationMs=120000,source="soundcloud")
+        assertTrue(track.valid());assertEquals(track,MusicQueue.decode(MusicQueue(listOf(track)).encode()).tracks.single())
+        assertFalse(track.copy(uri="gps3d-music://soundcloud/../../private/audio.m3u8").valid())
+        assertFalse(track.copy(uri="https://music.youtube.com/watch?v=abc").valid())
+        val old=MusicQueue.decode("""{"version":2,"tracks":[{"uri":"https://example.com/song.mp3","title":"Anterior","online":true}],"index":0,"positionMs":5000}""")
+        assertEquals(MusicTrack("https://example.com/song.mp3","Anterior",true),old.tracks.single());assertEquals(5000L,old.positionMs)
+    }
     @Test fun remembersSelectedDocumentsAndPlaybackPosition() {
         val queue=MusicQueue(listOf(MusicTrack("content://music/one", "Canción ñ"),MusicTrack("content://music/two", "Otra")),1,85123)
         assertEquals(queue,MusicQueue.decode(queue.encode()))

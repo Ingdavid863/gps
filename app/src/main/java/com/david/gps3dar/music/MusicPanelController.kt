@@ -30,7 +30,7 @@ import java.util.concurrent.Executors
 import com.google.common.util.concurrent.ListenableFuture
 
 /** Local files and Android's active music app share the same visible map transport controls. */
-class MusicPanelController(private val activity: AppCompatActivity) : AutoCloseable {
+class MusicPanelController(private val activity: AppCompatActivity, private val expanded: Boolean = false) : AutoCloseable {
     private val source = activity.findViewById<ImageButton>(R.id.musicSourceButton)
     private val title = activity.findViewById<TextView>(R.id.musicTitle)
     private val subtitle = activity.findViewById<TextView>(R.id.musicSubtitle)
@@ -55,6 +55,8 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
     private val lifecycle = object : DefaultLifecycleObserver {
         override fun onResume(owner: LifecycleOwner) {
             foreground = true
+            val wantedExternal = preferences.getString(SOURCE, LOCAL) == EXTERNAL
+            if (wantedExternal != external) { if (wantedExternal) useExternal() else useLocal {} }
             if (external) remote.start()
             main.removeCallbacks(ticker); main.post(ticker)
         }
@@ -63,30 +65,38 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         }
     }
     private val io = Executors.newSingleThreadExecutor()
+    private val artworkNetwork=MusicNetwork { preferences.getBoolean(MusicNetwork.FILTER,true) }
+    private val covers=MusicArtwork(artworkNetwork,io)
+    private var artworkUri=""
+    private var localArtworkActive = false
     private var closed = false
     private var importing = false
     private val preferences = activity.getSharedPreferences(MusicPlaybackService.PREFS, android.content.Context.MODE_PRIVATE)
     private var external = preferences.getString(SOURCE,
-        if (MusicQueue.decode(preferences.getString(MusicPlaybackService.QUEUE, "").orEmpty()).tracks.isNotEmpty()) LOCAL else EXTERNAL) == EXTERNAL
+        LOCAL) == EXTERNAL
     private val remote = ExternalMusicSessions(activity) { render() }
     private var controller: MediaController? = null
     private val files = activity.registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) addDocuments(uris)
     }
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = render()
+        override fun onEvents(player: Player, events: Player.Events) {
+            render()
+            if (events.contains(Player.EVENT_TIMELINE_CHANGED)) onLibraryChanged?.invoke()
+        }
         override fun onPlayerError(error: PlaybackException) {
             toast("No se pudo reproducir. Revisa la conexión para audio en línea o vuelve a elegir el archivo.")
             render()
         }
     }
+    var onLibraryChanged: (() -> Unit)? = null
     private var future: ListenableFuture<MediaController>? = null
     private val pendingLocalActions = mutableListOf<(MediaController) -> Unit>()
 
     init {
         activity.lifecycle.addObserver(lifecycle)
         source.setOnClickListener { showSources() }
-        artwork.setOnClickListener { showSources() }
+        artwork.setOnClickListener { if (expanded) showSources() else expand() }
         progress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(bar: SeekBar) { dragging = true }
             override fun onProgressChanged(bar: SeekBar, value: Int, user: Boolean) {
@@ -97,12 +107,13 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
                 dragging = false
             }
         })
-        title.setOnClickListener { if (external && remote.state().connected) openSelectedApp() else showSources() }
-        subtitle.setOnClickListener { if (external && remote.state().connected) openSelectedApp() else showSources() }
+        title.setOnClickListener { if (expanded) showSources() else expand() }
+        subtitle.setOnClickListener { if (expanded) showSources() else expand() }
         previous.setOnClickListener { skip(forward = false) }
         next.setOnClickListener { skip(forward = true) }
         play.setOnClickListener {
             if (external) {
+                remote.refreshAccess()
                 if (!remote.access) showConnection()
                 else if (!remote.toggle()) {
                     if (remote.preferredPackage.isNotBlank()) openMusicApp(remote.preferredPackage, remote.label(remote.preferredPackage))
@@ -110,7 +121,7 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
                 }
                 return@setOnClickListener
             }
-            if (controller == null || controller?.mediaItemCount == 0) { showInAppMusic(); return@setOnClickListener }
+            if (controller == null || controller?.mediaItemCount == 0) { if (expanded) showInAppMusic() else expand(); return@setOnClickListener }
             controller?.let { player ->
                 if (player.playWhenReady) player.pause() else {
                     if (player.playbackState == Player.STATE_IDLE || player.playerError != null) player.prepare()
@@ -122,6 +133,26 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         if (!external) connectLocal()
         render()
     }
+    private fun expand() { activity.startActivity(Intent(activity, MusicPlayerActivity::class.java)) }
+    fun importFiles() { useLocal { files.launch(arrayOf("audio/*")) } }
+    fun radio() = showInAppMusic()
+    fun library(ready: (List<androidx.media3.common.MediaItem>) -> Unit) {
+        useLocal { p -> ready((0 until p.mediaItemCount).map(p::getMediaItemAt)) }
+    }
+    fun playAt(index: Int) { useLocal { p ->
+        if (index in 0 until p.mediaItemCount) { p.seekToDefaultPosition(index);p.prepare();p.play() }
+    } }
+    fun playTrack(track: MusicTrack) = playTracks(listOf(track), 0)
+    fun playTracks(tracks: List<MusicTrack>, selected: Int) { useLocal { p ->
+        val chosen = tracks.getOrNull(selected) ?: return@useLocal
+        val existing = (0 until p.mediaItemCount).map { p.getMediaItemAt(it).mediaId }.toSet()
+        val additions = tracks.filter { it.valid() && it.uri !in existing }.distinctBy { it.uri }
+            .take((MusicQueue.MAX_TRACKS-p.mediaItemCount).coerceAtLeast(0))
+        p.addMediaItems(additions.map(MusicPlaybackService::mediaItem))
+        val index = (0 until p.mediaItemCount).firstOrNull { p.getMediaItemAt(it).mediaId == chosen.uri }
+        if (index == null) toast("Tu lista alcanzó las 100 canciones.")
+        else { p.seekToDefaultPosition(index); p.prepare(); p.play() }
+    } }
     private fun connectLocal(ready: ((MediaController) -> Unit)? = null) {
         controller?.let { ready?.invoke(it); return }
         ready?.let { pendingLocalActions.add(it) }
@@ -182,7 +213,13 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
             player?.isPlaying == true -> "${if (online) "Audio en línea" else "Canciones del teléfono"} · ${player.currentMediaItemIndex + 1}/${player.mediaItemCount}"
             else -> "En pausa · ${if (online) "audio en línea" else "canciones del teléfono"}"
         }
-        setArtwork(null, null)
+        val cover=player?.mediaMetadata?.artworkUri?.toString().orEmpty()
+        if(cover!=artworkUri || !localArtworkActive){artworkUri=cover;localArtworkActive=true;setArtwork(null,null)
+            if(cover.isNotBlank())covers.load(cover){bitmap->if(!closed && !external && artworkUri==cover)setArtwork(bitmap,null)}
+        } else if(cover.isBlank())setArtwork(null,null)
+        val artist=player?.mediaMetadata?.extras?.getString("track_artist").orEmpty()
+        val origin=player?.mediaMetadata?.extras?.getString("track_source").orEmpty()
+        if(hasMusic && artist.isNotBlank() && player?.playerError==null)subtitle.text=artist+(if(origin.isNotBlank()) " · ${origin.replaceFirstChar{it.uppercase()}}" else "")
         for (button in listOf(previous, play, next)) button.visibility = View.VISIBLE
         previous.isEnabled = hasMusic && (player?.mediaItemCount ?: 0) > 1
         next.isEnabled = previous.isEnabled; play.isEnabled = true
@@ -192,6 +229,7 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
         setProgress(player?.currentPosition ?: 0, (player?.duration ?: 0).coerceAtLeast(0), hasMusic && player?.isCurrentMediaItemSeekable == true)
     }
     private fun renderExternal() {
+        localArtworkActive = false
         val s = remote.state()
         title.text = when {
             s.connected -> s.title.ifBlank { "Reproducción en ${s.appName}" }
@@ -298,7 +336,7 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
             "Bloqueo de anuncios en audio", "Controlar otra app de música", "Abrir Spotify", "Abrir YouTube Music", "Abrir otra aplicación de música", "Vaciar mi lista")
         AlertDialog.Builder(activity).setCustomTitle(playerPicker())
             .setItems(items) { _, which -> when (which) {
-                0 -> showInAppMusic()
+                0 -> if (expanded) useLocal { showInAppMusic() } else expand()
                 1 -> showAudioLink()
                 2 -> useLocal { files.launch(arrayOf("audio/*")) }
                 3 -> useLocal { showQueue() }
@@ -325,15 +363,7 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
                         val streams = arrayOf("mp3-128", "rock-128", "mellow-128")
                         val labels = arrayOf("Radio Paradise · mezcla general", "Radio Paradise · rock", "Radio Paradise · relajante")
                         val queue = streams.indices.map { MusicTrack("https://stream.radioparadise.com/${streams[it]}",labels[it],true,true) }
-                        useLocal { player ->
-                            // Add the station set once, preserving the user's selected files and links.
-                            val existing = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
-                            val additions = queue.filter { it.uri !in existing }.take((MusicQueue.MAX_TRACKS-player.mediaItemCount).coerceAtLeast(0))
-                            player.addMediaItems(additions.map(MusicPlaybackService::mediaItem))
-                            val index=(0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == queue[which].uri }
-                            if (index == null) toast("La lista está llena. Vacía espacio para añadir emisoras.")
-                            else { player.seekToDefaultPosition(index); player.prepare(); player.play() }
-                        }
+                        playTracks(queue, which)
                     }
                     3 -> useLocal { showQueue() }
                     4 -> useLocal { files.launch(arrayOf("audio/*")) }
@@ -430,10 +460,11 @@ class MusicPanelController(private val activity: AppCompatActivity) : AutoClosea
     override fun close() {
         if (closed) return
         closed = true
+        sourceDialog?.dismiss()
         main.removeCallbacksAndMessages(null); remote.close(); activity.lifecycle.removeObserver(lifecycle)
         controller?.removeListener(listener)
         future?.let(MediaController::releaseFuture)
-        io.shutdown()
+        artworkNetwork.close();io.shutdown()
     }
     companion object {
         const val SOURCE = "control_source"

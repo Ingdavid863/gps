@@ -13,6 +13,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -35,8 +36,15 @@ class MusicPlaybackService : MediaSessionService() {
         super.onCreate()
         instance = WeakReference(this)
         network = MusicNetwork { getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(MusicNetwork.FILTER, true) }
-        val sources = DefaultMediaSourceFactory(DefaultDataSource.Factory(this,
-            OkHttpDataSource.Factory(network).setUserAgent("GPS3D-AR-David/0.30")))
+        val catalogue = MusicCatalogue(network)
+        val dataSources = ResolvingDataSource.Factory(DefaultDataSource.Factory(this,
+            OkHttpDataSource.Factory(network).setUserAgent(MusicCatalogue.AGENT)), ResolvingDataSource.Resolver { spec ->
+            if (spec.uri.scheme == "gps3d-music" && spec.uri.host == "soundcloud") {
+                val id=spec.uri.pathSegments.firstOrNull().orEmpty()
+                spec.withUri(android.net.Uri.parse(catalogue.soundCloudStream(id)))
+            } else spec
+        })
+        val sources = DefaultMediaSourceFactory(dataSources)
         val player = ExoPlayer.Builder(this).setMediaSourceFactory(sources).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
@@ -117,9 +125,16 @@ class MusicPlaybackService : MediaSessionService() {
         const val QUEUE = "queue"
         private fun track(item: MediaItem) = MusicTrack(item.mediaId,
             item.mediaMetadata.title?.toString() ?: "Canción", item.mediaMetadata.extras?.getBoolean("online") == true,
-            item.mediaMetadata.extras?.getBoolean("live") == true)
+            item.mediaMetadata.extras?.getBoolean("live") == true,
+            item.mediaMetadata.extras?.getString("track_artist").orEmpty(),
+            item.mediaMetadata.extras?.getString("track_artwork").orEmpty(),
+            item.mediaMetadata.extras?.getLong("track_duration") ?: 0,
+            item.mediaMetadata.extras?.getString("track_source").orEmpty())
         fun mediaItem(track: MusicTrack): MediaItem = MediaItem.Builder().setUri(track.uri).setMediaId(track.uri)
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(if (track.online) "Audio en GPS3D" else "Canciones del teléfono")
-                .setExtras(android.os.Bundle().apply { putBoolean("online",track.online);putBoolean("live",track.live) }).build()).build()
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist.ifBlank { if (track.online) "Audio en GPS3D" else "Canciones del teléfono" })
+                .setArtworkUri(track.artwork.takeIf { it.startsWith("https://") }?.let(android.net.Uri::parse))
+                .setExtras(android.os.Bundle().apply { putBoolean("online",track.online);putBoolean("live",track.live)
+                    putString("track_artist",track.artist);putString("track_artwork",track.artwork)
+                    putLong("track_duration",track.durationMs);putString("track_source",track.source) }).build()).build()
     }
 }

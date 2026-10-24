@@ -4,7 +4,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
-import android.view.accessibility.AccessibilityNodeInfo
+import android.view.View
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import android.widget.TextView
 import androidx.lifecycle.Lifecycle
 import androidx.media3.session.MediaController
@@ -42,15 +44,18 @@ class InAppAudioTest {
                     assertEquals("The selected built-in player remains available", "Escuchar en GPS3D",activity.findViewById<TextView>(R.id.musicTitle).text.toString())
                     activity.findViewById<android.view.View>(R.id.musicPlayPause).performClick()
                 }
-                await("The station chooser appears inside GPS3D") {
-                    val root=instrumentation.uiAutomation.rootInActiveWindow
-                    if(root?.findAccessibilityNodeInfosByText("Escuchar dentro de GPS3D").orEmpty().none { it.text?.toString()=="Escuchar dentro de GPS3D" }) false
-                    else root?.findAccessibilityNodeInfosByText("Radio Paradise · mezcla general").orEmpty()
-                        .firstOrNull { it.text?.toString()=="Radio Paradise · mezcla general" }?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
+                var expanded:MusicPlayerActivity?=null
+                await("Tapping play opens GPS3D's own full player") {
+                    main { expanded=ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).filterIsInstance<MusicPlayerActivity>().firstOrNull() }
+                    expanded!=null
                 }
+                main { expanded!!.findViewById<View>(R.id.musicRadio).performClick()
+                    expanded!!.findViewById<android.widget.LinearLayout>(R.id.musicResults).getChildAt(0).performClick() }
                 fun playing(uri:String):Boolean { var okay=false;main { okay=player.isPlaying&&player.currentMediaItem?.mediaId==uri&&player.currentPosition>200 };return okay }
                 await("GPS3D itself must decode and play actual HTTPS audio") { playing("https://stream.radioparadise.com/mp3-128") }
-                scenario.onActivity { assertEquals(Lifecycle.State.RESUMED,it.lifecycle.currentState);it.findViewById<android.view.View>(R.id.musicNext).performClick() }
+                main { expanded!!.findViewById<View>(R.id.musicMinimize).performClick() }
+                await("Minimizing returns to the map while audio keeps playing") { var ready=false;scenario.onActivity { ready=it.lifecycle.currentState==Lifecycle.State.RESUMED };ready }
+                scenario.onActivity { it.findViewById<View>(R.id.musicNext).performClick() }
                 await("Map next changes the actual stream") { playing("https://stream.radioparadise.com/rock-128") }
                 scenario.onActivity { it.findViewById<android.view.View>(R.id.musicPrevious).performClick() }
                 await("Map previous returns to the first stream") { playing("https://stream.radioparadise.com/mp3-128") }

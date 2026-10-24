@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/musicPlayerRoot" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="16dp" android:background="#101923">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:text="GPS3D Música" android:textStyle="bold" android:textSize="21sp" android:textColor="#EDF2F7" />
+        <Button android:id="@+id/musicMinimize" android:layout_width="wrap_content" android:layout_height="48dp"
+            android:text="Volver al mapa" android:textAllCaps="false" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/musicPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:layout_marginTop="12dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="88dp" android:gravity="center_vertical">
+            <ImageView android:id="@+id/musicArtwork" android:layout_width="80dp" android:layout_height="80dp"
+                android:layout_marginEnd="12dp" android:scaleType="centerCrop" android:src="@drawable/ic_music"
+                android:contentDescription="Carátula de la canción" />
+            <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:orientation="vertical" android:gravity="center_vertical">
+                <TextView android:id="@+id/musicTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Elige una canción" android:textSize="18sp" android:textStyle="bold" android:textColor="#EDF2F7"
+                    android:maxLines="2" android:ellipsize="end" />
+                <TextView android:id="@+id/musicSubtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Tu reproductor dentro de GPS3D" android:textSize="13sp" android:textColor="#BAC8D6"
+                    android:maxLines="2" android:ellipsize="end" />
+            </LinearLayout>
+            <ImageButton android:id="@+id/musicSourceButton" android:layout_width="48dp" android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music"
+                android:tint="#EDF2F7" android:contentDescription="Opciones y fuentes de música" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="56dp" android:gravity="center_vertical">
+            <TextView android:id="@+id/musicTime" android:layout_width="56dp" android:layout_height="wrap_content"
+                android:text="—:—" android:textSize="11sp" android:textColor="#BAC8D6" android:maxLines="2" android:gravity="center" />
+            <SeekBar android:id="@+id/musicProgress" android:layout_width="0dp" android:layout_height="48dp"
+                android:layout_weight="1" android:max="1000" android:progressTint="#50D693" android:thumbTint="#50D693"
+                android:contentDescription="Posición de la canción" />
+            <ImageButton android:id="@+id/musicPrevious" android:layout_width="48dp" android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music_previous"
+                android:tint="#EDF2F7" android:contentDescription="Canción anterior" />
+            <ImageButton android:id="@+id/musicPlayPause" android:layout_width="48dp" android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music_play"
+                android:tint="#EDF2F7" android:contentDescription="Reproducir música" />
+            <ImageButton android:id="@+id/musicNext" android:layout_width="48dp" android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music_next"
+                android:tint="#EDF2F7" android:contentDescription="Canción siguiente" />
+        </LinearLayout>
+    </LinearLayout>
+    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="52dp" android:scrollbars="none">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent">
+            <Button android:id="@+id/musicBrowse" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Buscar" android:textAllCaps="false" />
+            <Button android:id="@+id/musicLibrary" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Mi lista" android:textAllCaps="false" />
+            <Button android:id="@+id/musicPhone" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Teléfono" android:textAllCaps="false" />
+            <Button android:id="@+id/musicRadio" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Radio" android:textAllCaps="false" />
+        </LinearLayout>
+    </HorizontalScrollView>
+    <Spinner android:id="@+id/musicCatalogueSource" android:layout_width="match_parent" android:layout_height="48dp"
+        android:backgroundTint="#BAC8D6" android:popupBackground="#FFFFFF" android:contentDescription="Catálogo de música" />
+    <LinearLayout android:id="@+id/musicSearchRow" android:layout_width="match_parent" android:layout_height="56dp" android:gravity="center_vertical">
+        <EditText android:id="@+id/musicSearch" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:hint="Canción o artista" android:textColor="#EDF2F7" android:textColorHint="#BAC8D6" android:textSize="16sp"
+            android:singleLine="true" android:imeOptions="actionSearch" android:inputType="text" />
+        <Button android:id="@+id/musicSearchGo" android:layout_width="wrap_content" android:layout_height="48dp" android:text="Buscar" android:textAllCaps="false" />
+    </LinearLayout>
+    <TextView android:id="@+id/musicCatalogueStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingTop="8dp" android:paddingBottom="8dp" android:textColor="#BAC8D6" android:textSize="12sp"
+        android:text="Busca música para añadir a tu lista." />
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
+        <LinearLayout android:id="@+id/musicResults" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+    </ScrollView>
+</LinearLayout>
