@@ -3,6 +3,8 @@ package com.david.gps3dar.fixture;
 import android.app.*;
 import android.content.Intent;
 import android.media.*;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.media.session.*;
 import android.os.*;
 import android.os.Process;
@@ -43,6 +45,7 @@ public class MusicFixtureService extends Service {
         session.setCallback(new MediaSession.Callback() {
             @Override public void onPlay() { play(); }
             @Override public void onPause() { pause(); }
+            @Override public void onSeekTo(long position) { player.seekTo((int)position);publish(); }
             @Override public void onSkipToNext() { nextCount++; change(1); }
             @Override public void onSkipToPrevious() { previousCount++; change(-1); }
         },main);
@@ -65,6 +68,13 @@ public class MusicFixtureService extends Service {
     private void load(boolean resume) {
         try {
             player.reset();player.setDataSource(wave(index).getPath());player.setLooping(true);player.prepare();
+            Bitmap art=Bitmap.createBitmap(64,64,Bitmap.Config.ARGB_8888);
+            art.eraseColor(index==0?Color.rgb(28,120,90):index==1?Color.rgb(70,90,180):Color.rgb(180,80,90));
+            session.setMetadata(new MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE,"External track "+(index+1))
+                .putString(MediaMetadata.METADATA_KEY_ARTIST,"Artista de prueba "+(index+1))
+                .putString(MediaMetadata.METADATA_KEY_ALBUM,"GPS3D independent audio QA")
+                .putLong(MediaMetadata.METADATA_KEY_DURATION,player.getDuration())
+                .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART,art).build());
             if(resume) player.start();publish();
         } catch(Exception error) { throw new IllegalStateException(error); }
     }
@@ -76,9 +86,8 @@ public class MusicFixtureService extends Service {
     private void publish() {
         try {
             boolean playing=player!=null && player.isPlaying();
-            session.setMetadata(new MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE,"External track "+(index+1)).build());
             session.setPlaybackState(new PlaybackState.Builder().setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE |
-                PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS)
+                PlaybackState.ACTION_SEEK_TO | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS)
                 .setState(playing?PlaybackState.STATE_PLAYING:PlaybackState.STATE_PAUSED,player.getCurrentPosition(),playing?1f:0f).build());
             snapshot=new JSONObject().put("uid",Process.myUid()).put("playing",playing).put("index",index)
                 .put("position",player.getCurrentPosition()).put("next",nextCount).put("previous",previousCount)

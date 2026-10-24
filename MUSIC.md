@@ -1,25 +1,31 @@
-# Música en GPS3D 0.30
+# GPS3D 0.31 — minirreproductor en el mapa
 
-El modo inicial y la primera apertura tras actualizar usan el reproductor propio. El botón de reproducir abre «Escuchar dentro de GPS3D» si no hay una lista. Se puede seleccionar una emisora de Radio Paradise, añadir enlaces directos de audio HTTPS (incluido HLS) o elegir archivos con el selector de Android. La reproducción la realiza Media3 en el servicio de GPS3D: no se abre otra aplicación para esas fuentes. Las tres emisoras iniciales conservan los enlaces y canciones que ya existían en la lista. Su sitio y condiciones se enlazan desde «Acerca de la radio».
+La barra enlaza una sesión multimedia real de Spotify, YouTube Music u otro reproductor instalado. Presenta canción, artista, carátula si la app la publica, estado de reproducción, posición y duración. Anterior, reproducir/pausar, siguiente y búsqueda en la canción se envían al controlador elegido, respetando los comandos que esa app ofrece. Los controles deshabilitados no se simulan.
 
-La radio requiere internet. Anterior y siguiente cambian la emisora o entrada de la lista, no seleccionan canciones dentro de la programación de una emisora. Los archivos físicos elegidos en el teléfono funcionan sin internet; los proveedores de documentos en la nube pueden requerir conexión. La lista guarda hasta 100 entradas y conserva tipo de fuente, título y posición. Las emisiones en vivo vuelven al directo sin intentar recuperar una posición antigua. Restaurar un servicio deja la lista en pausa, sin reproducción automática.
+## Conexión inicial
 
-Los botones del mapa, la sesión de Android/Bluetooth y el servicio de reproducción funcionan también cuando se recrea la actividad. Las indicaciones del mapa, AR peatonal y Android Auto conservan la prioridad de audio y reducen el volumen del reproductor propio mientras se habla. La migración de la lista anterior mantiene los documentos y posiciones guardados.
+1. Toca ♫ en el panel para ver las apps de audio instaladas con sus iconos.
+2. Elige Spotify, YouTube Music u otro reproductor y activa **Controles de música GPS3D** cuando Android abra Acceso a notificaciones.
+3. Elige una canción en el reproductor si todavía no tiene sesión y vuelve al GPS. La información y los controles aparecen en el mapa. La selección se conserva al reabrir GPS3D.
 
-## Filtro de anuncios
+El catálogo se selecciona en la aplicación musical. GPS3D muestra y controla su sesión; no incrusta la ventana completa de otra app ni copia su catálogo. Al tocar la información del tema puede abrirse su reproductor. El modo automático elige la sesión activa; elegir una app concreta impide controlar accidentalmente otra.
 
-El cliente HTTP de música utiliza el DNS público de AdGuard por HTTPS, activado inicialmente. El menú «Bloqueo de anuncios en audio» permite desactivarlo y explica el alcance. Las consultas de dominios de audio se envían a ese proveedor. El filtro se aplica a las nuevas conexiones; para reabrir una conexión en curso hay que parar/cambiar la fuente. Las respuestas nulas o de loopback no se convierten en conexiones locales.
+Android exige habilitar un NotificationListenerService para consultar las sesiones de otras apps mediante MediaSessionManager. GPS3D no solicita el permiso de firma MEDIA_CONTENT_CONTROL, no automatiza la concesión y no usa accesibilidad. Su servicio no procesa ni guarda contenido de notificaciones. En Android 12+ declara una lista de categorías vacía; sólo se usan los datos multimedia que el reproductor publica. El usuario puede revocar el acceso desde Ajustes; el panel borra entonces título, carátula y controles obsoletos.
 
-El filtro no cambia el DNS del teléfono, no instala una VPN y no interviene en las conexiones del mapa, búsqueda, tráfico o cálculo de rutas. Bloquea dominios de publicidad/rastreo que identifique el proveedor. No elimina publicidad que venga insertada en el mismo audio, ni los anuncios de las apps externas. Si el proveedor DNS no está disponible puede impedir abrir una fuente; se puede desactivar desde el menú. No se promete bloquear toda publicidad.
+Algunas versiones de Android restringen este acceso para APK instalados fuera de la tienda. Puede ser necesario permitir ajustes restringidos desde Información de la app antes de activarlo. Android 10 o anteriores en dispositivos declarados de poca RAM pueden impedir los listeners; los perfiles de trabajo también tienen restricciones del sistema.
 
-## YouTube Music y Spotify
+## Condiciones del reproductor
 
-Siguen disponibles como opciones externas y conservan los controles multimedia de Android de 0.29. Su catálogo no se extrae ni se presenta como audio propio. Las páginas de esas plataformas no son enlaces directos de audio. YouTube Music vincula música en segundo plano y escucha sin anuncios a sus requisitos de suscripción; los botones de GPS3D no cambian esos requisitos. RethinkDNS reconoce que DNS no elimina de forma fiable los anuncios de YouTube, por lo que una VPN DNS adicional no resolvería esa restricción.
+Spotify y YouTube Music mantienen sus propias cuentas, suscripciones, anuncios, conexión y permisos de reproducción en segundo plano. YouTube Music normalmente requiere Premium para escuchar canciones mientras se utiliza otra app; la integración no elimina esa condición ni sus anuncios. No se pide la contraseña en GPS3D. Si una app no publica metadatos, carátula, duración o un comando, GPS3D indica lo disponible sin inventarlo.
 
-## Validación
+## Música propia conservada
 
-La validación incluye reproducción HTTPS real dentro del servicio de GPS3D, botones del mapa, persistencia de fuentes/listas, continuidad tras recrear la actividad y en segundo plano. Se comprueba el DNS filtrado con emisoras accesibles y un dominio publicitario bloqueado. También se mantienen las pruebas de archivos locales, prioridad de voz y control de un reproductor Android independiente. Las pruebas no sustituyen comprobar la recepción GNSS y la red en el teléfono de David.
+El menú conserva archivos del teléfono, enlaces directos HTTPS MP3/AAC/HLS y Radio Paradise. Se reproducen en Media3 dentro de GPS3D, con hasta 100 entradas, reproducción en segundo plano y atenuación durante indicaciones. La radio requiere internet y anterior/siguiente cambian de emisora. La lista se conserva al cambiar entre el reproductor propio y otra app.
 
-Fuentes: [Media3](https://developer.android.com/media/media3/session/background-playback), [Radio Paradise: enlaces para reproductores](https://radioparadise.com/listen/stream-links), [AdGuard DNS público](https://adguard-dns.io/es/public-dns.html), [YouTube Music en segundo plano](https://support.google.com/youtubemusic/answer/6313552), [límites de RethinkDNS](https://rethinkdns.com/faq).
+AdGuard DNS por HTTPS se aplica sólo al audio del reproductor propio. No modifica DNS del sistema, mapas, búsquedas, tráfico ni otras aplicaciones y no elimina publicidad integrada en emisiones o de YouTube Music externo. Se puede desactivar desde el menú.
 
-La liberación de conexiones TLS se realiza fuera del hilo principal de Android, una sola vez por reproductor, incluso al cambiar a una aplicación externa. Esto evita un cierre de la app al terminar una transmisión.
+## Verificación
+
+El reproductor de pruebas independiente usa otro UID, reproduce PCM real y publica título, artista, carátula, duración y progreso. Las pruebas comprueban controles, búsqueda real en el decodificador, cambios de canción, reapertura, revocación/reconexión y que una app seleccionada no envíe órdenes a otra sesión. No se utilizan cuentas reales de Spotify o YouTube Music. El reproductor de pruebas no se incluye en el APK entregado.
+
+Referencias: https://developer.android.com/reference/android/media/session/MediaSessionManager y https://developer.android.com/reference/android/service/notification/NotificationListenerService ; condiciones de YouTube Music: https://support.google.com/youtubemusic/answer/6313552

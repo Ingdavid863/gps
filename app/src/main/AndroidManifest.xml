@@ -14,6 +14,10 @@
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
 
     <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MUSIC" />
+        </intent>
         <package android:name="com.spotify.music" />
         <package android:name="com.google.android.apps.youtube.music" />
     </queries>
@@ -44,6 +48,16 @@
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
+        </service>
+        <service android:name=".music.MusicSessionAccessService"
+            android:label="Controles de música GPS3D" android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+            <!-- Only media sessions are used; no notification categories are requested. -->
+            <meta-data android:name="android.service.notification.default_filter_types" android:value="" />
+            <meta-data android:name="android.service.notification.disabled_filter_types" android:value="conversations|alerting|silent|ongoing" />
         </service>
 
         <!-- Override SceneView's optional declaration: GPS3D AR requires ARCore. -->

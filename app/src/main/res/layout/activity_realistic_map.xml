@@ -628,67 +628,42 @@
         <LinearLayout
             android:id="@+id/musicPanel"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="104dp"
             android:layout_marginTop="6dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-            <ImageButton
-                android:id="@+id/musicSourceButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_music"
-                android:contentDescription="Elegir música" />
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:gravity="center_vertical"
-                android:orientation="vertical">
-                <TextView
-                    android:id="@+id/musicTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Música"
-                    android:textColor="#27313A"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:maxLines="1"
-                    android:ellipsize="end" />
-                <TextView
-                    android:id="@+id/musicSubtitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Añadir canciones o abrir una app"
-                    android:textColor="#6A6D70"
-                    android:textSize="10sp"
-                    android:maxLines="1"
-                    android:ellipsize="end" />
+            android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical">
+                <ImageView android:id="@+id/musicArtwork" android:layout_width="48dp" android:layout_height="48dp"
+                    android:layout_marginEnd="10dp" android:scaleType="centerCrop" android:src="@drawable/ic_music"
+                    android:contentDescription="Carátula y selección de música" android:clickable="true" android:focusable="true" />
+                <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                    android:gravity="center_vertical" android:orientation="vertical">
+                    <TextView android:id="@+id/musicTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Conecta tu música" android:textColor="#27313A" android:textSize="15sp"
+                        android:textStyle="bold" android:maxLines="1" android:ellipsize="end" />
+                    <TextView android:id="@+id/musicSubtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Spotify, YouTube Music y tus reproductores" android:textColor="#6A6D70" android:textSize="11sp"
+                        android:maxLines="1" android:ellipsize="end" />
+                </LinearLayout>
+                <ImageButton android:id="@+id/musicSourceButton" android:layout_width="48dp" android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music"
+                    android:contentDescription="Elegir reproductor de música" />
             </LinearLayout>
-            <ImageButton
-                android:id="@+id/musicPrevious"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_music_previous"
-                android:contentDescription="Canción anterior"
-                android:visibility="gone" />
-            <ImageButton
-                android:id="@+id/musicPlayPause"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_music_play"
-                android:contentDescription="Reproducir música"
-                android:visibility="gone" />
-            <ImageButton
-                android:id="@+id/musicNext"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_music_next"
-                android:contentDescription="Canción siguiente"
-                android:visibility="gone" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:gravity="center_vertical">
+                <TextView android:id="@+id/musicTime" android:layout_width="56dp" android:layout_height="wrap_content"
+                    android:text="—:—" android:textSize="11sp" android:textColor="#6A6D70" android:maxLines="2" android:gravity="center" />
+                <SeekBar android:id="@+id/musicProgress" android:layout_width="0dp" android:layout_height="48dp"
+                    android:layout_weight="1" android:max="1000" android:progressTint="#168A58" android:thumbTint="#168A58"
+                    android:contentDescription="Posición de la canción" />
+                <ImageButton android:id="@+id/musicPrevious" android:layout_width="48dp" android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music_previous"
+                    android:contentDescription="Canción anterior" />
+                <ImageButton android:id="@+id/musicPlayPause" android:layout_width="48dp" android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music_play"
+                    android:contentDescription="Reproducir música" />
+                <ImageButton android:id="@+id/musicNext" android:layout_width="48dp" android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_music_next"
+                    android:contentDescription="Canción siguiente" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

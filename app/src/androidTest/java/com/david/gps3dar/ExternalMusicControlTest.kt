@@ -6,6 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
+import android.os.Bundle
+import android.widget.ImageView
+import android.widget.SeekBar
+import android.graphics.drawable.BitmapDrawable
 import android.provider.MediaStore
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageButton
@@ -69,7 +73,19 @@ class ExternalMusicControlTest {
         await("another application is actually playing PCM audio") { state().optBoolean("playing") && state().optLong("position")>150 }
         assertNotEquals("media player must run in a different Android UID",context.applicationInfo.uid,state().getInt("uid"))
     }
+    private fun access(enabled: Boolean) {
+        val action=if(enabled) "allow_listener" else "disallow_listener"
+        val component=ComponentName(context,MusicSessionAccessService::class.java).flattenToString()
+        instrumentation.uiAutomation.executeShellCommand("cmd notification $action $component").use {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
+        }
+        await("Android notification access changes") { ExternalMusicSessions.hasAccess(context)==enabled }
+    }
+    private fun text(scenario: ActivityScenario<RealisticMapActivity>, id: Int):String {
+        var value="";scenario.onActivity { value=it.findViewById<TextView>(id).text.toString() };return value
+    }
     @Before fun prepare() {
+        access(true)
         context.deleteFile("saved-navigation.json")
         context.contentResolver.call(fixture,"stop",null,null)
         val old=connect();main { old.stop();old.clearMediaItems();old.release() }
@@ -78,6 +94,7 @@ class ExternalMusicControlTest {
             .putString(MusicPanelController.SOURCE,MusicPanelController.EXTERNAL).commit()
     }
     @After fun cleanup() {
+        access(false)
         context.contentResolver.call(fixture,"stop",null,null)
         val local=connect();main { local.stop();local.clearMediaItems();local.release() }
         context.stopService(Intent(context,MusicPlaybackService::class.java))
@@ -89,20 +106,39 @@ class ExternalMusicControlTest {
             scenario.onActivity { activity ->
                 for(id in listOf(R.id.musicPrevious,R.id.musicPlayPause,R.id.musicNext)) {
                     assertTrue("transport buttons visible without local files",activity.findViewById<ImageButton>(id).isShown)
-                    assertTrue(activity.findViewById<ImageButton>(id).isEnabled)
                 }
-                assertEquals("Tu app de música",activity.findViewById<TextView>(R.id.musicTitle).text.toString())
+                assertEquals("Conecta tu música",activity.findViewById<TextView>(R.id.musicTitle).text.toString())
+                assertFalse(activity.findViewById<ImageButton>(R.id.musicNext).isEnabled)
             }
             startExternalAudio()
+            await("actual title and artist arrive from another app's session") {
+                text(scenario,R.id.musicTitle)=="External track 1" && text(scenario,R.id.musicSubtitle).contains("Artista de prueba 1")
+            }
+            scenario.onActivity { activity ->
+                assertEquals("Pausar música",activity.findViewById<ImageButton>(R.id.musicPlayPause).contentDescription)
+                val bitmap=(activity.findViewById<ImageView>(R.id.musicArtwork).drawable as BitmapDrawable).bitmap
+                assertEquals(android.graphics.Color.rgb(28,120,90),bitmap.getPixel(bitmap.width/2,bitmap.height/2))
+                val seek=activity.findViewById<SeekBar>(R.id.musicProgress)
+                assertTrue(seek.isEnabled)
+                assertTrue(seek.performAccessibilityAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id,
+                    Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE,500f) }))
+            }
+            await("the map seeks the external decoder rather than only moving a fake bar") { state().optLong("position") in 9000L..14000L }
+            await("duration is actual media metadata") { text(scenario,R.id.musicTime).contains("0:20") }
             click(scenario,R.id.musicNext)
             await("next arrives at external player and changes its audio track") { state().optInt("index")==1 && state().optInt("next")==1 && state().optBoolean("playing") }
+            await("the mini-player title follows the external next track") { text(scenario,R.id.musicTitle)=="External track 2" }
             click(scenario,R.id.musicPrevious)
             await("previous arrives at external player") { state().optInt("index")==0 && state().optInt("previous")==1 }
             click(scenario,R.id.musicPlayPause)
             await("map pauses external audio") { !state().optBoolean("playing") && state().optInt("pause")>0 }
+            await("paused state is reflected by the play icon") {
+                var paused=false;scenario.onActivity { paused=it.findViewById<ImageButton>(R.id.musicPlayPause).contentDescription=="Reproducir música" };paused
+            }
             click(scenario,R.id.musicPlayPause)
             await("map resumes external audio") { state().optBoolean("playing") && state().optInt("play")>=2 }
             scenario.recreate()
+            await("the title reconnects after reopening the map") { text(scenario,R.id.musicTitle)=="External track 1" }
             click(scenario,R.id.musicNext)
             await("reopening GPS3D does not steal the external media session") { state().optInt("next")==2 && state().optBoolean("playing") }
             val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
@@ -111,6 +147,38 @@ class ExternalMusicControlTest {
                 put(MediaStore.Downloads.MIME_TYPE,"image/png");put(MediaStore.Downloads.RELATIVE_PATH,"Download/GPS3DARQA")
             })!!
             context.contentResolver.openOutputStream(uri)!!.use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle()
+        }
+    }
+    @Test fun notificationAccessIsExplainedAndRevocationClearsTheMiniPlayer() {
+        ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
+            startExternalAudio()
+            await("the external session connects") { text(scenario,R.id.musicTitle)=="External track 1" }
+            access(false)
+            await("revocation removes stale track information") { text(scenario,R.id.musicTitle)=="Conecta tu música" }
+            scenario.onActivity { assertFalse(it.findViewById<ImageButton>(R.id.musicNext).isEnabled) }
+            click(scenario,R.id.musicPlayPause)
+            await("manual Android access is explained before opening settings") {
+                instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText("Conectar tu música").orEmpty().isNotEmpty()
+            }
+            clickText("Ahora no","Conectar tu música")
+            assertEquals("a denied connection must not send an unrelated global command",0,state().optInt("pause"))
+            access(true)
+            await("granting access reconnects to the real track") { text(scenario,R.id.musicTitle)=="External track 1" }
+        }
+    }
+    @Test fun anUnavailableSelectedAppCannotControlAnotherActivePlayer() {
+        prefs.edit().putString(ExternalMusicSessions.PREFERRED,"com.example.unavailable.music").commit()
+        ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
+            startExternalAudio()
+            scenario.onActivity { assertFalse(it.findViewById<ImageButton>(R.id.musicNext).isEnabled) }
+            assertNotEquals("External track 1",text(scenario,R.id.musicTitle))
+            assertEquals(0,state().optInt("next"))
+            prefs.edit().putString(ExternalMusicSessions.PREFERRED,"").commit()
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+            await("automatic selection reconnects after explicitly clearing the preferred app") { text(scenario,R.id.musicTitle)=="External track 1" }
+            click(scenario,R.id.musicNext)
+            await("the actual selected session receives next") { state().optInt("next")==1 }
         }
     }
     private fun localTrack(): MusicTrack {

@@ -32,14 +32,14 @@ class InAppAudioTest {
         context.deleteFile("saved-navigation.json")
         context.stopService(Intent(context,MusicPlaybackService::class.java))
         val prefs=context.getSharedPreferences(MusicPlaybackService.PREFS,Context.MODE_PRIVATE)
-        prefs.edit().clear().putString(MusicPanelController.SOURCE,MusicPanelController.EXTERNAL).commit()
+        prefs.edit().clear().putString(MusicPanelController.SOURCE,MusicPanelController.LOCAL).commit()
         ActivityScenario.launch(RealisticMapActivity::class.java).use { scenario ->
             var future:com.google.common.util.concurrent.ListenableFuture<MediaController>?=null
             main { future=MediaController.Builder(context,SessionToken(context,ComponentName(context,MusicPlaybackService::class.java))).buildAsync() }
             val player=future!!.get(10,TimeUnit.SECONDS)
             try {
                 scenario.onActivity { activity ->
-                    assertEquals("Upgrade offers the built-in player", "Escuchar en GPS3D",activity.findViewById<TextView>(R.id.musicTitle).text.toString())
+                    assertEquals("The selected built-in player remains available", "Escuchar en GPS3D",activity.findViewById<TextView>(R.id.musicTitle).text.toString())
                     activity.findViewById<android.view.View>(R.id.musicPlayPause).performClick()
                 }
                 await("The station chooser appears inside GPS3D") {
