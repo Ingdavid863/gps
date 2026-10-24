@@ -37,10 +37,10 @@ class MusicCatalogue(private val network: Call.Factory) {
                 val data=JSONObject(get(address.toString())).optJSONArray("collection") ?: JSONArray()
                 (0 until data.length()).mapNotNull { i ->
                     val item=data.optJSONObject(i) ?: return@mapNotNull null
-                    if(!item.optBoolean("streamable") || item.optString("policy") !in PUBLIC_POLICIES) return@mapNotNull null
+                    if(!item.optBoolean("streamable") || item.optString("policy") !in PUBLIC_POLICIES || publicFormats(item).isEmpty()) return@mapNotNull null
                     val id=item.optLong("id");if(id<=0)return@mapNotNull null
                     MusicTrack("gps3d-music://soundcloud/$id/audio.m3u8",item.optString("title").take(200),true,
-                        artist=item.optJSONObject("publisher_metadata")?.optString("artist")?.takeIf { it.isNotBlank() }
+                        artist=(item.optJSONObject("publisher_metadata")?.opt("artist") as? String)?.takeIf { it.isNotBlank() }
                             ?: item.optJSONObject("user")?.optString("username").orEmpty().take(200),
                         artwork=item.optString("artwork_url").takeUnless { it=="null" }.orEmpty().replace("-large.","-t300x300."),
                         durationMs=item.optLong("duration").coerceAtLeast(0),source="soundcloud")
@@ -54,19 +54,14 @@ class MusicCatalogue(private val network: Call.Factory) {
         val key=soundCloudKey()
         val item=JSONObject(get("https://api-v2.soundcloud.com/tracks/$id?client_id=$key"))
         if(!item.optBoolean("streamable") || item.optString("policy") !in PUBLIC_POLICIES) throw IOException("La pista no ofrece reproducción pública")
-        val list=item.optJSONObject("media")?.optJSONArray("transcodings") ?: throw IOException("Audio no disponible")
-        val choices=(0 until list.length()).map { list.getJSONObject(it) }.filter {
-            val format=it.optJSONObject("format")
-            format?.optString("protocol")=="hls" && format.optString("mime_type").contains("mpeg") &&
-                !it.optString("preset").startsWith("abr_sq") && !it.optBoolean("snipped")
-        }
+        val choices=publicFormats(item)
         for(format in choices) {
             val url=format.optString("url").toHttpUrl()
             if(url.scheme!="https" || url.host!="api-v2.soundcloud.com") continue
             val builder=url.newBuilder().addQueryParameter("client_id",key)
-            item.optString("track_authorization").takeIf { it.isNotBlank() }?.let { builder.addQueryParameter("track_authorization",it) }
-            val data=JSONObject(get(builder.build().toString()))
-            if(data.optString("licenseAuthToken").isNotBlank()) continue
+            (item.opt("track_authorization") as? String)?.takeIf { it.isNotBlank() }?.let { builder.addQueryParameter("track_authorization",it) }
+            val data=try { JSONObject(get(builder.build().toString())) } catch (_:Exception) { continue }
+            if(!data.isNull("licenseAuthToken") && data.optString("licenseAuthToken").isNotBlank()) continue
             val stream=data.optString("url")
             if(MusicTrack.directAudio(stream)) {
                 streams[id]=System.currentTimeMillis() to stream
@@ -74,6 +69,14 @@ class MusicCatalogue(private val network: Call.Factory) {
             }
         }
         throw IOException("La pista no ofrece un flujo público compatible")
+    }
+    private fun publicFormats(item:JSONObject):List<JSONObject> {
+        val formats=item.optJSONObject("media")?.optJSONArray("transcodings") ?: return emptyList()
+        return (0 until formats.length()).mapNotNull { formats.optJSONObject(it) }.filter {
+            val format=it.optJSONObject("format")
+            val mime=format?.optString("mime_type").orEmpty()
+            format?.optString("protocol")=="hls" && (mime.contains("mpeg") || mime.contains("mp4") || mime.contains("aac")) && !it.optBoolean("snipped")
+        }.sortedBy { if(it.optJSONObject("format")?.optString("mime_type").orEmpty().contains("mpeg"))0 else 1 }
     }
     @Synchronized private fun soundCloudKey(): String {
         if(clientId.isNotBlank()) return clientId

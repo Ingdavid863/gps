@@ -71,6 +71,7 @@ class MusicPlayerScreenTest {
                     val row=screen!!.findViewById<LinearLayout>(R.id.musicResults).getChildAt(0) as LinearLayout
                     expectedTitle=(row.getChildAt(0) as TextView).text.toString()
                     expectedArtist=(row.getChildAt(1) as TextView).text.toString()
+                    assertTrue(expectedArtist.isNotBlank());assertNotEquals("null",expectedArtist)
                     row.performClick()
                 }
                 await("The native decoder must actually advance through a $origin song") {
