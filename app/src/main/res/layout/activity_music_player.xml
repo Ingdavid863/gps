@@ -7,6 +7,10 @@
             android:text="GPS3D Música" android:textStyle="bold" android:textSize="21sp" android:textColor="#EDF2F7" />
         <Button android:id="@+id/musicMinimize" android:layout_width="wrap_content" android:layout_height="48dp"
             android:text="Volver al mapa" android:textAllCaps="false" />
+        <ImageButton android:id="@+id/musicClose" android:layout_width="48dp" android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:contentDescription="Cerrar reproductor y detener música" />
     </LinearLayout>
     <LinearLayout android:id="@+id/musicPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical" android:layout_marginTop="12dp">
